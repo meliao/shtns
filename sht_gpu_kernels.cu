@@ -722,6 +722,12 @@ static __global__ void leg_m_lowllim_kernel(
 			#pragma unroll
 			for (int f=0; f<NFIELDS; f++) 	qk[f][j] = ql[j  + f*ql_dist];
 		}
+		#ifdef SHTNS_ISHIOKA
+			if (j+BLOCKSIZE < 2*(llim+1)) {
+				#pragma unroll
+				for (int f=0; f<NFIELDS; f++)	qk[f][j+BLOCKSIZE] = ql[j+BLOCKSIZE + f*ql_dist];
+			}
+		#endif
 		double re[NFIELDS][NW], ro[NFIELDS][NW];
 		#pragma unroll
 		for (int f=0; f<NFIELDS; f++) {
@@ -732,11 +738,28 @@ static __global__ void leg_m_lowllim_kernel(
 			}
 		}
 		int l = 0;
-		for (int i=0; i<NW; i++) y0[i] = al[0];
+		#ifndef SHTNS_ISHIOKA
+			#pragma unroll
+			for (int i=0; i<NW; i++) y0[i] = al[0];
+		#else
+			#pragma unroll
+			for (int i=0; i<NW; i++) {
+				y0[i] = 1.0;
+				ct2[i] = cost[i]*cost[i];		// cos(theta)^2
+			}
+		#endif
 		if (S==1) for (int i=0; i<NW; i++) y0[i] *= rsqrt(1.0 - cost[i]*cost[i]);	// for vectors, divide by sin(theta)
-		for (int i=0; i<NW; i++) y1[i] = y0[i] * al[1] * cost[i];
+		#ifndef SHTNS_ISHIOKA
+			#pragma unroll
+			for (int i=0; i<NW; i++) y1[i] = y0[i] * al[1] * cost[i];
+		#else
+			#pragma unroll
+			for (int i=0; i<NW; i++) y1[i] = (al[1]*ct2[i] + al[0])*y0[i];			
+		#endif
+
 		al+=2;
 		__syncthreads();
+	#ifndef SHTNS_ISHIOKA
 		while(l<=llim-BLOCKSIZE/2) {
 			#pragma unroll
 			for (int k=0; k<BLOCKSIZE; k+=4) {
@@ -790,6 +813,68 @@ static __global__ void leg_m_lowllim_kernel(
 				for (int f=0; f<NFIELDS; f++)	re[f][i] += y0[i] * qk[f][k];
 			}
 		}
+	#else	/* SHTNS_ISHIOKA */
+		while (l<=llim - BLOCKSIZE) {	// compute even and odd parts
+			#pragma unroll
+			for (int k = 0; k<BLOCKSIZE; k+=2) {
+				#pragma unroll
+				for (int f=0; f<NFIELDS; f++) {
+					#pragma unroll
+					for (int i=0; i<NW; i++) {
+						re[f][i] += y0[i] * qk[f][2*k];	// real
+						ro[f][i] += y0[i] * qk[f][2*k+2];	// real
+					}
+				}
+				#pragma unroll
+				for (int i=0; i<NW; i++) {
+					double tmp = (ak[k+1]*ct2[i] + ak[k]) * y1[i] + y0[i];
+					y0[i] = y1[i];
+					y1[i] = tmp;
+				}
+			}
+			al += BLOCKSIZE;
+			l  += BLOCKSIZE;
+			__syncthreads();
+			if (l+j/2 <= llim) {
+				#pragma unroll
+				for (int f=0; f<NFIELDS; f++)	qk[f][j] = ql[2*l+j + f*ql_dist];
+			}
+			if (l+j/2+BLOCKSIZE/2 <= llim) {
+				#pragma unroll
+				for (int f=0; f<NFIELDS; f++)	qk[f][BLOCKSIZE+j] = ql[2*l+BLOCKSIZE+j + f*ql_dist];
+			}
+			if (l+j <= llim)	 ak[j] = al[j];
+			__syncthreads();
+		}
+		int k=0;
+		while (l<llim) {	// compute even and odd parts
+			#pragma unroll
+			for (int f=0; f<NFIELDS; f++) {
+				#pragma unroll
+				for (int i=0; i<NW; i++) {
+					re[f][i] += y0[i] * qk[f][2*k];	// real
+					ro[f][i] += y0[i] * qk[f][2*k+2];	// real
+				}
+			}
+			#pragma unroll
+			for (int i=0; i<NW; i++) {
+				double tmp = (ak[k+1]*ct2[i] + ak[k]) * y1[i] + y0[i];
+				y0[i] = y1[i];
+				y1[i] = tmp;
+			}
+			l+=2;	k+=2;
+		}
+		if (l==llim) {
+			#pragma unroll
+			for (int f=0; f<NFIELDS; f++) {
+				#pragma unroll
+				for (int i=0; i<NW; i++) {
+					re[f][i] += y0[i] * qk[f][2*k];		// real
+				}
+			}
+		}
+	#endif
+
 		#pragma unroll
 		for (int i=0; i<NW; i++) {
 			const int iit = it+i*BLOCKSIZE;
@@ -798,8 +883,13 @@ static __global__ void leg_m_lowllim_kernel(
 				const int iit = it+i*BLOCKSIZE;
 				#pragma unroll
 				for (int f=0; f<NFIELDS; f++) {
-					q[iit*k_inc + f*q_dist] = re[f][i]+ro[f][i];
-					q[(nlat_2*2-1-iit)*k_inc + f*q_dist] = re[f][i]-ro[f][i];
+					#ifndef SHTNS_ISHIOKA
+						q[iit*k_inc + f*q_dist] = re[f][i]+ro[f][i];
+						q[(nlat_2*2-1-iit)*k_inc + f*q_dist] = re[f][i]-ro[f][i];
+					#else
+						q[iit*k_inc + f*q_dist] = re[f][i]+ro[f][i]*cost[i];
+						q[(nlat_2*2-1-iit)*k_inc + f*q_dist] = re[f][i]-ro[f][i]*cost[i];
+					#endif
 				}
 			}
 		}
@@ -935,7 +1025,6 @@ static __global__ void leg_m_lowllim_kernel(
 			}
 		}
 	#else	/* SHTNS_ISHIOKA */
-
 
 		while (l<=llim - BLOCKSIZE) {	// compute even and odd parts
 			#pragma unroll
