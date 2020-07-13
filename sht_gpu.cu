@@ -450,15 +450,15 @@ void cuda_SH_to_spat(shtns_cfg shtns, cplx* d_Qlm, double *d_Vr, const long int 
 	
 	cplx* d_Qlm_ish = d_Qlm;
 	#ifdef SHTNS_ISHIOKA
-	cudaMalloc((void **)&d_Qlm_ish, (2*shtns->nlm + MAX_THREADS_PER_BLOCK-1)*sizeof(double));	// allow some overflow.
-	sh2ishioka_gpu(shtns, d_Qlm, d_Qlm_ish, llim, mmax);
+	//cudaMalloc((void **)&d_Qlm_ish, (2*shtns->nlm + MAX_THREADS_PER_BLOCK-1)*sizeof(double));	// allow some overflow.
+	//sh2ishioka_gpu(shtns, d_Qlm, d_Qlm_ish, llim, mmax);
 	#endif
 	
 	legendre<S,NFIELDS>(shtns, (double*) d_Qlm_ish, d_Vr, llim, mmax, spat_dist);
 	for (int f=0; f<NFIELDS; f++)  fourier_to_spat_gpu(shtns, d_Vr + f*spat_dist, mmax);
 	
 	#ifdef SHTNS_ISHIOKA
-	cudaFree(d_Qlm_ish);
+	//cudaFree(d_Qlm_ish);
 	#endif
 }
 
@@ -571,7 +571,15 @@ void SH_to_spat_gpu(shtns_cfg shtns, cplx *Qlm, double *Vr, const long int llim)
 		nlm = nlm_calc( shtns->lmax, mmax, mres);		// transfer less data
 	}
 	// copy spectral data to GPU
-	err = cudaMemcpy(d_qlm, Qlm, 2*nlm*sizeof(double), cudaMemcpyHostToDevice);
+	
+	cplx* Qlm_ish = (cplx*) malloc(sizeof(cplx) * nlm);
+	for (int im=0; im<mmax; im++) {
+		int m = im*mres;
+		long l = (im*(2*(LMAX+1)-(m+mres)))>>1 + m;		//l = LiM(shtns, 0,im);
+		SH_to_ishioka(shtns->xlm + 3*im*(2*(LMAX+4) -m+mres)/4, Qlm + l, llim-m, Qlm_ish + l);
+	}
+
+	err = cudaMemcpy(d_qlm, Qlm_ish, 2*nlm*sizeof(double), cudaMemcpyHostToDevice);
 	if (err != cudaSuccess) { printf("SH_to_spat_gpu failed copy qlm\n");	return; }
 
 	// SHT on the GPU
@@ -582,6 +590,8 @@ void SH_to_spat_gpu(shtns_cfg shtns, cplx *Qlm, double *Vr, const long int llim)
 	// copy back spatial data
 	err = cudaMemcpy(Vr, d_q, nlat*nphi*sizeof(double), cudaMemcpyDeviceToHost);
 	if (err != cudaSuccess) { printf("SH_to_spat_gpu failed copy back: %s\n", cudaGetErrorString(err));	return; }
+
+	free(Qlm_ish);
 }
 
 extern "C"
