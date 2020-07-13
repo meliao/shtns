@@ -516,8 +516,8 @@ sh2ishioka_kernel(const double* __restrict__ xlm, const double* __restrict__ ql,
 	const int l0 = ((blockDim.x-4) * blockIdx.x) >> 1;		// some overlap needed
 
 	const int l  = l0 + (j >> 1);
-	const int ri = j & 1;		// real or imag
-	const int eo = l & 1;				// evon or odd l
+	//const int ri = j & 1;		// real or imag
+	//const int eo = l & 1;				// evon or odd l
 	const int ll = (l >> 1)*3;			// coeff index
 
 	const int m = im*mres;
@@ -544,7 +544,7 @@ sh2ishioka_kernel(const double* __restrict__ xlm, const double* __restrict__ ql,
 		}
 	}
 	if ( (l<=((llim_m+1)>>2)*2) && (j+4 < BLOCKSIZE) ) {
-		ql_ish[j] = q;	// coalesced store
+		ql_ish[q_ofs +j] = q;	// coalesced store
 	}
 }
 
@@ -1033,7 +1033,6 @@ static __global__ void leg_m_lowllim_kernel(
 					rei[f][i] = sgn*(rei[f][i]-roi[f][i]*cost[i]);
 				#endif
 				}
-			  #endif
 				#pragma unroll
 				for (int f=0; f<NFIELDS; f++) {
 					q[im*m_inc + iit*k_inc + f*q_dist]                     = nr[f][i]  - ror[f][i];
@@ -1420,7 +1419,7 @@ ileg_m_lowllim_kernel(const double* __restrict__ al, const double* __restrict__ 
 		l=m;		al+=2;
 		while (l <= llim) {
 			if (BLOCKSIZE > WARPSZE) 	__syncthreads();
-		#ifndef SHTNS_ISHIOKA
+		#ifndef SHTNS_ISHIOKAxx
 			for (int k=0; k<LSPAN; k+=2) {		// compute a block of the matrix, write it in shared mem.
 				yl[k*l_inc +j]     = y0;
 				y0 = ak[2*k+3]*cost*y1 + ak[2*k+2]*y0;

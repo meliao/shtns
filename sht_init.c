@@ -1445,7 +1445,7 @@ int shtns_set_grid_auto(shtns_cfg shtns, enum shtns_type flags, double eps, int 
 	}
 
 //	set_sht_fly(shtns, SHT_TYP_VAN);
-//	set_sht_gpu(shtns, 0);
+	set_sht_gpu(shtns, 0);
 
   #if SHT_VERBOSE > 1
 	if ((omp_threads > 1)&&(verbose>1)) printf(" nthreads = %d\n",shtns->nthreads);

@@ -450,7 +450,7 @@ void cuda_SH_to_spat(shtns_cfg shtns, cplx* d_Qlm, double *d_Vr, const long int 
 	
 	cplx* d_Qlm_ish = d_Qlm;
 	#ifdef SHTNS_ISHIOKA
-	err = cudaMalloc((void **)&d_Qlm_ish, (2*shtns->NLM + MAX_THREADS_PER_BLOCK-1)*sizeof(double));	// allow some overflow.
+	cudaMalloc((void **)&d_Qlm_ish, (2*shtns->nlm + MAX_THREADS_PER_BLOCK-1)*sizeof(double));	// allow some overflow.
 	sh2ishioka_gpu(shtns, d_Qlm, d_Qlm_ish, llim, mmax);
 	#endif
 	
