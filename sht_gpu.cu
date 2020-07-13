@@ -572,12 +572,15 @@ void SH_to_spat_gpu(shtns_cfg shtns, cplx *Qlm, double *Vr, const long int llim)
 	}
 	// copy spectral data to GPU
 	
-	cplx* Qlm_ish = (cplx*) malloc(sizeof(cplx) * nlm);
+	cplx* Qlm_ish = Qlm;
+	#ifdef SHTNS_ISHIOKA
+	Qlm_ish = (cplx*) malloc(sizeof(cplx) * nlm);
 	for (int im=0; im<mmax; im++) {
 		int m = im*mres;
 		long l = (im*(2*(LMAX+1)-(m+mres)))>>1 + m;		//l = LiM(shtns, 0,im);
 		SH_to_ishioka(shtns->xlm + 3*im*(2*(LMAX+4) -m+mres)/4, Qlm + l, llim-m, Qlm_ish + l);
 	}
+	#endif
 
 	err = cudaMemcpy(d_qlm, Qlm_ish, 2*nlm*sizeof(double), cudaMemcpyHostToDevice);
 	if (err != cudaSuccess) { printf("SH_to_spat_gpu failed copy qlm\n");	return; }
@@ -591,7 +594,9 @@ void SH_to_spat_gpu(shtns_cfg shtns, cplx *Qlm, double *Vr, const long int llim)
 	err = cudaMemcpy(Vr, d_q, nlat*nphi*sizeof(double), cudaMemcpyDeviceToHost);
 	if (err != cudaSuccess) { printf("SH_to_spat_gpu failed copy back: %s\n", cudaGetErrorString(err));	return; }
 
+	#ifdef SHTNS_ISHIOKA
 	free(Qlm_ish);
+	#endif
 }
 
 extern "C"

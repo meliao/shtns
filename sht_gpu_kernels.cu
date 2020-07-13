@@ -240,55 +240,111 @@ leg_m0_kernel(const double *al, const double *ct, const double *ql, double *q, c
 	//__shared__ double qk[THREADS_PER_BLOCK/2];	// size blockDim.x / 2
 
 	extern __shared__ double ak[];			// size blockDim.x
-	double* const qk = ak + blockDim.x;		// size blockDim.x / 2
+	double* const qk = ak + blockDim.x;		// size blockDim.x / 2 for regular; size blockDim.x for ishioka
 
 	ak[j] = al[j];
+	#ifndef SHTNS_ISHIOKA
 	if ((j <= llim)&&(j<blockDim.x/2)) qk[j] = ql[2*j];
+	#else
+	if ((j <= llim)&&(j<blockDim.x)) qk[j] = ql[2*j];
+	#endif
 	__syncthreads();
 
 	int l = 0;
-	int k = 0;	int kq = 0;
+	int k = 0;
 	double cost[NW];
+	#ifdef SHTNS_ISHIOKA
+	double ct2[NW];
+	#endif
 	double y0[NW];    double y1[NW];
 	double re[NW];    double ro[NW];
 
 	for (int i=0; i<NW; i++) {
-	cost[i] = (it+i<nlat_2) ? ct[it+i] : 0.0;
-	y0[i] = ak[0];
-	if (S==1) y0[i] *= rsqrt(1.0 - cost[i]*cost[i]);	// for vectors, divide by sin(theta)
+		cost[i] = (it+i<nlat_2) ? ct[it+i] : 0.0;
 	}
 	for (int i=0; i<NW; i++) {
-	re[i] = y0[i] * qk[0];
-	y1[i] = y0[i] * ak[1] * cost[i];
+		#ifndef SHTNS_ISHIOKA
+		y0[i] = ak[0];
+		if (S==1) y0[i] *= rsqrt(1.0 - cost[i]*cost[i]);	// for vectors, divide by sin(theta)
+		#else
+		y0[i] = 1.0;
+		ct2[i] = cost[i]*cost[i];
+		if (S==1) y0[i] *= rsqrt(1.0 - ct2[i]);	// for vectors, divide by sin(theta)		
+		#endif
 	}
 	for (int i=0; i<NW; i++) {
-	ro[i] = y1[i] * qk[1];
+		re[i] = y0[i] * qk[0];
+		#ifndef SHTNS_ISHIOKA
+		y1[i] = y0[i] * ak[1] * cost[i];
+		#else
+		ro[i] = y0[i] * qk[1];
+		y1[i] = (ak[1]*ct2[i] + ak[0])*y0[i];
+		#endif
 	}
-	al+=2;    l+=2;	k+=2;	kq+=2;
+	#ifndef SHTNS_ISHIOKA
+	for (int i=0; i<NW; i++) {
+		ro[i] = y1[i] * qk[1];
+	}
+	#endif
+	al+=2;    l+=2;	k+=2;
+
+#ifndef SHTNS_ISHIOKA
+	int kq = 2;
 	while(l<llim) {
-	if (k+6 >= blockDim.x) {
-		__syncthreads();
-		ak[j] = al[j];
-		if ((j <= llim)&&(j<blockDim.x/2)) qk[j] = ql[2*(l+j)];
-		k=0;	kq=0;
-		__syncthreads();
-	}
-	for (int i=0; i<NW; i++)	y0[i]  = ak[k+1]*cost[i]*y1[i] + ak[k]*y0[i];
-	for (int i=0; i<NW; i++)	re[i] += y0[i] * qk[kq];
-	for (int i=0; i<NW; i++)	y1[i]  = ak[k+3]*cost[i]*y0[i] + ak[k+2]*y1[i];
-	for (int i=0; i<NW; i++)	ro[i] += y1[i] * qk[kq+1];
-	al+=4;	l+=2;	k+=4;	kq+=2;
+		if (k+6 >= blockDim.x) {
+			__syncthreads();
+			ak[j] = al[j];
+			if ((j <= llim)&&(j<blockDim.x/2)) qk[j] = ql[2*(l+j)];
+			k=0;	kq=0;
+			__syncthreads();
+		}
+		for (int i=0; i<NW; i++)	y0[i]  = ak[k+1]*cost[i]*y1[i] + ak[k]*y0[i];
+		for (int i=0; i<NW; i++)	re[i] += y0[i] * qk[kq];
+		for (int i=0; i<NW; i++)	y1[i]  = ak[k+3]*cost[i]*y0[i] + ak[k+2]*y1[i];
+		for (int i=0; i<NW; i++)	ro[i] += y1[i] * qk[kq+1];
+		al+=4;	l+=2;	k+=4;	kq+=2;
 	}
 	if (l==llim) {
-	for (int i=0; i<NW; i++)	y0[i]  = ak[k+1]*cost[i]*y1[i] + ak[k]*y0[i];
-	for (int i=0; i<NW; i++)	re[i] += y0[i] * qk[kq];
+		for (int i=0; i<NW; i++)	y0[i]  = ak[k+1]*cost[i]*y1[i] + ak[k]*y0[i];
+		for (int i=0; i<NW; i++)	re[i] += y0[i] * qk[kq];
 	}
+#else	/* SHTNS_ISHIOKA */
+	while(l<llim) {
+		if (k+3 >= blockDim.x) {
+			__syncthreads();
+			ak[j] = al[j];
+			if ((j <= llim)&&(j<blockDim.x)) qk[j] = ql[2*(l+j)];
+			k=0;
+			__syncthreads();
+		}
+		#pragma unroll
+		for (int i=0; i<NW; i++) {
+				double tmp = (ak[k+1]*ct2[i] + ak[k]) * y1[i] + y0[i];
+				y0[i] = y1[i];
+				y1[i] = tmp;
+		}
+		#pragma unroll
+		for (int i=0; i<NW; i++) {
+			re[i] += y0[i] * qk[k];
+			ro[i] += y0[i] * qk[k+1];
+		}
+		al+=2;	l+=2;	k+=2;
+	}
+	if (l==llim) {
+		for (int i=0; i<NW; i++)	re[i] += y1[i] * qk[k];
+	}
+#endif
 
 	for (int i=0; i<NW; i++) {
-	if (it+i < nlat_2) {
-		q[it+i] = re[i]+ro[i];
-		q[nlat_2*2-1-(it+i)] = re[i]-ro[i];
-	}
+		if (it+i < nlat_2) {
+			#ifndef SHTNS_ISHIOKA
+			q[it+i] = re[i]+ro[i];
+			q[nlat_2*2-1-(it+i)] = re[i]-ro[i];
+			#else
+			q[it+i] = re[i]+ro[i]*cost[i];
+			q[nlat_2*2-1-(it+i)] = re[i]-ro[i]*cost[i];
+			#endif
+		}
 	}
 /*
 	if (it < nlat_2) {
@@ -333,7 +389,11 @@ static void leg_m0(shtns_cfg shtns, const double *ql, double *q, const int llim,
 	const int blocksPerGrid = (nlat_2 + BLOCKSIZE*NW - 1) / (BLOCKSIZE*NW);
 	if (spat_dist == 0) spat_dist = shtns->spat_stride;
 	for (int f=0; f<NFIELDS; f++) {
+		#ifndef SHTNS_ISHIOKA
 		leg_m0_kernel<S,1> <<<blocksPerGrid, threadsPerBlock, 3*threadsPerBlock/2*sizeof(double), stream>>>(d_alm, d_ct, ql + f*shtns->nlm_stride, q + f*spat_dist, llim, nlat_2);
+		#else
+		leg_m0_kernel<S,1> <<<blocksPerGrid, threadsPerBlock, 2*threadsPerBlock*sizeof(double), stream>>>(shtns->d_clm, d_ct, ql + f*shtns->nlm_stride, q + f*spat_dist, llim, nlat_2);
+		#endif
 	}
 }
 
