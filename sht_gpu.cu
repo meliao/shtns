@@ -142,6 +142,10 @@ void cushtns_release_gpu(shtns_cfg shtns)
 	if (shtns->cu_flags & CUSHT_OWN_XFER_STREAM) cudaStreamDestroy(shtns->xfer_stream);
 	if (shtns->d_ct) cudaFree(shtns->d_ct);
 	if (shtns->d_alm) cudaFree(shtns->d_alm);
+	#ifdef SHTNS_ISHIOKA
+	if (shtns->d_xlm) cudaFree(shtns->d_xlm);
+	if (shtns->d_clm) cudaFree(shtns->d_clm);
+	#endif
 	if (shtns->d_mx_stdt) cudaFree(shtns->d_mx_stdt);
 	if (shtns->d_mx_van) cudaFree(shtns->d_mx_van);
 	if (shtns->gpu_mem) cudaFree(shtns->gpu_mem);
@@ -223,10 +227,14 @@ int cushtns_init_gpu(shtns_cfg shtns)
 	const long nlm = shtns->nlm;
 	const long nlat_2 = shtns->nlat_2;
 
-	double *d_alm = NULL;
-	double *d_ct  = NULL;
-	double *d_mx_stdt = NULL;
-	double *d_mx_van = NULL;
+	double *d_alm = 0;
+	double *d_ct  = 0;
+	double *d_mx_stdt = 0;
+	double *d_mx_van = 0;
+	#ifdef SHTNS_ISHIOKA
+	double *d_xlm = 0;
+	double *d_clm = 0;
+	#endif
 	int err_count = 0;
 	int device_id = -1;
 
@@ -243,6 +251,13 @@ int cushtns_init_gpu(shtns_cfg shtns)
 	// Allocate the device input vector alm
 	err = cudaMalloc((void **)&d_alm, (2*nlm+MAX_THREADS_PER_BLOCK-1)*sizeof(double));	// allow some overflow.
 	if (err != cudaSuccess) err_count ++;
+	#ifdef SHTNS_ISHIOKA 
+		const long nlm0 = nlm_calc(LMAX+4, MMAX, MRES);
+		err = cudaMalloc((void **)&d_clm, (nlm0+MAX_THREADS_PER_BLOCK-1)*sizeof(double));	// allow some overflow.
+		if (err != cudaSuccess) err_count ++;
+		err = cudaMalloc((void **)&d_xlm, (3*nlm0/2+MAX_THREADS_PER_BLOCK-1)*sizeof(double));	// allow some overflow.
+		if (err != cudaSuccess) err_count ++;
+	#endif
 	if (shtns->mx_stdt) {
 		// Allocate the device matrix for d(sin(t))/dt
 		err = cudaMalloc((void **)&d_mx_stdt, (2*nlm+MAX_THREADS_PER_BLOCK-1)*sizeof(double));
@@ -258,6 +273,12 @@ int cushtns_init_gpu(shtns_cfg shtns)
 	if (err_count == 0) {
 		err = cudaMemcpy(d_alm, shtns->alm, 2*nlm*sizeof(double), cudaMemcpyHostToDevice);
 		if (err != cudaSuccess)  err_count ++;
+		#ifdef SHTNS_ISHIOKA
+			err = cudaMemcpy(d_clm, shtns->clm, nlm0*sizeof(double), cudaMemcpyHostToDevice);
+			if (err != cudaSuccess)  err_count ++;
+			err = cudaMemcpy(d_xlm, shtns->xlm, 3*nlm0/2*sizeof(double), cudaMemcpyHostToDevice);
+			if (err != cudaSuccess)  err_count ++;
+		#endif
 		if (shtns->mx_stdt) {
 			err = cudaMemcpy(d_mx_stdt, shtns->mx_stdt, 2*nlm*sizeof(double), cudaMemcpyHostToDevice);
 			if (err != cudaSuccess)  err_count ++;
@@ -270,6 +291,10 @@ int cushtns_init_gpu(shtns_cfg shtns)
 		if (err != cudaSuccess)  err_count ++;
 	}
 
+	#ifdef SHTNS_ISHIOKA
+	shtns->d_xlm = d_xlm;
+	shtns->d_clm = d_clm;
+	#endif
 	shtns->d_alm = d_alm;
 	shtns->d_ct  = d_ct;
 	shtns->d_mx_stdt = d_mx_stdt;
@@ -422,8 +447,19 @@ template<int S, int NFIELDS>
 void cuda_SH_to_spat(shtns_cfg shtns, cplx* d_Qlm, double *d_Vr, const long int llim, const int mmax, int spat_dist = 0)
 {
 	if (spat_dist == 0) spat_dist = shtns->spat_stride;
-	legendre<S,NFIELDS>(shtns, (double*) d_Qlm, d_Vr, llim, mmax, spat_dist);
+	
+	cplx* d_Qlm_ish = d_Qlm;
+	#ifdef SHTNS_ISHIOKA
+	err = cudaMalloc((void **)&d_Qlm_ish, (2*shtns->NLM + MAX_THREADS_PER_BLOCK-1)*sizeof(double));	// allow some overflow.
+	sh2ishioka_gpu(shtns, d_Qlm, d_Qlm_ish, llim, mmax);
+	#endif
+	
+	legendre<S,NFIELDS>(shtns, (double*) d_Qlm_ish, d_Vr, llim, mmax, spat_dist);
 	for (int f=0; f<NFIELDS; f++)  fourier_to_spat_gpu(shtns, d_Vr + f*spat_dist, mmax);
+	
+	#ifdef SHTNS_ISHIOKA
+	cudaFree(d_Qlm_ish);
+	#endif
 }
 
 /// Perform SH transform on data that is already on the GPU. d_Qlm and d_Vr are pointers to GPU memory (obtained by cudaMalloc() for instance)

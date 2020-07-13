@@ -508,6 +508,48 @@ static void ileg_m0(shtns_cfg shtns, const double* q, double *ql, const int llim
 }
 
 
+template<int BLOCKSIZE> __global__ void
+sh2ishioka_kernel(const double* __restrict__ xlm, const double* __restrict__ ql, double* ql_ish, const int llim, const int lmax, const int mres)
+{
+	const int j = threadIdx.x;
+	const int im = blockIdx.y;
+	const int l0 = ((blockDim.x-4) * blockIdx.x) >> 1;		// some overlap needed
+
+	const int l  = l0 + (j >> 1);
+	const int ri = j & 1;		// real or imag
+	const int eo = l & 1;				// evon or odd l
+	const int ll = (l >> 1)*3;			// coeff index
+
+	const int m = im*mres;
+	const int q_ofs = im*(((lmax+1)<<1) -m+mres) + 2*l0;
+	const int x_ofs = 3*im*(2*(lmax+4) -m+mres)/4 + 3*(l0/2);
+	const int llim_m = llim-m;
+
+	__shared__ double xl_[BLOCKSIZE/4*3];
+	__shared__ double ql_[BLOCKSIZE];		// LSPAN = BLOCKSIZE/2 - 2
+
+	if (l<=llim_m) {
+		ql_[j] = ql[q_ofs +j];
+		if (ll < 3*llim_m/2) 	xl_[j] = xlm[x_ofs +j];
+	}
+	double q = 0.0;
+
+	__syncthreads();
+
+	if (l<=llim_m) {
+		int ix = 3*(j>>2);		// 3*l/2.
+		q = ql_[j] * xl_[ix + (j&2)];	// ix for l-m even, ix+2 for l-m odd
+		if ( ((j&2)==0) && (l+2<=llim_m) && (j+4 < BLOCKSIZE) ) {		// for l-m even
+			q += ql_[j+4] * xl_[ix+1];			// contribution of l+2
+		}
+	}
+	if ( (l<=((llim_m+1)>>2)*2) && (j+4 < BLOCKSIZE) ) {
+		ql_ish[j] = q;	// coalesced store
+	}
+}
+
+
+
 /** \internal convert from vector SH to scalar SH
 	Vlm =  st*d(Slm)/dtheta + I*m*Tlm
 	Wlm = -st*d(Tlm)/dtheta + I*m*Slm
@@ -609,6 +651,16 @@ scal2sphtor_kernel(const double* __restrict__ mx, const double* __restrict__ vlm
 	}
 }
 
+void sh2ishioka_gpu(shtns_cfg shtns, cplx* d_Qlm, cplx* d_Qlm_ish, int llim, int mmax)
+{
+	dim3 blocks((2*(shtns->lmax+2)+MAX_THREADS_PER_BLOCK-5)/(MAX_THREADS_PER_BLOCK-4), mmax+1);
+	dim3 threads(MAX_THREADS_PER_BLOCK, 1);
+	sh2ishioka_kernel<MAX_THREADS_PER_BLOCK> <<< blocks, threads,0, shtns->comp_stream >>>
+		(shtns->d_xlm, (double*) d_Qlm, (double*) d_Qlm_ish, llim, shtns->lmax, shtns->mres);
+	cudaError_t err = cudaGetLastError();
+	if (err != cudaSuccess) { printf("sh2ishioka_gpu error : %s!\n", cudaGetErrorString(err));	return; }
+}
+
 void sphtor2scal_gpu(shtns_cfg shtns, cplx* d_Slm, cplx* d_Tlm, cplx* d_Vlm, cplx* d_Wlm, int llim, int mmax)
 {
 	dim3 blocks((2*(shtns->lmax+2)+MAX_THREADS_PER_BLOCK-5)/(MAX_THREADS_PER_BLOCK-4), mmax+1);
@@ -646,11 +698,18 @@ static __global__ void leg_m_lowllim_kernel(
 	const int k_inc = 1;
 
 	__shared__ double ak[BLOCKSIZE];		// size blockDim.x
+	#ifndef SHTNS_ISHIOKA
 	__shared__ double qk[NFIELDS][BLOCKSIZE];	// size blockDim.x * NFIELDS
+	#else
+	__shared__ double qk[NFIELDS][BLOCKSIZE*2];	// size blockDim.x * NFIELDS
+	#endif
 
 	double cost[NW];
 	double y0[NW];
 	double y1[NW];
+	#ifdef SHTNS_ISHIOKA
+	double ct2[NW];
+	#endif
 	#pragma unroll
 	for (int i=0; i<NW; i++) {
 		const int iit = it+i*BLOCKSIZE;
@@ -748,14 +807,30 @@ static __global__ void leg_m_lowllim_kernel(
 		double rer[NFIELDS][NW], ror[NFIELDS][NW], rei[NFIELDS][NW], roi[NFIELDS][NW];
 		int m = im*mres;
 		int l = (im*(2*(lmax+1)-(m+mres)))>>1;
-		al += 2*(l+m);
+		#ifndef SHTNS_ISHIOKA
+			#pragma unroll
+			for (int i=0; i<NW; i++) 	y1[i] = sqrt(1.0 - cost[i]*cost[i]);		// y1 = sin(theta)
+			al += 2*(l+m);
+		#else
+			#pragma unroll
+			for (int i=0; i<NW; i++) ct2[i] = cost[i]*cost[i];		// cos(theta)^2
+			#pragma unroll
+			for (int i=0; i<NW; i++) 	y1[i] = sqrt(1.0 - ct2[i]);		// y1 = sin(theta)
+			al += l+m;
+		#endif
 		ql += 2*(l + S*im);	// allow vector transforms where llim = lmax+1
 
-		#pragma unroll
-		for (int i=0; i<NW; i++) 	y1[i] = sqrt(1.0 - cost[i]*cost[i]);		// y1 = sin(theta)
 		ak[j] = al[j+2];
-		#pragma unroll
-		for (int f=0; f<NFIELDS; f++)	if (m+j/2 <= llim) qk[f][j] = ql[2*m+j + f*ql_dist];
+		if (m+j/2 <= llim) {
+			#pragma unroll
+			for (int f=0; f<NFIELDS; f++)	qk[f][j] = ql[2*m+j + f*ql_dist];
+		}
+		#ifdef SHTNS_ISHIOKA
+			if (m+j/2+BLOCKSIZE/2 <= llim) {
+				#pragma unroll
+				for (int f=0; f<NFIELDS; f++)	qk[f][j+BLOCKSIZE] = ql[2*m+j+BLOCKSIZE + f*ql_dist];
+			}
+		#endif
 
 		#pragma unroll
 		for (int i=0; i<NW; i++) {
@@ -776,13 +851,21 @@ static __global__ void leg_m_lowllim_kernel(
 			for (int i=0; i<NW; i++) y1[i] *= y1[i];
 		} while(l >>= 1);
 
+	#ifndef SHTNS_ISHIOKA
 		#pragma unroll
 		for (int i=0; i<NW; i++) y0[i] *= al[0];
 		#pragma unroll
 		for (int i=0; i<NW; i++) y1[i] = al[1]*y0[i]*cost[i];
+	#else
+		#pragma unroll
+		for (int i=0; i<NW; i++) ct2[i] = cost[i]*cost[i];		// cos(theta)^2
+		#pragma unroll
+		for (int i=0; i<NW; i++) y1[i] = (al[1]*ct2[i] + al[0])*y0[i];
+	#endif
 
 		__syncthreads();
 		l=m;		al+=2;
+	#ifndef SHTNS_ISHIOKA
 		while (l<=llim - BLOCKSIZE/2) {	// compute even and odd parts
 			#pragma unroll
 			for (int k = 0; k<BLOCKSIZE; k+=4) {
@@ -851,6 +934,75 @@ static __global__ void leg_m_lowllim_kernel(
 				}
 			}
 		}
+	#else	/* SHTNS_ISHIOKA */
+
+
+		while (l<=llim - BLOCKSIZE) {	// compute even and odd parts
+			#pragma unroll
+			for (int k = 0; k<BLOCKSIZE; k+=2) {
+				#pragma unroll
+				for (int f=0; f<NFIELDS; f++) {
+					#pragma unroll
+					for (int i=0; i<NW; i++) {
+						rer[f][i] += y0[i] * qk[f][2*k];	// real
+						rei[f][i] += y0[i] * qk[f][2*k+1];	// imag
+						ror[f][i] += y0[i] * qk[f][2*k+2];	// real
+						roi[f][i] += y0[i] * qk[f][2*k+3];	// imag
+					}
+				}
+				#pragma unroll
+				for (int i=0; i<NW; i++) {
+					double tmp = (ak[k+1]*ct2[i] + ak[k]) * y1[i] + y0[i];
+					y0[i] = y1[i];
+					y1[i] = tmp;
+				}
+			}
+			al += BLOCKSIZE;
+			l  += BLOCKSIZE;
+			__syncthreads();
+			if (l+j/2 <= llim) {
+				#pragma unroll
+				for (int f=0; f<NFIELDS; f++)	qk[f][j] = ql[2*l+j + f*ql_dist];
+			}
+			if (l+j/2+BLOCKSIZE/2 <= llim) {
+				#pragma unroll
+				for (int f=0; f<NFIELDS; f++)	qk[f][BLOCKSIZE+j] = ql[2*l+BLOCKSIZE+j + f*ql_dist];
+			}
+			if (l+j <= llim)	 ak[j] = al[j];
+			__syncthreads();
+		}
+		int k=0;
+		while (l<llim) {	// compute even and odd parts
+			#pragma unroll
+			for (int f=0; f<NFIELDS; f++) {
+				#pragma unroll
+				for (int i=0; i<NW; i++) {
+					rer[f][i] += y0[i] * qk[f][2*k];	// real
+					rei[f][i] += y0[i] * qk[f][2*k+1];	// imag
+					ror[f][i] += y0[i] * qk[f][2*k+2];	// real
+					roi[f][i] += y0[i] * qk[f][2*k+3];	// imag
+				}
+			}
+			#pragma unroll
+			for (int i=0; i<NW; i++) {
+				double tmp = (ak[k+1]*ct2[i] + ak[k]) * y1[i] + y0[i];
+				y0[i] = y1[i];
+				y1[i] = tmp;
+			}
+			l+=2;	k+=2;
+		}
+		if (l==llim) {
+			#pragma unroll
+			for (int f=0; f<NFIELDS; f++) {
+				#pragma unroll
+				for (int i=0; i<NW; i++) {
+					rer[f][i] += y0[i] * qk[f][2*k];		// real
+					rei[f][i] += y0[i] * qk[f][2*k+1];	// imag
+				}
+			}
+		}
+
+	#endif
 
 		/// store mangled for complex fft
 		#pragma unroll
@@ -869,11 +1021,19 @@ static __global__ void leg_m_lowllim_kernel(
 			if (iit < nlat_2) {
 				#pragma unroll
 				for (int f=0; f<NFIELDS; f++) {
+				#ifndef SHTNS_ISHIOKA
 					nr[f][i] =  rer[f][i]+ror[f][i];
 					rer[f][i] = rer[f][i]-ror[f][i];
 					ror[f][i] = sgn*(rei[f][i]+roi[f][i]);
 					rei[f][i] = sgn*(rei[f][i]-roi[f][i]);
+				#else
+					nr[f][i] =  rer[f][i]+ror[f][i]*cost[i];
+					rer[f][i] = rer[f][i]-ror[f][i]*cost[i];
+					ror[f][i] = sgn*(rei[f][i]+roi[f][i]*cost[i]);
+					rei[f][i] = sgn*(rei[f][i]-roi[f][i]*cost[i]);
+				#endif
 				}
+			  #endif
 				#pragma unroll
 				for (int f=0; f<NFIELDS; f++) {
 					q[im*m_inc + iit*k_inc + f*q_dist]                     = nr[f][i]  - ror[f][i];
@@ -897,7 +1057,12 @@ static void leg_m_lowllim(shtns_cfg shtns, const double *ql, double *q, const in
 	double *d_ct = shtns->d_ct;
 	cudaStream_t stream = shtns->comp_stream;
 
+	#ifndef SHTNS_ISHIOKA
 	const int BLOCKSIZE = 256;		// good value
+	#else
+	const int BLOCKSIZE = 128;		// value to be tuned, but half the value of without Ishioka is likely good.
+	d_alm = shtns->d_clm;
+	#endif
 	const int NW = 2;
 
 	// Launch the Legendre CUDA Kernel
@@ -1255,6 +1420,7 @@ ileg_m_lowllim_kernel(const double* __restrict__ al, const double* __restrict__ 
 		l=m;		al+=2;
 		while (l <= llim) {
 			if (BLOCKSIZE > WARPSZE) 	__syncthreads();
+		#ifndef SHTNS_ISHIOKA
 			for (int k=0; k<LSPAN; k+=2) {		// compute a block of the matrix, write it in shared mem.
 				yl[k*l_inc +j]     = y0;
 				y0 = ak[2*k+3]*cost*y1 + ak[2*k+2]*y0;
@@ -1262,6 +1428,15 @@ ileg_m_lowllim_kernel(const double* __restrict__ al, const double* __restrict__ 
 				y1 = ak[2*k+5]*cost*y0 + ak[2*k+4]*y1;
 				al += 4;
 			}
+		#else	/* SHTNS_ISHIOKA */
+			for (int k=0; k<LSPAN; k+=2) {		// compute a block of the matrix, write it in shared mem.
+				yl[k*l_inc +j]     = y0;
+				y0 = (ak[2*k+3]*ct2 + ak[2*k+2])*y1 + y0;
+				yl[(k+1)*l_inc +j] = y1;
+				y1 = (ak[2*k+5]*ct2 + ak[2*k+4])*y0 + y1;
+				al += 4;
+			}
+		#endif
 
 			// transposed work:
 			if (BLOCKSIZE > WARPSZE)	__syncthreads();

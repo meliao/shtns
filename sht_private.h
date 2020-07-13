@@ -161,6 +161,8 @@ struct shtns_info {		// MUST start with "int nlm;"
 	/* cuda stuff */
 	short cu_flags;
 	short cu_fft_mode;
+	double* d_clm;
+	double* d_xlm;
 	double* d_alm;
 	double* d_ct;
 	double* d_mx_stdt;
