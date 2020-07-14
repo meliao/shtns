@@ -246,7 +246,7 @@ leg_m0_kernel(const double *al, const double *ct, const double *ql, double *q, c
 	#ifndef SHTNS_ISHIOKA
 	if ((j <= llim)&&(j<blockDim.x/2)) qk[j] = ql[2*j];
 	#else
-	if ((j <= llim)&&(j<blockDim.x)) qk[j] = ql[2*j];
+	if (j <= llim) qk[j] = ql[2*j];
 	#endif
 	__syncthreads();
 
@@ -259,9 +259,11 @@ leg_m0_kernel(const double *al, const double *ct, const double *ql, double *q, c
 	double y0[NW];    double y1[NW];
 	double re[NW];    double ro[NW];
 
+	#pragma unroll
 	for (int i=0; i<NW; i++) {
 		cost[i] = (it+i<nlat_2) ? ct[it+i] : 0.0;
 	}
+	#pragma unroll
 	for (int i=0; i<NW; i++) {
 		#ifndef SHTNS_ISHIOKA
 		y0[i] = ak[0];
@@ -269,9 +271,10 @@ leg_m0_kernel(const double *al, const double *ct, const double *ql, double *q, c
 		#else
 		y0[i] = 1.0;
 		ct2[i] = cost[i]*cost[i];
-		if (S==1) y0[i] *= rsqrt(1.0 - ct2[i]);	// for vectors, divide by sin(theta)		
+		if (S==1) y0[i] = rsqrt(1.0 - ct2[i]);	// for vectors, divide by sin(theta)		
 		#endif
 	}
+	#pragma unroll
 	for (int i=0; i<NW; i++) {
 		re[i] = y0[i] * qk[0];
 		#ifndef SHTNS_ISHIOKA
@@ -310,18 +313,18 @@ leg_m0_kernel(const double *al, const double *ct, const double *ql, double *q, c
 	}
 #else	/* SHTNS_ISHIOKA */
 	while(l<llim) {
-		if (k+3 >= blockDim.x) {
+		if (k+2 >= blockDim.x) {
 			__syncthreads();
 			ak[j] = al[j];
-			if ((j <= llim)&&(j<blockDim.x)) qk[j] = ql[2*(l+j)];
+			if (j <= llim) qk[j] = ql[2*(l+j)];
 			k=0;
 			__syncthreads();
 		}
 		#pragma unroll
 		for (int i=0; i<NW; i++) {
-				double tmp = (ak[k+1]*ct2[i] + ak[k]) * y1[i] + y0[i];
-				y0[i] = y1[i];
-				y1[i] = tmp;
+			double tmp = (ak[k+1]*ct2[i] + ak[k]) * y1[i] + y0[i];
+			y0[i] = y1[i];
+			y1[i] = tmp;
 		}
 		#pragma unroll
 		for (int i=0; i<NW; i++) {
@@ -767,14 +770,16 @@ static __global__ void leg_m_lowllim_kernel(
 	double cost[NW];
 	double y0[NW];
 	double y1[NW];
-	#ifdef SHTNS_ISHIOKA
-	double ct2[NW];
-	#endif
 	#pragma unroll
 	for (int i=0; i<NW; i++) {
 		const int iit = it+i*BLOCKSIZE;
 		cost[i] = (iit < nlat_2) ? ct[iit] : 0.0;
 	}
+	#ifdef SHTNS_ISHIOKA
+	double ct2[NW];
+	#pragma unroll
+	for (int i=0; i<NW; i++) ct2[i] = cost[i]*cost[i];		// cos(theta)^2
+	#endif
 
 	if (im==0) {
 		ak[j] = al[j+2];
@@ -803,10 +808,7 @@ static __global__ void leg_m_lowllim_kernel(
 			for (int i=0; i<NW; i++) y0[i] = al[0];
 		#else
 			#pragma unroll
-			for (int i=0; i<NW; i++) {
-				y0[i] = 1.0;
-				ct2[i] = cost[i]*cost[i];		// cos(theta)^2
-			}
+			for (int i=0; i<NW; i++) y0[i] = 1.0;
 		#endif
 		if (S==1) for (int i=0; i<NW; i++) y0[i] *= rsqrt(1.0 - cost[i]*cost[i]);	// for vectors, divide by sin(theta)
 		#ifndef SHTNS_ISHIOKA
@@ -963,8 +965,6 @@ static __global__ void leg_m_lowllim_kernel(
 			al += 2*(l+m);
 		#else
 			#pragma unroll
-			for (int i=0; i<NW; i++) ct2[i] = cost[i]*cost[i];		// cos(theta)^2
-			#pragma unroll
 			for (int i=0; i<NW; i++) 	y1[i] = sqrt(1.0 - ct2[i]);		// y1 = sin(theta)
 			al += l+m;
 		#endif
@@ -1007,8 +1007,6 @@ static __global__ void leg_m_lowllim_kernel(
 		#pragma unroll
 		for (int i=0; i<NW; i++) y1[i] = al[1]*y0[i]*cost[i];
 	#else
-		#pragma unroll
-		for (int i=0; i<NW; i++) ct2[i] = cost[i]*cost[i];		// cos(theta)^2
 		#pragma unroll
 		for (int i=0; i<NW; i++) y1[i] = (al[1]*ct2[i] + al[0])*y0[i];
 	#endif
@@ -1145,7 +1143,7 @@ static __global__ void leg_m_lowllim_kernel(
 			for (int f=0; f<NFIELDS; f++) {
 				#pragma unroll
 				for (int i=0; i<NW; i++) {
-					rer[f][i] += y0[i] * qk[f][2*k];		// real
+					rer[f][i] += y0[i] * qk[f][2*k];	// real
 					rei[f][i] += y0[i] * qk[f][2*k+1];	// imag
 				}
 			}
