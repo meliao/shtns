@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2010-2018 Centre National de la Recherche Scientifique.
+ * Copyright (c) 2010-2020 Centre National de la Recherche Scientifique.
  * written by Nathanael Schaeffer (CNRS, ISTerre, Grenoble, France).
  * 
  * nathanael.schaeffer@univ-grenoble-alpes.fr
@@ -54,7 +54,7 @@
 
 /// Maximum number of threads per block that should be used.
 #define MAX_THREADS_PER_BLOCK 512
-/// The warp size is always 32 on cuda devices (up to Pascal at least)
+/// The warp size is always 32 on cuda devices (up to Ampere at least)
 #define WARPSZE 32
 
 #include "sht_gpu_kernels.cu"
@@ -1285,6 +1285,16 @@ void spat_to_SH_gpu(shtns_cfg shtns, double *Vr, cplx *Qlm, const long int llim)
 	// copy back spectral data
 	err = cudaMemcpy(Qlm, d_qlm, 2*nlm*sizeof(double), cudaMemcpyDeviceToHost);
 	if (err != cudaSuccess) { printf("spat_to_SH_gpu failed copy back\n");	return; }
+	
+	#ifdef SHTNS_ISHIOKA
+	const int mmax = shtns->mmax;
+	const int mres = shtns->mres;
+	for (int im=0; im<=mmax; im++) {
+		int m = im*mres;
+		long l = (im*(2*(LMAX+1)-(m+mres)))>>1;		//l = LiM(shtns, 0,im);
+		ishioka_to_SH(shtns->xlm + 3*im*(2*(LMAX+4) -m+mres)/4, Qlm + l+m, llim-m, Qlm + l+m);
+	}
+	#endif
 
 	//cudaFree(d_qlm);
 }
