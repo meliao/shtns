@@ -883,7 +883,7 @@ static __global__ void leg_m_lowllim_kernel(
 				for (int f=0; f<NFIELDS; f++) {
 					#pragma unroll
 					for (int i=0; i<NW; i++) {
-						re[f][i] += y0[i] * qk[f][2*k];	// real
+						re[f][i] += y0[i] * qk[f][2*k];		// real
 						ro[f][i] += y0[i] * qk[f][2*k+2];	// real
 					}
 				}
@@ -1149,6 +1149,16 @@ static __global__ void leg_m_lowllim_kernel(
 			}
 		}
 
+		// correct odd part, before fft mangling
+		#pragma unroll
+		for (int f=0; f<NFIELDS; f++) {
+			#pragma unroll
+			for (int i=0; i<NW; i++) {
+				ror[f][i] *= cost[i];
+				roi[f][i] *= cost[i];
+			}
+		}
+
 	#endif
 
 		/// store mangled for complex fft
@@ -1168,17 +1178,10 @@ static __global__ void leg_m_lowllim_kernel(
 			if (iit < nlat_2) {
 				#pragma unroll
 				for (int f=0; f<NFIELDS; f++) {
-				#ifndef SHTNS_ISHIOKA
 					nr[f][i] =  rer[f][i]+ror[f][i];
 					rer[f][i] = rer[f][i]-ror[f][i];
 					ror[f][i] = sgn*(rei[f][i]+roi[f][i]);
 					rei[f][i] = sgn*(rei[f][i]-roi[f][i]);
-				#else
-					nr[f][i] =  rer[f][i]+ror[f][i]*cost[i];
-					rer[f][i] = rer[f][i]-ror[f][i]*cost[i];
-					ror[f][i] = sgn*(rei[f][i]+roi[f][i]*cost[i]);
-					rei[f][i] = sgn*(rei[f][i]-roi[f][i]*cost[i]);
-				#endif
 				}
 				#pragma unroll
 				for (int f=0; f<NFIELDS; f++) {
