@@ -450,8 +450,9 @@ void cuda_SH_to_spat(shtns_cfg shtns, cplx* d_Qlm, double *d_Vr, const long int 
 	
 	cplx* d_Qlm_ish = d_Qlm;
 	#ifdef SHTNS_ISHIOKA
+	d_Qlm_ish = (cplx*) shtns->gpu_mem;
 	//cudaMalloc((void **)&d_Qlm_ish, (2*shtns->nlm + MAX_THREADS_PER_BLOCK-1)*sizeof(double));	// allow some overflow.
-	//sh2ishioka_gpu(shtns, d_Qlm, d_Qlm_ish, llim, mmax);
+	sh2ishioka_gpu(shtns, d_Qlm, d_Qlm_ish, llim, mmax);
 	#endif
 	
 	legendre<S,NFIELDS>(shtns, (double*) d_Qlm_ish, d_Vr, llim, mmax, spat_dist);
@@ -572,7 +573,7 @@ void SH_to_spat_gpu(shtns_cfg shtns, cplx *Qlm, double *Vr, const long int llim)
 	}
 
 	cplx* Qlm_ish = Qlm;
-	#ifdef SHTNS_ISHIOKA
+	#ifdef SHTNS_ISHIOKAxx
 	Qlm_ish = (cplx*) malloc(sizeof(cplx) * (nlm+2));
 	for (int im=0; im<=mmax; im++) {
 		int m = im*mres;
@@ -594,7 +595,7 @@ void SH_to_spat_gpu(shtns_cfg shtns, cplx *Qlm, double *Vr, const long int llim)
 	err = cudaMemcpy(Vr, d_q, nlat*nphi*sizeof(double), cudaMemcpyDeviceToHost);
 	if (err != cudaSuccess) { printf("SH_to_spat_gpu failed copy back: %s\n", cudaGetErrorString(err));	return; }
 
-	#ifdef SHTNS_ISHIOKA
+	#ifdef SHTNS_ISHIOKAxx
 	free(Qlm_ish);
 	#endif
 }

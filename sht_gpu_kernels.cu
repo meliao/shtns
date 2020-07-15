@@ -586,16 +586,18 @@ sh2ishioka_kernel(const double* __restrict__ xlm, const double* __restrict__ ql,
 	const int x_ofs = 3*im*(2*(lmax+4) -m+mres)/4 + 3*(l0 >> 1);
 	const int llim_m = llim-m;
 
-	__shared__ double xl_[BLOCKSIZE/4*3];
 	__shared__ double ql_[BLOCKSIZE];		// LSPAN = BLOCKSIZE/2 - 2
+	__shared__ double xl_[BLOCKSIZE/4*3];
 
 	if (l<=llim_m) {
 		ql_[j] = ql[q_ofs +j];
 	} else ql_[j] = 0.0;
 
-	if (ll < 3*(llim_m+2)/2) {
-		xl_[j] = xlm[x_ofs +j];
-	} else xl_[j] = 0.0;
+	if (j<BLOCKSIZE/4*3) {
+		if (ll < 3*(llim_m+2)/2) {
+			xl_[j] = xlm[x_ofs +j];
+		} else xl_[j] = 0.0;
+	}
 
 	__syncthreads();
 
@@ -606,6 +608,7 @@ sh2ishioka_kernel(const double* __restrict__ xlm, const double* __restrict__ ql,
 			q += ql_[j+4] * xl_[ix+1];			// contribution of l+2
 		}
 		ql_ish[q_ofs +j] = q;	// coalesced store
+		//printf("m=%d, j=%d, q_ofs=%d, q=%g, qorg=%g, qorg_mem=%g\n",m,j,q_ofs,q,ql_[j],ql[q_ofs+j]);
 	}
 }
 
@@ -712,9 +715,10 @@ scal2sphtor_kernel(const double* __restrict__ mx, const double* __restrict__ vlm
 
 void sh2ishioka_gpu(shtns_cfg shtns, cplx* d_Qlm, cplx* d_Qlm_ish, int llim, int mmax)
 {
-	dim3 blocks((2*(shtns->lmax+2)+MAX_THREADS_PER_BLOCK-5)/(MAX_THREADS_PER_BLOCK-4), mmax+1);
-	dim3 threads(MAX_THREADS_PER_BLOCK, 1);
-	sh2ishioka_kernel<MAX_THREADS_PER_BLOCK> <<< blocks, threads,0, shtns->comp_stream >>>
+	const int blksze = MAX_THREADS_PER_BLOCK;
+	dim3 blocks((2*(shtns->lmax+3)+blksze-5)/(blksze-4), mmax+1);
+	dim3 threads(blksze, 1);
+	sh2ishioka_kernel<blksze> <<< blocks, threads,0, shtns->comp_stream >>>
 		(shtns->d_xlm, (double*) d_Qlm, (double*) d_Qlm_ish, llim, shtns->lmax, shtns->mres);
 	cudaError_t err = cudaGetLastError();
 	if (err != cudaSuccess) { printf("sh2ishioka_gpu error : %s!\n", cudaGetErrorString(err));	return; }
@@ -1222,8 +1226,8 @@ static void leg_m_lowllim(shtns_cfg shtns, const double *ql, double *q, const in
 	const int BLOCKSIZE = 256;		// good value
 	const int NW = 2;
 	#else
-	const int BLOCKSIZE = 96;		// value to be tuned, but half the value of without Ishioka is likely good.
-	const int NW = 1;
+	const int BLOCKSIZE = 128;		// value to be tuned, but half the value of without Ishioka is likely good.
+	const int NW = 2;
 	d_alm = shtns->d_clm;
 	#endif
 
