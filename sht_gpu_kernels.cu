@@ -1085,8 +1085,11 @@ static __global__ void leg_m_lowllim_kernel(
 	#else	/* SHTNS_ISHIOKA */
 
 		while (l<=llim - BLOCKSIZE) {	// compute even and odd parts
-			#pragma unroll
-			for (int k = 0; k<BLOCKSIZE; k+=2) {
+			//#pragma unroll
+			for (int k = 0; k<BLOCKSIZE; k+=4) {
+				double tmp[NW];
+				#pragma unroll
+				for (int i=0; i<NW; i++) tmp[i] = ak[k+1]*ct2[i] + ak[k];
 				#pragma unroll
 				for (int f=0; f<NFIELDS; f++) {
 					#pragma unroll
@@ -1099,9 +1102,25 @@ static __global__ void leg_m_lowllim_kernel(
 				}
 				#pragma unroll
 				for (int i=0; i<NW; i++) {
-					double tmp = (ak[k+1]*ct2[i] + ak[k]) * y1[i] + y0[i];
-					y0[i] = y1[i];
-					y1[i] = tmp;
+					//y0[i] = (ak[k+1]*ct2[i] + ak[k]) * y1[i] + y0[i];
+					y0[i] = tmp[i] * y1[i] + y0[i];
+				}
+				#pragma unroll
+				for (int i=0; i<NW; i++) tmp[i] = ak[k+3]*ct2[i] + ak[k+2];
+				#pragma unroll
+				for (int f=0; f<NFIELDS; f++) {
+					#pragma unroll
+					for (int i=0; i<NW; i++) {
+						rer[f][i] += y1[i] * qk[f][2*k+4];	// real
+						rei[f][i] += y1[i] * qk[f][2*k+5];	// imag
+						ror[f][i] += y1[i] * qk[f][2*k+6];	// real
+						roi[f][i] += y1[i] * qk[f][2*k+7];	// imag
+					}
+				}
+				#pragma unroll
+				for (int i=0; i<NW; i++) {
+					//y1[i] = (ak[k+3]*ct2[i] + ak[k+2]) * y0[i] + y1[i];
+					y1[i] = tmp[i] * y0[i] + y1[i];
 				}
 			}
 			al += BLOCKSIZE;
@@ -1120,6 +1139,9 @@ static __global__ void leg_m_lowllim_kernel(
 		}
 		int k=0;
 		while (l<llim) {	// compute even and odd parts
+			double tmp[NW];
+			#pragma unroll
+			for (int i=0; i<NW; i++) tmp[i] = ak[k+1]*ct2[i] + ak[k];
 			#pragma unroll
 			for (int f=0; f<NFIELDS; f++) {
 				#pragma unroll
@@ -1131,12 +1153,12 @@ static __global__ void leg_m_lowllim_kernel(
 				}
 			}
 			#pragma unroll
-			for (int i=0; i<NW; i++) {
-				double tmp = (ak[k+1]*ct2[i] + ak[k]) * y1[i] + y0[i];
-				y0[i] = y1[i];
-				y1[i] = tmp;
-			}
+			for (int i=0; i<NW; i++) tmp[i] = tmp[i] * y1[i] + y0[i];
+			#pragma unroll
+			for (int i=0; i<NW; i++) y0[i] = y1[i];
 			l+=2;	k+=2;
+			#pragma unroll
+			for (int i=0; i<NW; i++) y1[i] = tmp[i];
 		}
 		if (l==llim) {
 			#pragma unroll
@@ -1208,11 +1230,12 @@ static void leg_m_lowllim(shtns_cfg shtns, const double *ql, double *q, const in
 
 	#ifndef SHTNS_ISHIOKA
 	const int BLOCKSIZE = 256;		// good value
+	const int NW = 2;
 	#else
-	const int BLOCKSIZE = 128;		// value to be tuned, but half the value of without Ishioka is likely good.
+	const int BLOCKSIZE = 96;		// value to be tuned, but half the value of without Ishioka is likely good.
+	const int NW = 1;
 	d_alm = shtns->d_clm;
 	#endif
-	const int NW = 2;
 
 	// Launch the Legendre CUDA Kernel
 	const int threadsPerBlock = BLOCKSIZE;	// can be from 32 to 1024, we should try to measure the fastest !
