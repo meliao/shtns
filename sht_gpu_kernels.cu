@@ -591,18 +591,17 @@ sh2ishioka_kernel(const double* __restrict__ xlm, const double* __restrict__ ql,
 
 	if (l<=llim_m) {
 		ql_[j] = ql[q_ofs +j];
-		if (ll < 3*llim_m/2) 	xl_[j] = xlm[x_ofs +j];
-	} else {
-		xl_[j] = 0.0;
-		ql_[j] = 0.0;
-	}
-	double q = 0.0;
+	} else ql_[j] = 0.0;
+
+	if (ll < 3*(llim_m+2)/2) {
+		xl_[j] = xlm[x_ofs +j];
+	} else xl_[j] = 0.0;
 
 	__syncthreads();
 
 	if ((l<=llim_m) && (j+4 < BLOCKSIZE)) {
 		int ix = 3*(j>>2);		// 3*l/2.
-		q = ql_[j] * xl_[ix + (j&2)];	// ix for l-m even, ix+2 for l-m odd
+		double q = ql_[j] * xl_[ix + (j&2)];	// ix for l-m even, ix+2 for l-m odd
 		if ((j&2)==0) {		// for l-m even
 			q += ql_[j+4] * xl_[ix+1];			// contribution of l+2
 		}
