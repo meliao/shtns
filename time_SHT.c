@@ -147,26 +147,23 @@ double scal_error(complex double *Slm, complex double *Slm0, int ltr)
 	}
 	if (isNotFinite(sqrt(n2/NLM))) printf("!!! ERROR: nan or inf !!!\n");
 	printf("   => max error = %g (l=%d,lm=%ld)   rms error = %g",tmax,shtns->li[jj],jj,sqrt(n2/NLM));
-	if (tmax > 1e-3) {
-		if (NLM < 15) {
-			printf("\n orig:");
-			for (i=0; i<NLM;i++)
-				if ((i <= LMAX)||(i >= nlm_cplx)) {		// m=0, and 2*m=nphi is real
-					printf("  %g",creal(Slm0[i]));
-				} else {
-					printf("  %g,%g",creal(Slm0[i]),cimag(Slm0[i]));
-				}
-			printf("\n diff:");
-			for (i=0; i<NLM;i++)
-				if ((i <= LMAX)||(i >= nlm_cplx)) {		// m=0, and 2*m=nphi is real
-					printf("  %g",creal(Slm[i]));
-				} else {
-					printf("  %g,%g",creal(Slm[i]),cimag(Slm[i]));
-				}
-		}
-		printf("    **** ERROR ****\n");
-	}
-	else printf("\n");
+	if ((NLM < 15) && ((tmax > 1e-10) || isNotFinite(n2))) {
+		printf("\n orig:");
+		for (i=0; i<NLM;i++)
+			if ((i <= LMAX)||(i >= nlm_cplx)) {		// m=0, and 2*m=nphi is real
+				printf("  %g",creal(Slm0[i]));
+			} else {
+				printf("  %g,%g",creal(Slm0[i]),cimag(Slm0[i]));
+			}
+		printf("\n diff:");
+		for (i=0; i<NLM;i++)
+			if ((i <= LMAX)||(i >= nlm_cplx)) {		// m=0, and 2*m=nphi is real
+				printf("  %g",creal(Slm[i]));
+			} else {
+				printf("  %g,%g",creal(Slm[i]),cimag(Slm[i]));
+			}
+	} else printf("\n");
+	if ((tmax > 1e-6) || isNotFinite(n2)) printf("    **** ERROR: BAD ACCURACY ****\n");
 	return(tmax);
 }
 
