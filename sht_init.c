@@ -1357,6 +1357,8 @@ int shtns_set_grid_auto(shtns_cfg shtns, enum shtns_type flags, double eps, int 
 			m = choose_nlat( m );
 			*nlat = m;
 		} else *nlat = n_gauss;
+		#ifndef HAVE_LIBCUFFT
+		// don't do this with GPU, as nlat must be a multiple of 64 there
 		if (((layout & SHT_ALLOW_PADDING) == 0) && (shtns->nthreads == 1)) {
 			if ((*nlat % 64 == 0) && (*nlat * *nphi > 512)) {		// heuristics to avoid cache bank conflicts.
 			#ifndef SHTNS4MAGIC
@@ -1366,6 +1368,7 @@ int shtns_set_grid_auto(shtns_cfg shtns, enum shtns_type flags, double eps, int 
 			#endif
 			}
 		}
+		#endif
 	}
 
 	if (quick_init == 0) {		// do not waste too much time finding optimal fftw.
