@@ -760,11 +760,11 @@ static __global__ void leg_m_lowllim_kernel(
 	const int m_inc = 2*nlat_2;
 	const int k_inc = 1;
 
-	//__shared__ double ak[BLOCKSIZE];                // size blockDim.x
+	__shared__ double ak[BLOCKSIZE];		// size blockDim.x
 	#ifndef SHTNS_ISHIOKA
-	__shared__ double qk[NFIELDS][BLOCKSIZE];       // size blockDim.x * NFIELDS
+	__shared__ double qk[NFIELDS][BLOCKSIZE];	// size blockDim.x * NFIELDS
 	#else
-	__shared__ double qk[NFIELDS][BLOCKSIZE*2];     // size blockDim.x * NFIELDS
+	__shared__ double qk[NFIELDS][BLOCKSIZE*2];	// size blockDim.x * NFIELDS
 	#endif
 
 	double cost[NW];
@@ -782,6 +782,7 @@ static __global__ void leg_m_lowllim_kernel(
 	#endif
 
 	if (im==0) {
+		ak[j] = al[j+2];
 		if (j<2*(llim+1)) {
 			#pragma unroll
 			for (int f=0; f<NFIELDS; f++) 	qk[f][j] = ql[j  + f*ql_dist];
@@ -830,19 +831,20 @@ static __global__ void leg_m_lowllim_kernel(
 					for (int f=0; f<NFIELDS; f++)	re[f][i] += y0[i] * qk[f][k];
 				}
 				#pragma unroll
-				for (int i=0; i<NW; i++) 	y0[i] = al[k+1]*cost[i]*y1[i] + al[k]*y0[i];
+				for (int i=0; i<NW; i++) 	y0[i] = ak[k+1]*cost[i]*y1[i] + ak[k]*y0[i];
 				#pragma unroll
 				for (int i=0; i<NW; i++) {
 					#pragma unroll
 					for (int f=0; f<NFIELDS; f++)	ro[f][i] += y1[i] * qk[f][k+2];
 				}
 				#pragma unroll
-				for (int i=0; i<NW; i++)	y1[i] = al[k+3]*cost[i]*y0[i] + al[k+2]*y1[i];
+				for (int i=0; i<NW; i++)	y1[i] = ak[k+3]*cost[i]*y0[i] + ak[k+2]*y1[i];
 			}
 			al += BLOCKSIZE;
 			l += BLOCKSIZE/2;
 			__syncthreads();
 			if (l+j/2 <= llim) {
+				ak[j] = al[j];
 				#pragma unroll
 				for (int f=0; f<NFIELDS; f++)	qk[f][j] = ql[2*l+j + f*ql_dist];
 			}
@@ -856,14 +858,14 @@ static __global__ void leg_m_lowllim_kernel(
 				for (int f=0; f<NFIELDS; f++)	re[f][i] += y0[i] * qk[f][k];
 			}
 			#pragma unroll
-			for (int i=0; i<NW; i++) 	y0[i]  = al[k+1]*cost[i]*y1[i] + al[k]*y0[i];
+			for (int i=0; i<NW; i++) 	y0[i]  = ak[k+1]*cost[i]*y1[i] + ak[k]*y0[i];
 			#pragma unroll
 			for (int i=0; i<NW; i++) {
 				#pragma unroll
 				for (int f=0; f<NFIELDS; f++)	ro[f][i] += y1[i] * qk[f][k+2];
 			}
 			#pragma unroll
-			for (int i=0; i<NW; i++)	y1[i]  = al[k+3]*cost[i]*y0[i] + al[k+2]*y1[i];
+			for (int i=0; i<NW; i++)	y1[i]  = ak[k+3]*cost[i]*y0[i] + ak[k+2]*y1[i];
 			l+=2;	  k+=4;
 		}
 		if (l==llim) {
@@ -887,7 +889,7 @@ static __global__ void leg_m_lowllim_kernel(
 				}
 				#pragma unroll
 				for (int i=0; i<NW; i++) {
-					double tmp = (al[k+1]*ct2[i] + al[k]) * y1[i] + y0[i];
+					double tmp = (ak[k+1]*ct2[i] + ak[k]) * y1[i] + y0[i];
 					y0[i] = y1[i];
 					y1[i] = tmp;
 				}
@@ -903,6 +905,7 @@ static __global__ void leg_m_lowllim_kernel(
 				#pragma unroll
 				for (int f=0; f<NFIELDS; f++)	qk[f][BLOCKSIZE+j] = ql[2*l+BLOCKSIZE+j + f*ql_dist];
 			}
+			if (l+j <= llim)	 ak[j] = al[j];
 			__syncthreads();
 		}
 		int k=0;
@@ -917,7 +920,7 @@ static __global__ void leg_m_lowllim_kernel(
 			}
 			#pragma unroll
 			for (int i=0; i<NW; i++) {
-				double tmp = (al[k+1]*ct2[i] + al[k]) * y1[i] + y0[i];
+				double tmp = (ak[k+1]*ct2[i] + ak[k]) * y1[i] + y0[i];
 				y0[i] = y1[i];
 				y1[i] = tmp;
 			}
@@ -967,6 +970,7 @@ static __global__ void leg_m_lowllim_kernel(
 		#endif
 		ql += 2*(l + S*im);	// allow vector transforms where llim = lmax+1
 
+		ak[j] = al[j+2];
 		if (m+j/2 <= llim) {
 			#pragma unroll
 			for (int f=0; f<NFIELDS; f++)	qk[f][j] = ql[2*m+j + f*ql_dist];
@@ -1022,7 +1026,7 @@ static __global__ void leg_m_lowllim_kernel(
 					}
 				}
 				#pragma unroll
-				for (int i=0; i<NW; i++) 	y0[i] = al[k+1]*(cost[i]*y1[i]) + al[k]*y0[i];
+				for (int i=0; i<NW; i++) 	y0[i] = ak[k+1]*(cost[i]*y1[i]) + ak[k]*y0[i];
 				#pragma unroll
 				for (int f=0; f<NFIELDS; f++) {
 					#pragma unroll
@@ -1032,12 +1036,13 @@ static __global__ void leg_m_lowllim_kernel(
 					}
 				}
 				#pragma unroll
-				for (int i=0; i<NW; i++) 	y1[i] = al[k+3]*(cost[i]*y0[i]) + al[k+2]*y1[i];
+				for (int i=0; i<NW; i++) 	y1[i] = ak[k+3]*(cost[i]*y0[i]) + ak[k+2]*y1[i];
 			}
 			al += BLOCKSIZE;
 			l += BLOCKSIZE/2;
 			__syncthreads();
 			if (l+j/2 <= llim) {
+				ak[j] = al[j];
 				#pragma unroll
 				for (int f=0; f<NFIELDS; f++)	qk[f][j] = ql[2*l+j + f*ql_dist];
 			}
@@ -1054,7 +1059,7 @@ static __global__ void leg_m_lowllim_kernel(
 				}
 			}
 			#pragma unroll
-			for (int i=0; i<NW; i++) 	y0[i] = al[k+1]*(cost[i]*y1[i]) + al[k]*y0[i];
+			for (int i=0; i<NW; i++) 	y0[i] = ak[k+1]*(cost[i]*y1[i]) + ak[k]*y0[i];
 			#pragma unroll
 			for (int f=0; f<NFIELDS; f++) {
 				#pragma unroll
@@ -1064,7 +1069,7 @@ static __global__ void leg_m_lowllim_kernel(
 				}
 			}
 			#pragma unroll
-			for (int i=0; i<NW; i++) 	y1[i] = al[k+3]*(cost[i]*y0[i]) + al[k+2]*y1[i];
+			for (int i=0; i<NW; i++) 	y1[i] = ak[k+3]*(cost[i]*y0[i]) + ak[k+2]*y1[i];
 			l+=2;	k+=4;
 		}
 		if (l==llim) {
@@ -1084,7 +1089,7 @@ static __global__ void leg_m_lowllim_kernel(
 			for (int k = 0; k<BLOCKSIZE; k+=4) {
 				double tmp[NW];
 				#pragma unroll
-				for (int i=0; i<NW; i++) tmp[i] = al[k+1]*ct2[i] + al[k];
+				for (int i=0; i<NW; i++) tmp[i] = ak[k+1]*ct2[i] + ak[k];
 				#pragma unroll
 				for (int f=0; f<NFIELDS; f++) {
 					#pragma unroll
@@ -1101,7 +1106,7 @@ static __global__ void leg_m_lowllim_kernel(
 					y0[i] = tmp[i] * y1[i] + y0[i];
 				}
 				#pragma unroll
-				for (int i=0; i<NW; i++) tmp[i] = al[k+3]*ct2[i] + al[k+2];
+				for (int i=0; i<NW; i++) tmp[i] = ak[k+3]*ct2[i] + ak[k+2];
 				#pragma unroll
 				for (int f=0; f<NFIELDS; f++) {
 					#pragma unroll
@@ -1129,13 +1134,14 @@ static __global__ void leg_m_lowllim_kernel(
 				#pragma unroll
 				for (int f=0; f<NFIELDS; f++)	qk[f][BLOCKSIZE+j] = ql[2*l+BLOCKSIZE+j + f*ql_dist];
 			}
+			if (l+j <= llim)	 ak[j] = al[j];
 			__syncthreads();
 		}
 		int k=0;
 		while (l<llim) {	// compute even and odd parts
 			double tmp[NW];
 			#pragma unroll
-			for (int i=0; i<NW; i++) tmp[i] = al[k+1]*ct2[i] + al[k];
+			for (int i=0; i<NW; i++) tmp[i] = ak[k+1]*ct2[i] + ak[k];
 			#pragma unroll
 			for (int f=0; f<NFIELDS; f++) {
 				#pragma unroll
