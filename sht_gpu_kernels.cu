@@ -579,13 +579,11 @@ sh2ishioka_kernel(const double* __restrict__ xlm, const double* __restrict__ ql,
 	const int l0 = ((blockDim.x-4) * blockIdx.x) >> 1;		// some overlap needed
 
 	const int l  = l0 + (j >> 1);
-	//const int ri = j & 1;		// real or imag
-	//const int eo = l & 1;				// evon or odd l
 	const int ll = (l >> 1)*3;			// coeff index
 
 	const int m = im*mres;
-	const int q_ofs = im*(((lmax+1)<<1) -m+mres) + 2*l0;
-	const int x_ofs = 3*im*(2*(lmax+4) -m+mres)/4 + 3*(l0/2);
+	const int q_ofs = im*(((lmax+1)*2) -m+mres) + 2*l0;
+	const int x_ofs = 3*im*(2*(lmax+4) -m+mres)/4 + 3*(l0 >> 1);
 	const int llim_m = llim-m;
 
 	__shared__ double xl_[BLOCKSIZE/4*3];
@@ -594,24 +592,23 @@ sh2ishioka_kernel(const double* __restrict__ xlm, const double* __restrict__ ql,
 	if (l<=llim_m) {
 		ql_[j] = ql[q_ofs +j];
 		if (ll < 3*llim_m/2) 	xl_[j] = xlm[x_ofs +j];
+	} else {
+		xl_[j] = 0.0;
+		ql_[j] = 0.0;
 	}
 	double q = 0.0;
 
 	__syncthreads();
 
-	if (l<=llim_m) {
+	if ((l<=llim_m) && (j+4 < BLOCKSIZE)) {
 		int ix = 3*(j>>2);		// 3*l/2.
 		q = ql_[j] * xl_[ix + (j&2)];	// ix for l-m even, ix+2 for l-m odd
-		if ( ((j&2)==0) && (l+2<=llim_m) && (j+4 < BLOCKSIZE) ) {		// for l-m even
+		if ((j&2)==0) {		// for l-m even
 			q += ql_[j+4] * xl_[ix+1];			// contribution of l+2
 		}
-	}
-	if ( (l<=((llim_m+1)>>2)*2) && (j+4 < BLOCKSIZE) ) {
 		ql_ish[q_ofs +j] = q;	// coalesced store
 	}
 }
-
-
 
 /** \internal convert from vector SH to scalar SH
 	Vlm =  st*d(Slm)/dtheta + I*m*Tlm
