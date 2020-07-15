@@ -579,25 +579,18 @@ sh2ishioka_kernel(const double* __restrict__ xlm, const double* __restrict__ ql,
 	const int l0 = ((blockDim.x-4) * blockIdx.x) >> 1;		// some overlap needed
 
 	const int l  = l0 + (j >> 1);
-	const int ll = (l >> 1)*3;			// coeff index
-
 	const int m = im*mres;
 	const int q_ofs = im*(((lmax+1)*2) -m+mres) + 2*l0;
 	const int x_ofs = 3*im*(2*(lmax+4) -m+mres)/4 + 3*(l0 >> 1);
 	const int llim_m = llim-m;
 
 	__shared__ double ql_[BLOCKSIZE];		// LSPAN = BLOCKSIZE/2 - 2
-	__shared__ double xl_[BLOCKSIZE/4*3];
+	__shared__ double xl_[BLOCKSIZE/4*3-3];
 
 	if (l<=llim_m) {
 		ql_[j] = ql[q_ofs +j];
+		if (j<BLOCKSIZE/4*3-3) xl_[j] = xlm[x_ofs +j];
 	} else ql_[j] = 0.0;
-
-	if (j<BLOCKSIZE/4*3) {
-		if (ll < 3*(llim_m+2)/2) {
-			xl_[j] = xlm[x_ofs +j];
-		} else xl_[j] = 0.0;
-	}
 
 	__syncthreads();
 
@@ -608,7 +601,6 @@ sh2ishioka_kernel(const double* __restrict__ xlm, const double* __restrict__ ql,
 			q += ql_[j+4] * xl_[ix+1];			// contribution of l+2
 		}
 		ql_ish[q_ofs +j] = q;	// coalesced store
-		//printf("m=%d, j=%d, q_ofs=%d, q=%g, qorg=%g, qorg_mem=%g\n",m,j,q_ofs,q,ql_[j],ql[q_ofs+j]);
 	}
 }
 
