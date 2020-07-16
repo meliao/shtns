@@ -1506,9 +1506,10 @@ ileg_m_lowllim_kernel(const double* __restrict__ al, const double* __restrict__ 
 	__shared__ double ak[2*LSPAN+2];	// cache
 	__shared__ double yl[LSPAN*l_inc];		// yl is also used for even/odd computation. Ensure LSPAN >= 4.
 	#else
-	const int l_inc = BLOCKSIZE+4;
+	const int padding = 2;		// padding = 0 is very bad for performance (shared-memory bank conflicts).
+	const int l_inc = BLOCKSIZE+padding;
 	__shared__ double ak[LSPAN+2];	// cache
-	__shared__ double yl[LSPAN/2*l_inc];		// yl is also used for even/odd computation. Ensure LSPAN >= 8.
+	__shared__ double yl[LSPAN/2*l_inc - padding];		// yl is also used for even/odd computation. Ensure LSPAN >= 8.
 	#endif
 	double cost = (it < nlat_2) ? ct[it] : 0.0;
 	double y0, y1;
@@ -1818,8 +1819,9 @@ static void ileg_m_lowllim(shtns_cfg shtns, const double* q, double *ql, const i
 	const int BLOCKSIZE = 256/NFIELDS;
 	const int LSPAN_ = 8/NFIELDS;
 	#else
-	const int BLOCKSIZE = 128/NFIELDS;
+	const int BLOCKSIZE = 32/NFIELDS;
 	const int LSPAN_ = 16/NFIELDS;
+	// on V100, for lmax=1024, BLOCKSIZE=32, LSPAN_=16 is best.  BLOCKSIZE=64, LSPAN=32 is also interesting.
 	d_alm = shtns->d_clm;
 	#endif
 	const int NW = 1;
