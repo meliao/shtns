@@ -47,12 +47,14 @@ __device__ double atomicAdd(double* address, double val)
 	#define shfl(...) __shfl(__VA_ARGS__)
 	#define _any(p) __any(p)
 	#define _all(p) __all(p)
+	#define _syncwarp 0
 #else
 	#define shfl_xor(...) __shfl_xor_sync(0xFFFFFFFF, __VA_ARGS__)
 	#define shfl_down(...) __shfl_down_sync(0xFFFFFFFF, __VA_ARGS__)
 	#define shfl(...) __shfl_sync(0xFFFFFFFF, __VA_ARGS__)
 	#define _any(p) __any_sync(0xFFFFFFFF, p)
 	#define _all(p) __all_sync(0xFFFFFFFF, p)
+	#define _syncwarp __syncwarp()
 #endif
 
 /*
@@ -437,6 +439,13 @@ ileg_m0_kernel(const double* __restrict__ al, const double* __restrict__ ct, con
 	// re-assign each thread an l (transpose)
 	const int ll = j / (BLOCKSIZE/LSPAN);
 
+	static_assert((BLOCKSIZE % LSPAN) == 0, "BLOCKSIZE must be a multiple of LSPAN");
+	#ifndef SHTNS_ISHIOKA
+	static_assert((LSPAN % 2) == 0, "LSPAN must be a multiple of 2");
+	#else
+	static_assert((LSPAN % 4) == 0, "LSPAN must be a multiple of 4");
+	#endif
+
 	#ifndef SHTNS_ISHIOKA
 	__shared__ double ak[2*LSPAN+2];	// cache
 	__shared__ double yl[LSPAN*BLOCKSIZE];		// yl is also used for even/odd computation. Ensure LSPAN >= 4.
@@ -449,11 +458,8 @@ ileg_m0_kernel(const double* __restrict__ al, const double* __restrict__ ct, con
 	double y0, y1;
 
 	#ifndef SHTNS_ISHIOKA
-	if (LSPAN < 4) printf("ERROR: LSPAN<4\n");
 	if (j < 2*LSPAN+2) ak[j] = al[j];
 	#else
-	if (LSPAN < 8) printf("ERROR: LSPAN<8\n");
-	if (LSPAN % 4) printf("ERROR: LSPAN not a multiple of 4\n");
 	if (j < LSPAN+2) ak[j] = al[j];
 	#endif
 
@@ -464,14 +470,16 @@ ileg_m0_kernel(const double* __restrict__ al, const double* __restrict__ ct, con
 		y0 = (it < nlat_2) ? q[it + f*q_dist] : 0.0;				// north
 		y1 = (it < nlat_2) ? q[nlat_2*2-1 - it + f*q_dist] : 0.0;	// south
 
-		if ((f>0) && (BLOCKSIZE > WARPSZE)) 	__syncthreads();
+		if (f>0) {
+			if (BLOCKSIZE > WARPSZE) {	__syncthreads(); } else { _syncwarp; }
+		}
 		yl[j] = y0+y1;					// even
 		#ifndef SHTNS_ISHIOKA
 		yl[BLOCKSIZE +j] = y0-y1;		// odd
 		#else
 		yl[BLOCKSIZE +j] = (y0-y1)*cost;		// odd
 		#endif
-		if (BLOCKSIZE > WARPSZE) 	__syncthreads();
+		if (BLOCKSIZE > WARPSZE) {	__syncthreads(); } else { _syncwarp; }
 
 		// transpose reo to my_reo
 		#pragma unroll
@@ -493,10 +501,9 @@ ileg_m0_kernel(const double* __restrict__ al, const double* __restrict__ ct, con
 	y1 = (ak[1]*cost + ak[0]) * y0;
 	#endif
 
-	if (BLOCKSIZE > WARPSZE)	__syncthreads();
-
 	al+=2;
 	while (l <= llim) {
+		if (BLOCKSIZE > WARPSZE) {	__syncthreads(); } else { _syncwarp; }
 		#ifndef SHTNS_ISHIOKA
 			for (int k=0; k<LSPAN; k+=2) {		// compute a block of the matrix, write it in shared mem.
 				yl[k*l_inc +j]     = y0;
@@ -516,7 +523,7 @@ ileg_m0_kernel(const double* __restrict__ al, const double* __restrict__ ct, con
 				y1 = c1 * y0 + y1;
 			}
 		#endif
-		if(BLOCKSIZE > WARPSZE)	__syncthreads();
+		if (BLOCKSIZE > WARPSZE) {	__syncthreads(); } else { _syncwarp; }
 
 		double qll[NFIELDS];	// accumulator
 		// now re-assign each thread an l (transpose)
@@ -585,7 +592,6 @@ ileg_m0_kernel(const double* __restrict__ al, const double* __restrict__ ct, con
 		#else
 		if (j<LSPAN) ak[j+2] = al[j];
 		#endif
-		if (BLOCKSIZE > WARPSZE)	__syncthreads();
 		l+=LSPAN;
 	}
 }
@@ -893,7 +899,7 @@ static __global__ void leg_m_lowllim_kernel(
 		#endif
 
 		al+=2;
-		__syncthreads();
+		if (BLOCKSIZE > WARPSZE) { __syncthreads(); } else { _syncwarp; }
 	#ifndef SHTNS_ISHIOKA
 		while(l<=llim-BLOCKSIZE/2) {
 			#pragma unroll
@@ -915,13 +921,13 @@ static __global__ void leg_m_lowllim_kernel(
 			}
 			al += BLOCKSIZE;
 			l += BLOCKSIZE/2;
-			__syncthreads();
+			if (BLOCKSIZE > WARPSZE) { __syncthreads(); } else { _syncwarp; }
 			if (l+j/2 <= llim) {
 				ak[j] = al[j];
 				#pragma unroll
 				for (int f=0; f<NFIELDS; f++)	qk[f][j] = ql[2*l+j + f*ql_dist];
 			}
-			__syncthreads();
+			if (BLOCKSIZE > WARPSZE) { __syncthreads(); } else { _syncwarp; }
 		}
 		int k=0;
 		while(l<llim) {
@@ -969,7 +975,7 @@ static __global__ void leg_m_lowllim_kernel(
 			}
 			al += BLOCKSIZE;
 			l  += BLOCKSIZE;
-			__syncthreads();
+			if (BLOCKSIZE > WARPSZE) { __syncthreads(); } else { _syncwarp; }
 			if (l+j/2 <= llim) {
 				#pragma unroll
 				for (int f=0; f<NFIELDS; f++)	qk[f][j] = ql[2*l+j + f*ql_dist];
@@ -979,7 +985,7 @@ static __global__ void leg_m_lowllim_kernel(
 				for (int f=0; f<NFIELDS; f++)	qk[f][BLOCKSIZE+j] = ql[2*l+BLOCKSIZE+j + f*ql_dist];
 			}
 			if (l+j <= llim)	 ak[j] = al[j];
-			__syncthreads();
+			if (BLOCKSIZE > WARPSZE) { __syncthreads(); } else { _syncwarp; }
 		}
 		int k=0;
 		while (l<llim) {	// compute even and odd parts
@@ -1084,7 +1090,7 @@ static __global__ void leg_m_lowllim_kernel(
 		for (int i=0; i<NW; i++) y1[i] = (al[1]*ct2[i] + al[0])*y0[i];
 	#endif
 
-		__syncthreads();
+		if (BLOCKSIZE > WARPSZE) { __syncthreads(); } else { _syncwarp; }
 		l=m;		al+=2;
 	#ifndef SHTNS_ISHIOKA
 		while (l<=llim - BLOCKSIZE/2) {	// compute even and odd parts
@@ -1113,13 +1119,13 @@ static __global__ void leg_m_lowllim_kernel(
 			}
 			al += BLOCKSIZE;
 			l += BLOCKSIZE/2;
-			__syncthreads();
+			if (BLOCKSIZE > WARPSZE) { __syncthreads(); } else { _syncwarp; }
 			if (l+j/2 <= llim) {
 				ak[j] = al[j];
 				#pragma unroll
 				for (int f=0; f<NFIELDS; f++)	qk[f][j] = ql[2*l+j + f*ql_dist];
 			}
-			__syncthreads();
+			if (BLOCKSIZE > WARPSZE) { __syncthreads(); } else { _syncwarp; }
 		}
 		int k=0;
 		while (l<llim) {	// compute even and odd parts
@@ -1198,7 +1204,7 @@ static __global__ void leg_m_lowllim_kernel(
 			}
 			al += BLOCKSIZE;
 			l  += BLOCKSIZE;
-			__syncthreads();
+			if (BLOCKSIZE > WARPSZE) { __syncthreads(); } else { _syncwarp; }
 			if (l+j/2 <= llim) {
 				#pragma unroll
 				for (int f=0; f<NFIELDS; f++)	qk[f][j] = ql[2*l+j + f*ql_dist];
@@ -1208,7 +1214,7 @@ static __global__ void leg_m_lowllim_kernel(
 				for (int f=0; f<NFIELDS; f++)	qk[f][BLOCKSIZE+j] = ql[2*l+BLOCKSIZE+j + f*ql_dist];
 			}
 			if (l+j <= llim)	 ak[j] = al[j];
-			__syncthreads();
+			if (BLOCKSIZE > WARPSZE) { __syncthreads(); } else { _syncwarp; }
 		}
 		int k=0;
 		while (l<llim) {	// compute even and odd parts
@@ -1501,9 +1507,19 @@ ileg_m_lowllim_kernel(const double* __restrict__ al, const double* __restrict__ 
 	const int ll = j / (BLOCKSIZE/LSPAN);
 	const int ri = j / (BLOCKSIZE/(2*LSPAN)) % 2;	// real (0) or imag (1)
 
+	static_assert((BLOCKSIZE % (2*LSPAN)) == 0, "BLOCKSIZE must be a multiple of 2*LSPAN");
+	static_assert( ((WARPSZE >= BLOCKSIZE/LSPAN) ? (WARPSZE % (BLOCKSIZE/LSPAN)) : ((BLOCKSIZE/LSPAN) % WARPSZE)) == 0, "WARPSZE and BLOCKSIZE/LSPAN must be multiples");
+	#ifndef SHTNS_ISHIOKA
+	static_assert(LSPAN >= 4, "LSPAN must be >= 4");
+	static_assert((LSPAN % 2) == 0, "LSPAN must be a multiple of 2");
+	#else
+	static_assert(LSPAN >= 8, "LSPAN must be >= 8");
+	static_assert((LSPAN % 4) == 0, "LSPAN must be a multiple of 4");
+	#endif
+
 	#ifndef SHTNS_ISHIOKA
 	const int l_inc = BLOCKSIZE;
-	__shared__ double ak[2*LSPAN+2];	// cache
+	__shared__ double ak[2*LSPAN+2];		// cache
 	__shared__ double yl[LSPAN*l_inc];		// yl is also used for even/odd computation. Ensure LSPAN >= 4.
 	#else
 	const int padding = 2;		// padding = 0 is very bad for performance (shared-memory bank conflicts).
@@ -1513,13 +1529,6 @@ ileg_m_lowllim_kernel(const double* __restrict__ al, const double* __restrict__ 
 	#endif
 	double cost = (it < nlat_2) ? ct[it] : 0.0;
 	double y0, y1;
-
-	#ifndef SHTNS_ISHIOKA
-	if (LSPAN < 4) printf("ERROR: LSPAN<4\n");
-	#else
-	if (LSPAN < 8) printf("ERROR: LSPAN<8\n");
-	if (LSPAN % 4) printf("ERROR: LSPAN not a multiple of 4\n");
-	#endif
 
 	if (im == 0) {
 		double my_reo[NFIELDS][LSPAN];			// in registers
@@ -1534,14 +1543,16 @@ ileg_m_lowllim_kernel(const double* __restrict__ al, const double* __restrict__ 
 			y0 = (it < nlat_2) ? q[it + f*q_dist] : 0.0;				// north
 			y1 = (it < nlat_2) ? q[nlat_2*2-1 - it + f*q_dist] : 0.0;	// south
 
-			if ((f>0) && (BLOCKSIZE > WARPSZE)) 	__syncthreads();
+			if (f>0) {
+				if (BLOCKSIZE > WARPSZE) {	__syncthreads(); } else { _syncwarp; }
+			}
 			yl[j] = y0+y1;					// even
 			#ifndef SHTNS_ISHIOKA
-			yl[l_inc +j] = y0-y1;		// odd
+			yl[l_inc +j] = y0-y1;			// odd
 			#else
 			yl[l_inc +j] = (y0-y1)*cost;	// odd
 			#endif
-			if (BLOCKSIZE > WARPSZE) 	__syncthreads();
+			if (BLOCKSIZE > WARPSZE) {	__syncthreads(); } else { _syncwarp; }
 
 			// transpose reo to my_reo
 			#pragma unroll
@@ -1563,10 +1574,9 @@ ileg_m_lowllim_kernel(const double* __restrict__ al, const double* __restrict__ 
 		y1 = (ak[1]*cost + ak[0]) * y0;
 		#endif
 
-		if (BLOCKSIZE > WARPSZE)	__syncthreads();
-		
 		al+=2;
 		while (l <= llim) {
+			if (BLOCKSIZE > WARPSZE) {	__syncthreads(); } else { _syncwarp; }
 			#ifndef SHTNS_ISHIOKA
 				for (int k=0; k<LSPAN; k+=2) {		// compute a block of the matrix, write it in shared mem.
 					yl[k*l_inc +j]     = y0;
@@ -1586,7 +1596,7 @@ ileg_m_lowllim_kernel(const double* __restrict__ al, const double* __restrict__ 
 					y1 = c1 * y0 + y1;
 				}
 			#endif
-			if(BLOCKSIZE > WARPSZE)	__syncthreads();
+			if (BLOCKSIZE > WARPSZE) {	__syncthreads(); } else { _syncwarp; }
 
 			double qll[NFIELDS];	// accumulator
 			// now re-assign each thread an l (transpose)
@@ -1604,7 +1614,6 @@ ileg_m_lowllim_kernel(const double* __restrict__ al, const double* __restrict__ 
 			}
 
 			if (BLOCKSIZE/LSPAN <= WARPSZE) {	// reduce_add within same l is in same warp too:
-				if (WARPSZE % (BLOCKSIZE/LSPAN)) printf("ERROR\n");
 				#pragma unroll
 				for (int ofs = BLOCKSIZE/(LSPAN*2); ofs > 0; ofs>>=1) {
 					#pragma unroll
@@ -1620,7 +1629,6 @@ ileg_m_lowllim_kernel(const double* __restrict__ al, const double* __restrict__ 
 					}
 				}
 			} else {	// only partial reduction possible, finish with atomicAdd():
-				if ((BLOCKSIZE/LSPAN) % WARPSZE) printf("ERROR\n");
 				#pragma unroll
 				for (int ofs = WARPSZE/2; ofs > 0; ofs>>=1) {
 					#pragma unroll
@@ -1655,7 +1663,6 @@ ileg_m_lowllim_kernel(const double* __restrict__ al, const double* __restrict__ 
 			#else
 			if (j<LSPAN) ak[j+2] = al[j];
 			#endif
-			if (BLOCKSIZE > WARPSZE)	__syncthreads();
 			l+=LSPAN;
 		}
 	} else {	// im > 0
@@ -1683,7 +1690,7 @@ ileg_m_lowllim_kernel(const double* __restrict__ al, const double* __restrict__ 
 			y0 = shfl_xor(qei, 1);	// exchange between adjacent lanes.
 			y1 = shfl_xor(qoi, 1);
 
-			if ((f>0) && (BLOCKSIZE > WARPSZE)) 	__syncthreads();
+			if ((f>0) && (BLOCKSIZE > WARPSZE))		__syncthreads();	// _syncwarp not needed after shfl_xor
 
 			yl[j] 		       = qer + qor;	// rer
 			yl[2*l_inc +j] = sgn*(y0 - y1);	// rei
@@ -1695,7 +1702,7 @@ ileg_m_lowllim_kernel(const double* __restrict__ al, const double* __restrict__ 
 			yl[3*l_inc +j] = sgn*(y0 + y1)*cost;	// roi
 			#endif
 
-			if (BLOCKSIZE > WARPSZE) 	__syncthreads();
+			if (BLOCKSIZE > WARPSZE) {	__syncthreads(); } else { _syncwarp; }
 			// transpose yl to my_reo
 			#pragma unroll
 			for (int i=0, k=0; i<BLOCKSIZE; i+= BLOCKSIZE/(2*LSPAN), k++) {
@@ -1727,7 +1734,7 @@ ileg_m_lowllim_kernel(const double* __restrict__ al, const double* __restrict__ 
 
 		l=m;		al+=2;
 		while (l <= llim) {
-			if (BLOCKSIZE > WARPSZE) 	__syncthreads();
+			if (BLOCKSIZE > WARPSZE) {	__syncthreads(); } else { _syncwarp; }
 		#ifndef SHTNS_ISHIOKA
 			for (int k=0; k<LSPAN; k+=2) {		// compute a block of the matrix, write it in shared mem.
 				yl[k*l_inc +j]     = y0;
@@ -1749,7 +1756,7 @@ ileg_m_lowllim_kernel(const double* __restrict__ al, const double* __restrict__ 
 		#endif
 
 			// transposed work:
-			if (BLOCKSIZE > WARPSZE)	__syncthreads();
+			if (BLOCKSIZE > WARPSZE) {	__syncthreads(); } else { _syncwarp; }
 			double qlri[NFIELDS];	// accumulator
 			#ifndef SHTNS_ISHIOKA
 			const int itl = ll*l_inc + j % (BLOCKSIZE/(2*LSPAN));
@@ -1765,7 +1772,7 @@ ileg_m_lowllim_kernel(const double* __restrict__ al, const double* __restrict__ 
 			}
 
 			if (BLOCKSIZE/(2*LSPAN) <= WARPSZE) {		// reduce_add within same l is in same warp too:
-				if (WARPSZE % (BLOCKSIZE/(2*LSPAN))) printf("ERROR\n");
+				//if (WARPSZE % (BLOCKSIZE/(2*LSPAN))) printf("ERROR\n");
 				#pragma unroll
 				for (int ofs = BLOCKSIZE/(LSPAN*4); ofs > 0; ofs>>=1) {
 					#pragma unroll
@@ -1781,7 +1788,7 @@ ileg_m_lowllim_kernel(const double* __restrict__ al, const double* __restrict__ 
 					}
 				}
 			} else {	// only partial reduction possible, finish with atomicAdd():
-				if ((BLOCKSIZE/(2*LSPAN)) % WARPSZE) printf("ERROR\n");
+				//if ((BLOCKSIZE/(2*LSPAN)) % WARPSZE) printf("ERROR\n");
 				#pragma unroll
 				for (int ofs = WARPSZE; ofs > 0; ofs>>=1) {
 					#pragma unroll
@@ -1819,7 +1826,7 @@ static void ileg_m_lowllim(shtns_cfg shtns, const double* q, double *ql, const i
 	const int BLOCKSIZE = 256/NFIELDS;
 	const int LSPAN_ = 8/NFIELDS;
 	#else
-	const int BLOCKSIZE = 32/NFIELDS;
+	const int BLOCKSIZE = 32;
 	const int LSPAN_ = 16/NFIELDS;
 	// on V100, for lmax=1024, BLOCKSIZE=32, LSPAN_=16 is best.  BLOCKSIZE=64, LSPAN=32 is also interesting.
 	d_alm = shtns->d_clm;
