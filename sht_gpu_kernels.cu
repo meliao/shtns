@@ -1502,13 +1502,14 @@ ileg_m_lowllim_kernel(const double* __restrict__ al, const double* __restrict__ 
 	const int ri = j / (BLOCKSIZE/(2*LSPAN)) % 2;	// real (0) or imag (1)
 
 	#ifndef SHTNS_ISHIOKA
-	__shared__ double ak[2*LSPAN+2];	// cache
-	__shared__ double yl[LSPAN*BLOCKSIZE];		// yl is also used for even/odd computation. Ensure LSPAN >= 4.
-	#else
-	__shared__ double ak[LSPAN+2];	// cache
-	__shared__ double yl[LSPAN/2*BLOCKSIZE];		// yl is also used for even/odd computation. Ensure LSPAN >= 8.
-	#endif
 	const int l_inc = BLOCKSIZE;
+	__shared__ double ak[2*LSPAN+2];	// cache
+	__shared__ double yl[LSPAN*l_inc];		// yl is also used for even/odd computation. Ensure LSPAN >= 4.
+	#else
+	const int l_inc = BLOCKSIZE+4;
+	__shared__ double ak[LSPAN+2];	// cache
+	__shared__ double yl[LSPAN/2*l_inc];		// yl is also used for even/odd computation. Ensure LSPAN >= 8.
+	#endif
 	double cost = (it < nlat_2) ? ct[it] : 0.0;
 	double y0, y1;
 
@@ -1535,9 +1536,9 @@ ileg_m_lowllim_kernel(const double* __restrict__ al, const double* __restrict__ 
 			if ((f>0) && (BLOCKSIZE > WARPSZE)) 	__syncthreads();
 			yl[j] = y0+y1;					// even
 			#ifndef SHTNS_ISHIOKA
-			yl[BLOCKSIZE +j] = y0-y1;		// odd
+			yl[l_inc +j] = y0-y1;		// odd
 			#else
-			yl[BLOCKSIZE +j] = (y0-y1)*cost;	// odd
+			yl[l_inc +j] = (y0-y1)*cost;	// odd
 			#endif
 			if (BLOCKSIZE > WARPSZE) 	__syncthreads();
 
@@ -1545,7 +1546,7 @@ ileg_m_lowllim_kernel(const double* __restrict__ al, const double* __restrict__ 
 			#pragma unroll
 			for (int i=0, k=0; i<BLOCKSIZE; i+= BLOCKSIZE/LSPAN, k++) {
 				int it = j % (BLOCKSIZE/LSPAN) + i;
-				my_reo[f][k] = yl[(ll&1)*BLOCKSIZE +it];
+				my_reo[f][k] = yl[(ll&1)*l_inc +it];
 			}
 		}
 
@@ -1684,13 +1685,13 @@ ileg_m_lowllim_kernel(const double* __restrict__ al, const double* __restrict__ 
 			if ((f>0) && (BLOCKSIZE > WARPSZE)) 	__syncthreads();
 
 			yl[j] 		       = qer + qor;	// rer
-			yl[2*BLOCKSIZE +j] = sgn*(y0 - y1);	// rei
+			yl[2*l_inc +j] = sgn*(y0 - y1);	// rei
 			#ifndef SHTNS_ISHIOKA
-			yl[BLOCKSIZE +j]   = qer - qor;	// ror
-			yl[3*BLOCKSIZE +j] = sgn*(y0 + y1);	// roi
+			yl[l_inc +j]   = qer - qor;	// ror
+			yl[3*l_inc +j] = sgn*(y0 + y1);	// roi
 			#else
-			yl[BLOCKSIZE +j]   = (qer - qor)*cost;		// ror
-			yl[3*BLOCKSIZE +j] = sgn*(y0 + y1)*cost;	// roi
+			yl[l_inc +j]   = (qer - qor)*cost;		// ror
+			yl[3*l_inc +j] = sgn*(y0 + y1)*cost;	// roi
 			#endif
 
 			if (BLOCKSIZE > WARPSZE) 	__syncthreads();
@@ -1698,7 +1699,7 @@ ileg_m_lowllim_kernel(const double* __restrict__ al, const double* __restrict__ 
 			#pragma unroll
 			for (int i=0, k=0; i<BLOCKSIZE; i+= BLOCKSIZE/(2*LSPAN), k++) {
 				int it = j % (BLOCKSIZE/(2*LSPAN)) + i;
-				my_reo[f][k] = yl[((ll&1)+2*ri)*BLOCKSIZE +it];
+				my_reo[f][k] = yl[((ll&1)+2*ri)*l_inc +it];
 			}
 		}
 
