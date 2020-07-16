@@ -495,8 +495,6 @@ ileg_m0_kernel(const double* __restrict__ al, const double* __restrict__ ct, con
 
 	if (BLOCKSIZE > WARPSZE)	__syncthreads();
 
-	yl[j] = y0;
-	yl[l_inc +j] = y1;
 	al+=2;
 	while (l <= llim) {
 		#ifndef SHTNS_ISHIOKA
@@ -606,6 +604,7 @@ static void ileg_m0(shtns_cfg shtns, const double* q, double *ql, const int llim
 	#else
 	const int BLOCKSIZE = 128/NFIELDS;
 	const int LSPAN_ = 16/NFIELDS;
+	d_alm = shtns->d_clm;
 	#endif
 	const int NW = 1;
 
@@ -1534,11 +1533,10 @@ ileg_m_lowllim_kernel(const double* __restrict__ al, const double* __restrict__ 
 			y1 = (it < nlat_2) ? q[nlat_2*2-1 - it + f*q_dist] : 0.0;	// south
 
 			if ((f>0) && (BLOCKSIZE > WARPSZE)) 	__syncthreads();
-			#ifndef SHTNS_ISHIOKA
 			yl[j] = y0+y1;					// even
+			#ifndef SHTNS_ISHIOKA
 			yl[BLOCKSIZE +j] = y0-y1;		// odd
 			#else
-			yl[j] = y0+y1;						// even
 			yl[BLOCKSIZE +j] = (y0-y1)*cost;	// odd
 			#endif
 			if (BLOCKSIZE > WARPSZE) 	__syncthreads();
@@ -1565,8 +1563,6 @@ ileg_m_lowllim_kernel(const double* __restrict__ al, const double* __restrict__ 
 
 		if (BLOCKSIZE > WARPSZE)	__syncthreads();
 		
-		yl[j] = y0;
-		yl[l_inc +j] = y1;
 		al+=2;
 		while (l <= llim) {
 			#ifndef SHTNS_ISHIOKA
@@ -1664,12 +1660,16 @@ ileg_m_lowllim_kernel(const double* __restrict__ al, const double* __restrict__ 
 		double my_reo[NFIELDS][2*LSPAN];			// in registers
 		int m = im*mres;
 		int l = (im*(2*(lmax+1)-(m+mres)))>>1;
+		#ifndef SHTNS_ISHIOKA
 		al += 2*(l+m);
-		ql += 2*(l + S*im);	// allow vector transforms where llim = lmax+1
-
 		if (j < 2*LSPAN+2) ak[j] = al[j];
+		#else
+		al += l+m;
+		if (j < LSPAN+2) ak[j] = al[j];
+		#endif
+		ql += 2*(l + S*im);	// allow vector transforms where llim = lmax+1
 		const double sgn = 2*(j&1) - 1;	// -/+
-		
+
 		#pragma unroll
 		for (int f=0; f<NFIELDS; f++) {
 			y0         = (it < nlat_2) ? q[im*m_inc + it + f*q_dist] : 0.0;		// north imag (ani)
@@ -1684,9 +1684,14 @@ ileg_m_lowllim_kernel(const double* __restrict__ al, const double* __restrict__ 
 			if ((f>0) && (BLOCKSIZE > WARPSZE)) 	__syncthreads();
 
 			yl[j] 		       = qer + qor;	// rer
-			yl[BLOCKSIZE +j]   = qer - qor;	// ror
 			yl[2*BLOCKSIZE +j] = sgn*(y0 - y1);	// rei
+			#ifndef SHTNS_ISHIOKA
+			yl[BLOCKSIZE +j]   = qer - qor;	// ror
 			yl[3*BLOCKSIZE +j] = sgn*(y0 + y1);	// roi
+			#else
+			yl[BLOCKSIZE +j]   = (qer - qor)*cost;		// ror
+			yl[3*BLOCKSIZE +j] = sgn*(y0 + y1)*cost;	// roi
+			#endif
 
 			if (BLOCKSIZE > WARPSZE) 	__syncthreads();
 			// transpose yl to my_reo
@@ -1697,21 +1702,31 @@ ileg_m_lowllim_kernel(const double* __restrict__ al, const double* __restrict__ 
 			}
 		}
 
+		#ifndef SHTNS_ISHIOKA
 		y1 = sqrt(1.0 - cost*cost);	// sin(theta)
-
 		y0 = 0.5 * ak[0];	// y0
+		#else
+		cost *= cost;			// cos(theta)^2
+		y1 = sqrt(1.0 - cost);	// sin(theta)
+		y0 = 0.5;				// y0
+		#endif
+
 		l = m - S;
 		do {		// sin(theta)^(m-S)
-		if (l&1) y0 *= y1;
-		y1 *= y1;
+			if (l&1) y0 *= y1;
+			y1 *= y1;
 		} while(l >>= 1);
 		if (it < nlat_2)     y0 *= ct[it + nlat_2];		// include quadrature weights.
+		#ifndef SHTNS_ISHIOKA
 		y1 = ak[1]*y0*cost;
+		#else
+		y1 = (ak[1]*cost + ak[0]) * y0;
+		#endif
 
 		l=m;		al+=2;
 		while (l <= llim) {
 			if (BLOCKSIZE > WARPSZE) 	__syncthreads();
-		#ifndef SHTNS_ISHIOKAxx
+		#ifndef SHTNS_ISHIOKA
 			for (int k=0; k<LSPAN; k+=2) {		// compute a block of the matrix, write it in shared mem.
 				yl[k*l_inc +j]     = y0;
 				y0 = ak[2*k+3]*cost*y1 + ak[2*k+2]*y0;
@@ -1720,19 +1735,25 @@ ileg_m_lowllim_kernel(const double* __restrict__ al, const double* __restrict__ 
 				al += 4;
 			}
 		#else	/* SHTNS_ISHIOKA */
-			for (int k=0; k<LSPAN; k+=2) {		// compute a block of the matrix, write it in shared mem.
-				yl[k*l_inc +j]     = y0;
-				y0 = (ak[2*k+3]*ct2 + ak[2*k+2])*y1 + y0;
-				yl[(k+1)*l_inc +j] = y1;
-				y1 = (ak[2*k+5]*ct2 + ak[2*k+4])*y0 + y1;
+			for (int k=0; k<LSPAN/2; k+=2) {		// compute a block of the matrix, write it in shared mem.
+				double c0 = ak[2*k+3]*cost + ak[2*k+2];
+				double c1 = ak[2*k+5]*cost + ak[2*k+4];
+				yl[k*l_inc +j]     = y0;		// l and l+1
+				yl[(k+1)*l_inc +j] = y1;		// l+2 and l+3
 				al += 4;
+				y0 = c0 * y1 + y0;
+				y1 = c1 * y0 + y1;
 			}
 		#endif
 
 			// transposed work:
 			if (BLOCKSIZE > WARPSZE)	__syncthreads();
 			double qlri[NFIELDS];	// accumulator
+			#ifndef SHTNS_ISHIOKA
 			const int itl = ll*l_inc + j % (BLOCKSIZE/(2*LSPAN));
+			#else
+			const int itl = (ll>>1)*l_inc + j % (BLOCKSIZE/(2*LSPAN));
+			#endif
 			#pragma unroll
 			for (int f=0; f<NFIELDS; f++)	qlri[f] = my_reo[f][0] * yl[itl];		// first element
 			#pragma unroll
@@ -1741,7 +1762,6 @@ ileg_m_lowllim_kernel(const double* __restrict__ al, const double* __restrict__ 
 				for (int f=0; f<NFIELDS; f++)	qlri[f] += my_reo[f][k] * yl[itl + i];
 			}
 
-			
 			if (BLOCKSIZE/(2*LSPAN) <= WARPSZE) {		// reduce_add within same l is in same warp too:
 				if (WARPSZE % (BLOCKSIZE/(2*LSPAN))) printf("ERROR\n");
 				#pragma unroll
@@ -1771,7 +1791,11 @@ ileg_m_lowllim_kernel(const double* __restrict__ al, const double* __restrict__ 
 				}
 			}
 
+			#ifndef SHTNS_ISHIOKA
 			if (j<2*LSPAN) ak[j+2] = al[j];
+			#else
+			if (j<LSPAN) ak[j+2] = al[j];
+			#endif
 			l+=LSPAN;
 		}
 	}
@@ -1789,8 +1813,14 @@ static void ileg_m_lowllim(shtns_cfg shtns, const double* q, double *ql, const i
 	double *d_ct = shtns->d_ct;
 	cudaStream_t stream = shtns->comp_stream;
 
+	#ifndef SHTNS_ISHIOKA
 	const int BLOCKSIZE = 256/NFIELDS;
 	const int LSPAN_ = 8/NFIELDS;
+	#else
+	const int BLOCKSIZE = 128/NFIELDS;
+	const int LSPAN_ = 16/NFIELDS;
+	d_alm = shtns->d_clm;
+	#endif
 	const int NW = 1;
 
 	const int threadsPerBlock = BLOCKSIZE;	// can be from 32 to 1024, we should try to measure the fastest !
