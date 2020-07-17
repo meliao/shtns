@@ -1281,15 +1281,15 @@ static __global__ void leg_m_lowllim_kernel(
 				for (int f=0; f<NFIELDS; f++) {
 					nr[f][i] =  rer[f][i]+ror[f][i];
 					rer[f][i] = rer[f][i]-ror[f][i];
-					ror[f][i] = sgn*(rei[f][i]+roi[f][i]);
-					rei[f][i] = sgn*(rei[f][i]-roi[f][i]);
+					ror[f][i] = rei[f][i]+roi[f][i];
+					rei[f][i] = rei[f][i]-roi[f][i];
 				}
 				#pragma unroll
 				for (int f=0; f<NFIELDS; f++) {
-					q[im*m_inc + iit*k_inc + f*q_dist]                     = nr[f][i]  - ror[f][i];
-					q[(nphi-im)*m_inc + iit*k_inc + f*q_dist]              = nr[f][i]  + ror[f][i];
-					q[im*m_inc + (nlat_2*2-1-iit)*k_inc + f*q_dist]        = rer[f][i] + rei[f][i];
-					q[(nphi-im)*m_inc + (nlat_2*2-1-iit)*k_inc + f*q_dist] = rer[f][i] - rei[f][i];
+					q[im*m_inc + iit*k_inc + f*q_dist]                     = nr[f][i]  - ror[f][i]*sgn;
+					q[(nphi-im)*m_inc + iit*k_inc + f*q_dist]              = nr[f][i]  + ror[f][i]*sgn;
+					q[im*m_inc + (nlat_2*2-1-iit)*k_inc + f*q_dist]        = rer[f][i] + rei[f][i]*sgn;
+					q[(nphi-im)*m_inc + (nlat_2*2-1-iit)*k_inc + f*q_dist] = rer[f][i] - rei[f][i]*sgn;
 				}
 			}
 		}
@@ -1501,11 +1501,6 @@ ileg_m_lowllim_kernel(const double* __restrict__ al, const double* __restrict__ 
 	const int j = threadIdx.x;
 	const int im = blockIdx.y;
 	const int m_inc = 2*nlat_2;
-//    const int k_inc = 1;
-
-	// re-assign each thread an l (transpose)
-	const int ll = j / (BLOCKSIZE/LSPAN);
-	const int ri = j / (BLOCKSIZE/(2*LSPAN)) % 2;	// real (0) or imag (1)
 
 	static_assert((BLOCKSIZE % (2*LSPAN)) == 0, "BLOCKSIZE must be a multiple of 2*LSPAN");
 	static_assert( ((WARPSZE >= BLOCKSIZE/LSPAN) ? (WARPSZE % (BLOCKSIZE/LSPAN)) : ((BLOCKSIZE/LSPAN) % WARPSZE)) == 0, "WARPSZE and BLOCKSIZE/LSPAN must be multiples");
@@ -1531,6 +1526,9 @@ ileg_m_lowllim_kernel(const double* __restrict__ al, const double* __restrict__ 
 	double y0, y1;
 
 	if (im == 0) {
+		// re-assign each thread an l (transpose)
+		const int ll = j / (BLOCKSIZE/LSPAN);
+
 		double my_reo[NFIELDS][LSPAN];			// in registers
 		#ifndef SHTNS_ISHIOKA
 		if (j < 2*LSPAN+2) ak[j] = al[j];
@@ -1666,6 +1664,9 @@ ileg_m_lowllim_kernel(const double* __restrict__ al, const double* __restrict__ 
 			l+=LSPAN;
 		}
 	} else {	// im > 0
+		// re-assign each thread an l (transpose)
+		const int ll = j / (BLOCKSIZE/(2*LSPAN));		// 2*l + (real ? 0 : 1)
+
 		double my_reo[NFIELDS][2*LSPAN];			// in registers
 		int m = im*mres;
 		int l = (im*(2*(lmax+1)-(m+mres)))>>1;
@@ -1692,22 +1693,22 @@ ileg_m_lowllim_kernel(const double* __restrict__ al, const double* __restrict__ 
 
 			if ((f>0) && (BLOCKSIZE > WARPSZE))		__syncthreads();	// _syncwarp not needed after shfl_xor
 
-			yl[j] 		       = qer + qor;	// rer
-			yl[2*l_inc +j] = sgn*(y0 - y1);	// rei
 			#ifndef SHTNS_ISHIOKA
-			yl[l_inc +j]   = qer - qor;	// ror
-			yl[3*l_inc +j] = sgn*(y0 + y1);	// roi
+			yl[3*l_inc +j] = sgn*(y0 + y1);	// roi, exchange even and odd lanes
+			yl[2*l_inc +j] = qer - qor;			// ror
 			#else
-			yl[l_inc +j]   = (qer - qor)*cost;		// ror
-			yl[3*l_inc +j] = sgn*(y0 + y1)*cost;	// roi
+			yl[3*l_inc +j] = sgn*(y0 + y1)*cost;	// roi, exchange even and odd lanes
+			yl[2*l_inc +j] = (qer - qor)*cost;		// ror
 			#endif
+			yl[l_inc +j]   = sgn*(y0 - y1);	// rei, exchange evend and odd lanes
+			yl[j] 		   = qer + qor;		// rer
 
 			if (BLOCKSIZE > WARPSZE) {	__syncthreads(); } else { _syncwarp; }
 			// transpose yl to my_reo
 			#pragma unroll
 			for (int i=0, k=0; i<BLOCKSIZE; i+= BLOCKSIZE/(2*LSPAN), k++) {
 				int it = j % (BLOCKSIZE/(2*LSPAN)) + i;
-				my_reo[f][k] = yl[((ll&1)+2*ri)*l_inc +it];
+				my_reo[f][k] = yl[(ll&3)*l_inc +it];
 			}
 		}
 
@@ -1759,9 +1760,9 @@ ileg_m_lowllim_kernel(const double* __restrict__ al, const double* __restrict__ 
 			if (BLOCKSIZE > WARPSZE) {	__syncthreads(); } else { _syncwarp; }
 			double qlri[NFIELDS];	// accumulator
 			#ifndef SHTNS_ISHIOKA
-			const int itl = ll*l_inc + j % (BLOCKSIZE/(2*LSPAN));
-			#else
 			const int itl = (ll>>1)*l_inc + j % (BLOCKSIZE/(2*LSPAN));
+			#else
+			const int itl = (ll>>2)*l_inc + j % (BLOCKSIZE/(2*LSPAN));
 			#endif
 			#pragma unroll
 			for (int f=0; f<NFIELDS; f++)	qlri[f] = my_reo[f][0] * yl[itl];		// first element
@@ -1778,13 +1779,13 @@ ileg_m_lowllim_kernel(const double* __restrict__ al, const double* __restrict__ 
 					#pragma unroll
 					for (int f=0; f<NFIELDS; f++)	qlri[f] += shfl_down(qlri[f], ofs, BLOCKSIZE/(LSPAN*2));
 				}
-				if ( ((j % (BLOCKSIZE/(2*LSPAN))) == 0) && ((l+ll)<=llim) ) {	// write result
+				if ( ((j % (BLOCKSIZE/(2*LSPAN))) == 0) && ((l+(ll>>1))<=llim) ) {	// write result
 					if (nlat_2 <= BLOCKSIZE) {		// do we need atomic add or not ?
 						#pragma unroll
-						for (int f=0; f<NFIELDS; f++)	ql[2*(l+ll)+ri + f*ql_dist]   = qlri[f];
+						for (int f=0; f<NFIELDS; f++)	ql[2*l+ll + f*ql_dist]   = qlri[f];
 					} else {
 						#pragma unroll
-						for (int f=0; f<NFIELDS; f++)	atomicAdd(ql+2*(l+ll)+ri + f*ql_dist, qlri[f]);		// VERY slow atomic add on Kepler.
+						for (int f=0; f<NFIELDS; f++)	atomicAdd(ql+2*l+ll + f*ql_dist, qlri[f]);		// VERY slow atomic add on Kepler.
 					}
 				}
 			} else {	// only partial reduction possible, finish with atomicAdd():
@@ -1794,9 +1795,9 @@ ileg_m_lowllim_kernel(const double* __restrict__ al, const double* __restrict__ 
 					#pragma unroll
 					for (int f=0; f<NFIELDS; f++)	qlri[f] += shfl_down(qlri[f], ofs, WARPSZE);
 				}
-				if ( ((j % WARPSZE) == 0) && ((l+ll)<=llim) ) {	// write result
+				if ( ((j % WARPSZE) == 0) && ((l+(ll>>1))<=llim) ) {	// write result
 					#pragma unroll
-					for (int f=0; f<NFIELDS; f++)	atomicAdd(ql+2*(l+ll)+ri + f*ql_dist, qlri[f]);		// VERY slow atomic add on Kepler.
+					for (int f=0; f<NFIELDS; f++)	atomicAdd(ql+2*l+ll + f*ql_dist, qlri[f]);		// VERY slow atomic add on Kepler.
 				}
 			}
 
