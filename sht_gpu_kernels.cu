@@ -1494,7 +1494,7 @@ static void leg_m_highllim(shtns_cfg shtns, const double *ql, double *q, const i
 }
 
 
-template<int BLOCKSIZE, int LSPAN, int S, int NFIELDS> __global__ void
+template<int BLOCKSIZE, int LSPAN, int S, int NFIELDS, int NACC=1> __global__ void
 ileg_m_lowllim_kernel(const double* __restrict__ al, const double* __restrict__ ct, const double* __restrict__ q, double *ql, const int llim, const int nlat_2, const int lmax, const int mres, const int nphi, const int q_dist=0, const int ql_dist=0)
 {
 	const int it = BLOCKSIZE * blockIdx.x + threadIdx.x;
@@ -1679,7 +1679,8 @@ ileg_m_lowllim_kernel(const double* __restrict__ al, const double* __restrict__ 
 		#endif
 		ql += 2*(l + S*im);	// allow vector transforms where llim = lmax+1
 		const double sgn = 2*(j&1) - 1;	// -/+
-
+		
+		const int ofs = (ll&3)*l_inc + j % (BLOCKSIZE/(2*LSPAN)); 
 		#pragma unroll
 		for (int f=0; f<NFIELDS; f++) {
 			y0         = (it < nlat_2) ? q[im*m_inc + it + f*q_dist] : 0.0;		// north imag (ani)
@@ -1697,18 +1698,17 @@ ileg_m_lowllim_kernel(const double* __restrict__ al, const double* __restrict__ 
 			yl[3*l_inc +j] = sgn*(y0 + y1);	// roi, exchange even and odd lanes
 			yl[2*l_inc +j] = qer - qor;			// ror
 			#else
-			yl[3*l_inc +j] = sgn*(y0 + y1)*cost;	// roi, exchange even and odd lanes
+			yl[3*l_inc +j] = (sgn*cost)*(y0 + y1);	// roi, exchange even and odd lanes
 			yl[2*l_inc +j] = (qer - qor)*cost;		// ror
 			#endif
 			yl[l_inc +j]   = sgn*(y0 - y1);	// rei, exchange evend and odd lanes
 			yl[j] 		   = qer + qor;		// rer
 
 			if (BLOCKSIZE > WARPSZE) {	__syncthreads(); } else { _syncwarp; }
-			// transpose yl to my_reo
+			// transpose yl to my_reo (registers)
 			#pragma unroll
-			for (int i=0, k=0; i<BLOCKSIZE; i+= BLOCKSIZE/(2*LSPAN), k++) {
-				int it = j % (BLOCKSIZE/(2*LSPAN)) + i;
-				my_reo[f][k] = yl[(ll&3)*l_inc +it];
+			for (int k=0; k<2*LSPAN; k++) {
+				my_reo[f][k] = yl[ofs + k*(BLOCKSIZE/(2*LSPAN))];
 			}
 		}
 
@@ -1756,20 +1756,38 @@ ileg_m_lowllim_kernel(const double* __restrict__ al, const double* __restrict__ 
 			}
 		#endif
 
-			// transposed work:
+			// transposed work (at given l):
 			if (BLOCKSIZE > WARPSZE) {	__syncthreads(); } else { _syncwarp; }
-			double qlri[NFIELDS];	// accumulator
+			const int NACC = (NFIELDS == 1) ? 2 : 1;		// number of independent accumulators per NFIELD.
+			double qlri[NFIELDS*NACC];		// accumulators
 			#ifndef SHTNS_ISHIOKA
 			const int itl = (ll>>1)*l_inc + j % (BLOCKSIZE/(2*LSPAN));
 			#else
 			const int itl = (ll>>2)*l_inc + j % (BLOCKSIZE/(2*LSPAN));
 			#endif
+
 			#pragma unroll
-			for (int f=0; f<NFIELDS; f++)	qlri[f] = my_reo[f][0] * yl[itl];		// first element
-			#pragma unroll
-			for (int i=BLOCKSIZE/(2*LSPAN), k=1; i<BLOCKSIZE; i+= BLOCKSIZE/(2*LSPAN),k++) {		// accumulate
+			for (int a=0; a<NACC; a++) {	// NACC independent accumulators
 				#pragma unroll
-				for (int f=0; f<NFIELDS; f++)	qlri[f] += my_reo[f][k] * yl[itl + i];
+				for (int f=0; f<NFIELDS; f++)	qlri[f+a*NFIELDS]   = my_reo[f][a]   * yl[itl + a*(BLOCKSIZE/(2*LSPAN))];
+			}
+			#pragma unroll
+			for (int k=NACC; k<2*LSPAN; k+=NACC) {		// accumulate in NACC separate accumulators
+				#pragma unroll
+				for (int a=0; a<NACC; a++) {	// NACC independent accumulators
+					#pragma unroll
+					for (int f=0; f<NFIELDS; f++)	qlri[f+a*NFIELDS]   += my_reo[f][k+a]   * yl[itl + (k+a)*(BLOCKSIZE/(2*LSPAN))];
+				}
+			}
+			// reduce the NACC independent accumulators
+			#pragma unroll
+			for (int a=0; a<NACC; a+=2) {
+				#pragma unroll
+				for (int f=0; f<NFIELDS; f++)	qlri[f+a*NFIELDS] += qlri[f+(a+1)*NFIELDS];
+			}
+			for (int a=2; a<NACC; a+=2) {
+				#pragma unroll
+				for (int f=0; f<NFIELDS; f++)	qlri[f] += qlri[f+a*NFIELDS];
 			}
 
 			if (BLOCKSIZE/(2*LSPAN) <= WARPSZE) {		// reduce_add within same l is in same warp too:
