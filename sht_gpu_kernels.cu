@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2010-2018 Centre National de la Recherche Scientifique.
+ * Copyright (c) 2010-2020 Centre National de la Recherche Scientifique.
  * written by Nathanael Schaeffer (CNRS, ISTerre, Grenoble, France).
  * 
  * nathanael.schaeffer@univ-grenoble-alpes.fr
@@ -638,16 +638,18 @@ sh2ishioka_kernel(const double* __restrict__ xlm, const double* __restrict__ ql,
 	__shared__ double ql_[BLOCKSIZE];		// LSPAN = BLOCKSIZE/2 - 2
 	__shared__ double xl_[BLOCKSIZE/4*3-3];
 
-	if (l<=llim_m) {
-		ql_[j] = ql[q_ofs +j];
+	double q = 0.0;
+	if (l <= llim_m) {
 		if (j<BLOCKSIZE/4*3-3) xl_[j] = xlm[x_ofs +j];
-	} else ql_[j] = 0.0;
+		q = ql[q_ofs +j];
+	}
+	if (l-2 <= llim_m) ql_[j] = q;
 
 	__syncthreads();
 
-	if ((l<=llim_m) && (j+4 < BLOCKSIZE)) {
+	if ((l<=llim_m) && (j < BLOCKSIZE-4)) {
 		int ix = 3*(j>>2);		// 3*l/2.
-		double q = ql_[j] * xl_[ix + (j&2)];	// ix for l-m even, ix+2 for l-m odd
+		q *= xl_[ix + (j&2)];	// ix for l-m even, ix+2 for l-m odd
 		if ((j&2)==0) {		// for l-m even
 			q += ql_[j+4] * xl_[ix+1];			// contribution of l+2
 		}
@@ -670,23 +672,24 @@ ishioka2sh_kernel(const double* __restrict__ xlm, const double* __restrict__ ql_
 	const int llim_m = llim-m;
 
 	__shared__ double ql_[BLOCKSIZE];		// LSPAN = BLOCKSIZE/2 - 2
-	__shared__ double xl_[BLOCKSIZE/4*3-3];
+	__shared__ double xl_[BLOCKSIZE/4*3+3];
 
-	if ((l-2<=llim_m) && (l>=2)) {
-		ql_[j] = ql_ish[q_ofs +j-4];
-	} else ql_[j] = 0.0;
-	
-	if ((j<BLOCKSIZE/4*3-3) && (l<=llim_m)) xl_[j] = xlm[x_ofs +j];
+	double q = 0.0;
+	if (l-2 <= llim_m) {
+		if ((j<BLOCKSIZE/4*3+3) && (x_ofs+j-3 >= 0)) xl_[j] = xlm[x_ofs +j-3];
+		if (l-2 >= 0) q = ql_ish[q_ofs +j-4];		// ql_[4] = ql_ish[0]
+		ql_[j] = q;
+	}
 
 	__syncthreads();
 
 	if ((l<=llim_m) && (j<BLOCKSIZE-4)) {
-		int ix = 3*(j>>2);		// 3*l/2.
+		int ix = 3*(j>>2)+3;		// 3*l/2.
 		double q = ql_[j+4] * xl_[ix + (j&2)];	// ix for l-m even, ix+2 for l-m odd
 		if ((j&2)==0) {		// for l-m even
-			q += ql_[j] * xl_[ix+1];			// contribution of l-2
+			q += ql_[j] * xl_[ix-2];			// contribution of l-2
 		}
-		ql_ish[q_ofs +j] = q;	// coalesced store
+		ql[q_ofs +j] = q;	// coalesced store
 	}
 }
 
@@ -801,6 +804,17 @@ void sh2ishioka_gpu(shtns_cfg shtns, cplx* d_Qlm, cplx* d_Qlm_ish, int llim, int
 		(shtns->d_xlm, (double*) d_Qlm, (double*) d_Qlm_ish, llim, shtns->lmax, shtns->mres);
 	cudaError_t err = cudaGetLastError();
 	if (err != cudaSuccess) { printf("sh2ishioka_gpu error : %s!\n", cudaGetErrorString(err));	return; }
+}
+
+void ishioka2sh_gpu(shtns_cfg shtns, cplx* d_Qlm_ish, cplx* d_Qlm, int llim, int mmax)
+{
+	const int blksze = MAX_THREADS_PER_BLOCK;
+	dim3 blocks((2*(shtns->lmax+3)+blksze-5)/(blksze-4), mmax+1);
+	dim3 threads(blksze, 1);
+	ishioka2sh_kernel<blksze> <<< blocks, threads,0, shtns->comp_stream >>>
+		(shtns->d_xlm, (double*) d_Qlm_ish, (double*) d_Qlm, llim, shtns->lmax, shtns->mres);
+	cudaError_t err = cudaGetLastError();
+	if (err != cudaSuccess) { printf("ishioka2sh_gpu error : %s!\n", cudaGetErrorString(err));	return; }
 }
 
 void sphtor2scal_gpu(shtns_cfg shtns, cplx* d_Slm, cplx* d_Tlm, cplx* d_Vlm, cplx* d_Wlm, int llim, int mmax)
@@ -922,7 +936,7 @@ static __global__ void leg_m_lowllim_kernel(
 			al += BLOCKSIZE;
 			l += BLOCKSIZE/2;
 			if (BLOCKSIZE > WARPSZE) { __syncthreads(); } else { _syncwarp; }
-			if (l+j/2 <= llim) {
+			if (l+(j>>1) <= llim) {
 				ak[j] = al[j];
 				#pragma unroll
 				for (int f=0; f<NFIELDS; f++)	qk[f][j] = ql[2*l+j + f*ql_dist];
@@ -976,11 +990,11 @@ static __global__ void leg_m_lowllim_kernel(
 			al += BLOCKSIZE;
 			l  += BLOCKSIZE;
 			if (BLOCKSIZE > WARPSZE) { __syncthreads(); } else { _syncwarp; }
-			if (l+j/2 <= llim) {
+			if (l+(j>>1) <= llim) {
 				#pragma unroll
 				for (int f=0; f<NFIELDS; f++)	qk[f][j] = ql[2*l+j + f*ql_dist];
 			}
-			if (l+j/2+BLOCKSIZE/2 <= llim) {
+			if (l+(j>>1)+BLOCKSIZE/2 <= llim) {
 				#pragma unroll
 				for (int f=0; f<NFIELDS; f++)	qk[f][BLOCKSIZE+j] = ql[2*l+BLOCKSIZE+j + f*ql_dist];
 			}

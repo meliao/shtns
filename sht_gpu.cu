@@ -447,7 +447,7 @@ template<int S, int NFIELDS>
 void cuda_SH_to_spat(shtns_cfg shtns, cplx* d_Qlm, double *d_Vr, const long int llim, const int mmax, int spat_dist = 0)
 {
 	if (spat_dist == 0) spat_dist = shtns->spat_stride;
-	
+
 	cplx* d_Qlm_ish = d_Qlm;
 	#ifdef SHTNS_ISHIOKA
 	d_Qlm_ish = (cplx*) shtns->gpu_mem;
@@ -472,7 +472,14 @@ void cuda_spat_to_SH(shtns_cfg shtns, double *d_Vr, cplx* d_Qlm, const long int 
 	if (spat_dist == 0) spat_dist = shtns->spat_stride;
 	if (llim < mmax*mres)	mmax = llim / mres;		// truncate mmax too !
 	for (int f=0; f<NFIELDS; f++) spat_to_fourier_gpu(shtns, d_Vr + f*spat_dist, mmax);
+	
+	#ifndef SHTNS_ISHIOKA
 	ilegendre<S, NFIELDS>(shtns, d_Vr, (double*) d_Qlm, llim, spat_dist);
+	#else
+	cplx* d_Qlm_ish = (cplx*) shtns->gpu_mem;
+	ilegendre<S, NFIELDS>(shtns, d_Vr, (double*) d_Qlm_ish, llim, spat_dist);
+	ishioka2sh_gpu(shtns, d_Qlm_ish, d_Qlm, llim, mmax);
+	#endif
 }
 
 
@@ -1286,7 +1293,7 @@ void spat_to_SH_gpu(shtns_cfg shtns, double *Vr, cplx *Qlm, const long int llim)
 	err = cudaMemcpy(Qlm, d_qlm, 2*nlm*sizeof(double), cudaMemcpyDeviceToHost);
 	if (err != cudaSuccess) { printf("spat_to_SH_gpu failed copy back\n");	return; }
 	
-	#ifdef SHTNS_ISHIOKA
+	#ifdef SHTNS_ISHIOKAxx
 	const int mmax = shtns->mmax;
 	const int mres = shtns->mres;
 	for (int im=0; im<=mmax; im++) {
