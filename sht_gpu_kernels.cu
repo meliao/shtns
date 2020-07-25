@@ -803,7 +803,8 @@ scal2sphtor_kernel(const double* __restrict__ mx, const double* __restrict__ vlm
 
 void sh2ishioka_gpu(shtns_cfg shtns, cplx* d_Qlm, cplx* d_Qlm_ish, int llim, int mmax)
 {
-	const int blksze = MAX_THREADS_PER_BLOCK;
+	int blksze = (((llim+2)*2+WARPSZE-1)/WARPSZE) * WARPSZE;
+	if (blksze > MAX_THREADS_PER_BLOCK) blksze = MAX_THREADS_PER_BLOCK;
 	dim3 blocks((2*(shtns->lmax+3)+blksze-5)/(blksze-4), mmax+1);
 	dim3 threads(blksze, 1);
 	sh2ishioka_kernel <<< blocks, threads,(blksze/4*7-3)*sizeof(double), shtns->comp_stream >>>
@@ -814,7 +815,8 @@ void sh2ishioka_gpu(shtns_cfg shtns, cplx* d_Qlm, cplx* d_Qlm_ish, int llim, int
 
 void ishioka2sh_gpu(shtns_cfg shtns, cplx* d_Qlm_ish, cplx* d_Qlm, int llim, int mmax)
 {
-	const int blksze = MAX_THREADS_PER_BLOCK;
+	int blksze = (((llim+2)*2+WARPSZE-1)/WARPSZE) * WARPSZE;
+	if (blksze > MAX_THREADS_PER_BLOCK) blksze = MAX_THREADS_PER_BLOCK;
 	dim3 blocks((2*(shtns->lmax+3)+blksze-5)/(blksze-4), mmax+1);
 	dim3 threads(blksze, 1);
 	ishioka2sh_kernel <<< blocks, threads, (blksze/4*7+3)*sizeof(double), shtns->comp_stream >>>
