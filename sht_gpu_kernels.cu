@@ -622,7 +622,7 @@ static void ileg_m0(shtns_cfg shtns, const double* q, double *ql, const int llim
 }
 
 
-template<int BLOCKSIZE> __global__ void
+__global__ void
 sh2ishioka_kernel(const double* __restrict__ xlm, const double* __restrict__ ql, double* ql_ish, const int llim, const int lmax, const int mres)
 {
 	const int j = threadIdx.x;
@@ -661,7 +661,7 @@ sh2ishioka_kernel(const double* __restrict__ xlm, const double* __restrict__ ql,
 }
 
 /// performs: Ql[2*l] = qq[2*l]*xlm[3*l] + qq[2*l-2]*xlm[3*l+1];   Ql[2*l+1] = qq[2*l+1] * xlm[3*l+2];
-template<int BLOCKSIZE> __global__ void
+__global__ void
 ishioka2sh_kernel(const double* __restrict__ xlm, const double* __restrict__ ql_ish, double* ql, const int llim, const int lmax, const int mres)
 {
 	const int j = threadIdx.x;
@@ -674,19 +674,22 @@ ishioka2sh_kernel(const double* __restrict__ xlm, const double* __restrict__ ql_
 	const int x_ofs = 3*im*(2*(lmax+4) -m+mres)/4 + 3*(l0 >> 1);
 	const int llim_m = llim-m;
 
-	__shared__ double ql_[BLOCKSIZE];		// LSPAN = BLOCKSIZE/2 - 2
-	__shared__ double xl_[BLOCKSIZE/4*3+3];
+	extern __shared__ double ql_[];			// size blockDim.x
+	double* const xl_ = ql_ + blockDim.x;	// size blockDim.x/4*3 - 3
+
+	//__shared__ double ql_[BLOCKSIZE];		// LSPAN = BLOCKSIZE/2 - 2
+	//__shared__ double xl_[BLOCKSIZE/4*3+3];
 
 	double q = 0.0;
 	if (l-2 <= llim_m) {
-		if ((j<BLOCKSIZE/4*3+3) && (x_ofs+j-3 >= 0)) xl_[j] = xlm[x_ofs +j-3];
+		if ((j<(blockDim.x>>2)*3+3) && (x_ofs+j-3 >= 0)) xl_[j] = xlm[x_ofs +j-3];
 		if (l-2 >= 0) q = ql_ish[q_ofs +j-4];		// ql_[4] = ql_ish[0]
 		ql_[j] = q;
 	}
 
 	__syncthreads();
 
-	if ((l<=llim_m) && (j<BLOCKSIZE-4)) {
+	if ((l<=llim_m) && (j<blockDim.x-4)) {
 		int ix = 3*(j>>2)+3;		// 3*l/2.
 		double q = ql_[j+4] * xl_[ix + (j&2)];	// ix for l-m even, ix+2 for l-m odd
 		if ((j&2)==0) {		// for l-m even
@@ -803,7 +806,7 @@ void sh2ishioka_gpu(shtns_cfg shtns, cplx* d_Qlm, cplx* d_Qlm_ish, int llim, int
 	const int blksze = MAX_THREADS_PER_BLOCK;
 	dim3 blocks((2*(shtns->lmax+3)+blksze-5)/(blksze-4), mmax+1);
 	dim3 threads(blksze, 1);
-	sh2ishioka_kernel<blksze> <<< blocks, threads,(blksze/4*7-3)*sizeof(double), shtns->comp_stream >>>
+	sh2ishioka_kernel <<< blocks, threads,(blksze/4*7-3)*sizeof(double), shtns->comp_stream >>>
 		(shtns->d_xlm, (double*) d_Qlm, (double*) d_Qlm_ish, llim, shtns->lmax, shtns->mres);
 	cudaError_t err = cudaGetLastError();
 	if (err != cudaSuccess) { printf("sh2ishioka_gpu error : %s!\n", cudaGetErrorString(err));	return; }
@@ -814,7 +817,7 @@ void ishioka2sh_gpu(shtns_cfg shtns, cplx* d_Qlm_ish, cplx* d_Qlm, int llim, int
 	const int blksze = MAX_THREADS_PER_BLOCK;
 	dim3 blocks((2*(shtns->lmax+3)+blksze-5)/(blksze-4), mmax+1);
 	dim3 threads(blksze, 1);
-	ishioka2sh_kernel<blksze> <<< blocks, threads,0, shtns->comp_stream >>>
+	ishioka2sh_kernel <<< blocks, threads, (blksze/4*7+3)*sizeof(double), shtns->comp_stream >>>
 		(shtns->d_xlm, (double*) d_Qlm_ish, (double*) d_Qlm, llim, shtns->lmax, shtns->mres);
 	cudaError_t err = cudaGetLastError();
 	if (err != cudaSuccess) { printf("ishioka2sh_gpu error : %s!\n", cudaGetErrorString(err));	return; }
