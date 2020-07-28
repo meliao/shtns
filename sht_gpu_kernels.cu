@@ -646,7 +646,7 @@ sh2ishioka_kernel(const double* __restrict__ xlm, const double* __restrict__ ql,
 		if (j<(blockDim.x>>2)*3-3) xl_[j] = xlm[x_ofs +j];
 		q = ql[q_ofs +j];
 	}
-	if (l-2 <= llim_m) ql_[j] = q;
+	if ((l-2 <= llim_m) && ((j&2) == 0)) ql_[(j>>1)+(j&1)] = q;
 
 	__syncthreads();
 
@@ -654,7 +654,7 @@ sh2ishioka_kernel(const double* __restrict__ xlm, const double* __restrict__ ql,
 		int ix = 3*(j>>2);		// 3*l/2.
 		q *= xl_[ix + (j&2)];	// ix for l-m even, ix+2 for l-m odd
 		if ((j&2)==0) {		// for l-m even
-			q += ql_[j+4] * xl_[ix+1];			// contribution of l+2
+			q += ql_[(j>>1)+(j&1)+2] * xl_[ix+1];			// contribution of l+2
 		}
 		ql_ish[q_ofs +j] = q;	// coalesced store
 	}
