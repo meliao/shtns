@@ -1461,9 +1461,9 @@ leg_m_highllim_kernel(const double *al, const double *ct, const double *ql, doub
 			} while(l >>= 1);
 			#ifndef SHTNS_ISHIOKA
 			y0 *= al[0];
-			y1 = 0.0;
 	//	    y1 = al[1]*y0*cost;
 			#endif
+			y1 = 0.0;
 			const int ofs = j & 0xFFE0;
 
 			l=m;	int ka = WARPSZE;
@@ -1514,10 +1514,10 @@ leg_m_highllim_kernel(const double *al, const double *ct, const double *ql, doub
 				#else
 				double tmp = ak[ka+1+ofs]*ct2 + ak[ka+ofs];
 				if (ny==0) {
-					rer += y0 * qk[2*(ka+ofs)];	// real
-					rei += y0 * qk[2*(ka+ofs)+1];	// imag
-					ror += y0 * qk[2*(ka+ofs)+2];	// real
-					roi += y0 * qk[2*(ka+ofs)+3];	// imag
+					rer += y0 * ql[2*l];	//qk[2*(ka+ofs)];	// real
+					rei += y0 * ql[2*l+1];	//qk[2*(ka+ofs)+1];	// imag
+					ror += y0 * ql[2*l+2];	//qk[2*(ka+ofs)+2];	// real
+					roi += y0 * ql[2*l+3];	//qk[2*(ka+ofs)+3];	// imag
 				}
 				#endif
 				else if (fabs(y1) > SHT_ACCURACY*SHT_SCALE_FACTOR + 1.0)
