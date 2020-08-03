@@ -865,7 +865,7 @@ static __global__ void leg_m_lowllim_kernel(
 	#ifndef SHTNS_ISHIOKA
 	__shared__ double qk[NFIELDS][BLOCKSIZE];	// size blockDim.x * NFIELDS
 	#else
-	__shared__ double qk[NFIELDS][BLOCKSIZE*2];	// size blockDim.x * NFIELDS
+	__shared__ double qk[NFIELDS][BLOCKSIZE*2];	// size 2*blockDim.x * NFIELDS
 	#endif
 
 	double cost[NW];
@@ -1294,7 +1294,7 @@ static __global__ void leg_m_lowllim_kernel(
 			}
 		}
 		double nr[NFIELDS][NW];
-		const double sgn = 1 - 2*(j&1);
+		const double sgn = (j^1) - j;	// 1 - 2*(j&1);		// 1 for even j, -1 for odd j.
 		#pragma unroll
 		for (int i=0; i<NW; i++) {
 			const int iit = it+i*BLOCKSIZE;
@@ -1476,7 +1476,7 @@ leg_m_highllim_kernel(const double *al, const double *ct, const double *ql, doub
 	/// store mangled for complex fft
 	double nr = rer+ror;
 	double sr = rer-ror;
-	const double sgn = 1 - 2*(j&1);
+	const double sgn = (j^1) - j;	// 1 - 2*(j&1); +/-
 	rei = shfl_xor(rei, 1);
 	roi = shfl_xor(roi, 1);
 	double nix = sgn*(rei+roi);
@@ -1700,7 +1700,7 @@ ileg_m_lowllim_kernel(const double* __restrict__ al, const double* __restrict__ 
 		if (j < LSPAN+2) ak[j] = al[j];
 		#endif
 		ql += 2*(l + S*im);	// allow vector transforms where llim = lmax+1
-		const double sgn = 2*(j&1) - 1;	// -/+
+		const double sgn = j - (j^1);	//	2*(j&1) - 1;	// -/+
 		
 		const int ofs = (ll&3)*l_inc + j % (BLOCKSIZE/(2*LSPAN)); 
 		#pragma unroll
@@ -1960,7 +1960,7 @@ ileg_m_highllim_kernel(const double *al, const double *ct, const double *q, doub
 
 		if (j < 2*LSPAN+2) ak[j] = al[j];
 		if (BLOCKSIZE > WARPSZE)	__syncthreads();
-		const double sgn = 2*(j&1) - 1;	// -/+
+		const double sgn = j - (j^1);	// 2*(j&1) - 1;	// -/+
 		y0    = (it < nlat_2) ? q[im*m_inc + it] : 0.0;		// north imag (ani)
 		double qer    = (it < nlat_2) ? q[(nphi-im)*m_inc + it] : 0.0;	// north real (an)
 		y1    = (it < nlat_2) ? q[im*m_inc + nlat_2*2-1-it] : 0.0;	// south imag (asi)
