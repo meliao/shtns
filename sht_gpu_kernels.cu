@@ -1092,6 +1092,9 @@ static __global__ void leg_m_lowllim_kernel(
 			}
 			y0[i] = 1.0;
 		}
+		
+	if ((NW>1) || (BLOCKSIZE > WARPSZE) || (_any(m - llim*y1[0] <= max(50,llim/200))))	// polar optimization (see Reinecke 2013), avoiding warp divergence
+	{
 		l = m - S;
 		do {		// sin(theta)^(m-S)
 			if (l&1) {
@@ -1186,11 +1189,11 @@ static __global__ void leg_m_lowllim_kernel(
 	#else	/* SHTNS_ISHIOKA */
 
 		while (l<=llim - BLOCKSIZE) {	// compute even and odd parts
-			//#pragma unroll
+			#pragma unroll
 			for (int k = 0; k<BLOCKSIZE; k+=4) {
 				double tmp[NW];
 				#pragma unroll
-				for (int i=0; i<NW; i++) tmp[i] = ak[k+1]*ct2[i] + ak[k];
+				for (int i=0; i<NW; i++)	tmp[i] = ak[k+1]*ct2[i] + ak[k];
 				#pragma unroll
 				for (int f=0; f<NFIELDS; f++) {
 					#pragma unroll
@@ -1202,12 +1205,9 @@ static __global__ void leg_m_lowllim_kernel(
 					}
 				}
 				#pragma unroll
-				for (int i=0; i<NW; i++) {
-					//y0[i] = (ak[k+1]*ct2[i] + ak[k]) * y1[i] + y0[i];
-					y0[i] = tmp[i] * y1[i] + y0[i];
-				}
+				for (int i=0; i<NW; i++)	y0[i] = tmp[i] * y1[i] + y0[i];
 				#pragma unroll
-				for (int i=0; i<NW; i++) tmp[i] = ak[k+3]*ct2[i] + ak[k+2];
+				for (int i=0; i<NW; i++)	tmp[i] = ak[k+3]*ct2[i] + ak[k+2];
 				#pragma unroll
 				for (int f=0; f<NFIELDS; f++) {
 					#pragma unroll
@@ -1219,10 +1219,7 @@ static __global__ void leg_m_lowllim_kernel(
 					}
 				}
 				#pragma unroll
-				for (int i=0; i<NW; i++) {
-					//y1[i] = (ak[k+3]*ct2[i] + ak[k+2]) * y0[i] + y1[i];
-					y1[i] = tmp[i] * y0[i] + y1[i];
-				}
+				for (int i=0; i<NW; i++)	y1[i] = tmp[i] * y0[i] + y1[i];
 			}
 			al += BLOCKSIZE;
 			l  += BLOCKSIZE;
@@ -1242,7 +1239,7 @@ static __global__ void leg_m_lowllim_kernel(
 		while (l<llim) {	// compute even and odd parts
 			double tmp[NW];
 			#pragma unroll
-			for (int i=0; i<NW; i++) tmp[i] = ak[k+1]*ct2[i] + ak[k];
+			for (int i=0; i<NW; i++)	tmp[i] = ak[k+1]*ct2[i] + ak[k];
 			#pragma unroll
 			for (int f=0; f<NFIELDS; f++) {
 				#pragma unroll
@@ -1276,10 +1273,12 @@ static __global__ void leg_m_lowllim_kernel(
 		#pragma unroll
 		for (int f=0; f<NFIELDS; f++) {
 			#pragma unroll
-			for (int i=0; i<NW; i++) {
-				ror[f][i] *= cost[i];
-				roi[f][i] *= cost[i];
-			}
+			for (int i=0; i<NW; i++)	roi[f][i] *= cost[i];		// do roi first, used in shuffle below
+		}
+		#pragma unroll
+		for (int f=0; f<NFIELDS; f++) {
+			#pragma unroll
+			for (int i=0; i<NW; i++)	ror[f][i] *= cost[i];
 		}
 
 	#endif
@@ -1288,11 +1287,15 @@ static __global__ void leg_m_lowllim_kernel(
 		#pragma unroll
 		for (int i=0; i<NW; i++) {
 			#pragma unroll
-			for (int f=0; f<NFIELDS; f++) {
-				rei[f][i] = shfl_xor(rei[f][i], 1);
-				roi[f][i] = shfl_xor(roi[f][i], 1);
-			}
+			for (int f=0; f<NFIELDS; f++)	rei[f][i] = shfl_xor(rei[f][i], 1);
 		}
+		#pragma unroll
+		for (int i=0; i<NW; i++) {
+			#pragma unroll
+			for (int f=0; f<NFIELDS; f++)	roi[f][i] = shfl_xor(roi[f][i], 1);
+		}
+	}
+
 		double nr[NFIELDS][NW];
 		const double sgn = (j^1) - j;	// 1 - 2*(j&1);		// 1 for even j, -1 for odd j.
 		#pragma unroll
@@ -1333,8 +1336,8 @@ static void leg_m_lowllim(shtns_cfg shtns, const double *ql, double *q, const in
 	const int BLOCKSIZE = 256;		// good value
 	const int NW = 2;
 	#else
-	const int BLOCKSIZE = 128;		// value to be tuned, but half the value of without Ishioka is likely good.
-	const int NW = 2;
+	const int BLOCKSIZE = 32;		// value to be tuned, but half the value of without Ishioka is likely good.
+	const int NW = 1;
 	d_alm = shtns->d_clm;
 	#endif
 
@@ -1516,7 +1519,7 @@ static void leg_m_highllim(shtns_cfg shtns, const double *ql, double *q, const i
 }
 
 
-template<int BLOCKSIZE, int LSPAN, int S, int NFIELDS, int NACC=1> __global__ void
+template<int BLOCKSIZE, int LSPAN, int S, int NFIELDS> __global__ void
 ileg_m_lowllim_kernel(const double* __restrict__ al, const double* __restrict__ ct, const double* __restrict__ q, double *ql, const int llim, const int nlat_2, const int lmax, const int mres, const int nphi, const int q_dist=0, const int ql_dist=0)
 {
 	const int it = BLOCKSIZE * blockIdx.x + threadIdx.x;
