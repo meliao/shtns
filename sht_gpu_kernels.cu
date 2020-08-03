@@ -1361,135 +1361,209 @@ leg_m_highllim_kernel(const double *al, const double *ct, const double *ql, doub
 	const int m_inc = 2*nlat_2;
 	const int k_inc = 1;
 
-	//__shared__ double ak[THREADS_PER_BLOCK];	// cache
-	//__shared__ double qk[THREADS_PER_BLOCK];
-	// two arrays in shared memory of size blockDim.x :
-	extern __shared__ double ak[];
-	double* const qk = ak + blockDim.x;
+	extern __shared__ double ak[];			// array of size blockDim.x
+	#ifndef SHTNS_ISHIOKA
+	double* const qk = ak + blockDim.x;		// array of size blockDim.x
+	#else
+	double* const qk = ak + blockDim.x + (j/WARPSZE)*2*WARPSZE;		// array of size 2*blockDim.x with SHTNS_ISHIOKA
+	#endif
 
 	const double cost = (it < nlat_2) ? ct[it] : 0.0;
+	#ifdef SHTNS_ISHIOKA
+	const double ct2 = cost*cost;
+	#endif
 
 	if (im==0) {
-	int l = 0;
-	double y0 = al[0];
-	if (S==1) y0 *= rsqrt(1.0 - cost*cost);
-	double re = y0 * ql[0];
-	double y1 = y0 * al[1] * cost;
-	double ro = y1 * ql[2];
-	al+=2;    l+=2;
-	while(l<llim) {
-		y0  = al[1]*(cost*y1) + al[0]*y0;
-		re += y0 * ql[2*l];
-		y1  = al[3]*(cost*y0) + al[2]*y1;
-		ro += y1 * ql[2*l+2];
-		al+=4;	l+=2;
-	}
-	if (l==llim) {
-		y0  = al[1]*cost*y1 + al[0]*y0;
-		re += y0 * ql[2*l];
-	}
-	if (it < nlat_2) {
-		// store mangled for complex fft
-		q[it*k_inc] = re+ro;
-		q[(nlat_2*2-1-it)*k_inc] = re-ro;
-	}
-	} else { 	// m>0
-	int m = im*mres;
-	int l = (im*(2*(lmax+1)-(m+mres)))>>1;
-	al += 2*(l+m);
-	ql += 2*(l + S*im);
-	double rer,ror, rei,roi, y0, y1;
-	ror = 0.0;	roi = 0.0;
-	rer = 0.0;	rei = 0.0;
-	y1 = sqrt(1.0 - cost*cost);	// sin(theta)
-	if (_any(m - llim*y1 <= max(50,llim/200))) {		// polar optimization (see Reinecke 2013), avoiding warp divergence
-		y0 = 1.0;	// y0
-		l = m - S;
-		int ny = 0;
-		int nsint = 0;
-		do {		// sin(theta)^(m-S)		(use rescaling to avoid underflow)
-		if (l&1) {
-			y0 *= y1;
-			ny += nsint;
-			if (_any(y0 < (SHT_ACCURACY+1.0/SHT_SCALE_FACTOR))) {		// avoid warp divergence
-			ny--;
-			y0 *= SHT_SCALE_FACTOR;
-			}
-		}
-		y1 *= y1;
-		nsint += nsint;
-		if (_any(y1 < 1.0/SHT_SCALE_FACTOR)) {		// avoid warp divergence
-			nsint--;
-			y1 *= SHT_SCALE_FACTOR;
-		}
-		} while(l >>= 1);
-		y0 *= al[0];
-		y1 = 0.0;
-//	    y1 = al[1]*y0*cost;
-
-		l=m;	int ka = WARPSZE;
-		const int ofs = j & 0xFFE0;
-
-		while ( _all(ny<0) && (l<llim) ) {
-			if (ka+4 >= WARPSZE) {
-				ak[j] = al[(j&31)];
-				ka=0;
-			}
-			y1 = ak[ka+1+ofs]*cost*y0 + ak[ka+ofs]*y1;
-			y0 = ak[ka+3+ofs]*cost*y1 + ak[ka+2+ofs]*y0;
-			l+=2;	al+=4;	ka+=4;
-			if (fabs(y1) > SHT_ACCURACY*SHT_SCALE_FACTOR + 1.0)
-			{	// rescale when value is significant
-				++ny;
-				y0 *= 1.0/SHT_SCALE_FACTOR;
-				y1 *= 1.0/SHT_SCALE_FACTOR;
-			}
-		}
-
-		ka = WARPSZE;
-		while (l<llim) {
-			if (ka+4 >= WARPSZE) {		// cache coefficients
-				ak[j] = al[(j&31)];
-				qk[j] = ql[2*l+(j&31)];
-				ka = 0;
-			}
-			y1 = ak[ka+1+ofs]*cost*y0 + ak[ka+ofs]*y1;
-			if (ny==0) {
-				rer += y0 * qk[ka+ofs];	// real
-				rei += y0 * qk[ka+1+ofs];	// imag
-				ror += y1 * qk[ka+2+ofs];	// real
-				roi += y1 * qk[ka+3+ofs];	// imag
-			}
-			else if (fabs(y0) > SHT_ACCURACY*SHT_SCALE_FACTOR + 1.0)
-			{	// rescale when value is significant
-				++ny;
-				y0 *= 1.0/SHT_SCALE_FACTOR;
-				y1 *= 1.0/SHT_SCALE_FACTOR;
-			}
+		int l = 0;
+		#ifndef SHTNS_ISHIOKA
+		double y0 = al[0];
+		if (S==1) y0 *= rsqrt(1.0 - cost*cost);
+		double y1 = y0 * al[1] * cost;
+		double re = y0 * ql[0];
+		double ro = y1 * ql[2];
+		#else
+		double y0 = (S==1) ? rsqrt(1.0 - ct2) : 1.0;
+		double y1 = (al[1]*ct2 + al[0])*y0;
+		double re = y0 * ql[0];
+		double ro = y0 * ql[2];
+		#endif
+		l+=2;	al+=2;
+		#ifndef SHTNS_ISHIOKA
+		while(l<llim) {
+			y0  = al[1]*(cost*y1) + al[0]*y0;
+			re += y0 * ql[2*l];
+			y1  = al[3]*(cost*y0) + al[2]*y1;
+			ro += y1 * ql[2*l+2];
 			l+=2;	al+=4;
-			y0 = ak[ka+3+ofs]*cost*y1 + ak[ka+2+ofs]*y0;
-			ka+=4;
 		}
-		if ((l==llim) && (ny==0)) {
-			rer += y0 * ql[2*l];
-			rei += y0 * ql[2*l+1];
+		if (l==llim) {
+			y0  = al[1]*cost*y1 + al[0]*y0;
+			re += y0 * ql[2*l];
 		}
-	}
+		#else
+		while(l<llim) {
+			double tmp = al[1]*ct2 + al[0];
+			re += y1 * ql[2*l];
+			ro += y1 * ql[2*l+2];
+			tmp = tmp*y1 + y0;
+			y0 = y1;
+			l+=2;	al+=2;
+			y1 = tmp;
+		}
+		if (l==llim) {
+			re += y1 * ql[2*l];
+		}
+		#endif
+		if (it < nlat_2) {
+			// store mangled for complex fft
+			#ifndef SHTNS_ISHIOKA
+			q[it*k_inc] = re+ro;
+			q[(nlat_2*2-1-it)*k_inc] = re-ro;
+			#else
+			q[it*k_inc] = re+ro*cost;
+			q[(nlat_2*2-1-it)*k_inc] = re-ro*cost;
+			#endif
+		}
+	} else { 	// m>0
+		double rer,ror, rei,roi, y0, y1;
+		int m = im*mres;
+		int l = (im*(2*(lmax+1)-(m+mres)))>>1;
+		#ifndef SHTNS_ISHIOKA
+		al += 2*(l+m);
+		y1 = sqrt(1.0 - cost*cost);	// sin(theta)
+		#else
+		al += l+m;
+		y1 = sqrt(1.0 - ct2);	// sin(theta)
+		#endif
+		ql += 2*(l + S*im);
+		ror = 0.0;	roi = 0.0;
+		rer = 0.0;	rei = 0.0;
+		if (_any(m - llim*y1 <= max(50,llim/200))) {		// polar optimization (see Reinecke 2013), avoiding warp divergence
+			y0 = 1.0;	// y0
+			l = m - S;
+			int ny = 0;
+			int nsint = 0;
+			do {		// sin(theta)^(m-S)		(use rescaling to avoid underflow)
+				if (l&1) {
+					y0 *= y1;
+					ny += nsint;
+					if (_any(y0 < (SHT_ACCURACY+1.0/SHT_SCALE_FACTOR))) {		// avoid warp divergence
+					ny--;
+					y0 *= SHT_SCALE_FACTOR;
+					}
+				}
+				y1 *= y1;
+				nsint += nsint;
+				if (_any(y1 < 1.0/SHT_SCALE_FACTOR)) {		// avoid warp divergence
+					nsint--;
+					y1 *= SHT_SCALE_FACTOR;
+				}
+			} while(l >>= 1);
+			#ifndef SHTNS_ISHIOKA
+			y0 *= al[0];
+			y1 = 0.0;
+	//	    y1 = al[1]*y0*cost;
+			#endif
+			const int ofs = j & 0xFFE0;
 
-	/// store mangled for complex fft
-	double nr = rer+ror;
-	double sr = rer-ror;
-	const double sgn = (j^1) - j;	// 1 - 2*(j&1); +/-
-	rei = shfl_xor(rei, 1);
-	roi = shfl_xor(roi, 1);
-	double nix = sgn*(rei+roi);
-	double six = sgn*(rei-roi);
-	if (it < nlat_2) {
-		q[im*m_inc + it*k_inc]                     = nr - nix;
-		q[(nphi-im)*m_inc + it*k_inc]              = nr + nix;
-		q[im*m_inc + (nlat_2*2-1-it)*k_inc]        = sr + six;
-		q[(nphi-im)*m_inc + (nlat_2*2-1-it)*k_inc] = sr - six;
-	}
+			l=m;	int ka = WARPSZE;
+			while ( _all(ny<0) && (l<llim) ) {
+				if (ka+4 >= WARPSZE) {
+					ak[j] = al[(j&31)];
+					ka=0;
+					_syncwarp;
+				}
+				#ifndef SHTNS_ISHIOKA
+				y1 = ak[ka+1+ofs]*cost*y0 + ak[ka+ofs]*y1;
+				y0 = ak[ka+3+ofs]*cost*y1 + ak[ka+2+ofs]*y0;
+				l+=2;	al+=4;	ka+=4;
+				#else
+				double t0 = ak[ka+1+ofs]*ct2 + ak[ka+ofs];
+				double t1 = ak[ka+3+ofs]*ct2 + ak[ka+2+ofs];
+				l+=4;	al+=4;	ka+=4;
+				y1 = t0*y0 + y1;
+				y0 = t1*y1 + y0;
+				#endif
+				if (fabs(y1) > SHT_ACCURACY*SHT_SCALE_FACTOR + 1.0)
+				{	// rescale when value is significant
+					++ny;
+					y0 *= 1.0/SHT_SCALE_FACTOR;
+					y1 *= 1.0/SHT_SCALE_FACTOR;
+				}
+			}
+
+			ka = WARPSZE;
+			while (l<llim) {
+				if (ka+4 >= WARPSZE) {		// cache coefficients
+					ak[j] = al[(j&31)];
+					qk[j] = ql[2*l+(j&31)];
+					#ifdef SHTNS_ISHIOKA
+					qk[j + WARPSZE] = ql[2*l+(j&31) + WARPSZE];
+					#endif
+					ka = 0;
+					_syncwarp;
+				}
+				#ifndef SHTNS_ISHIOKA
+				y1 = ak[ka+1+ofs]*cost*y0 + ak[ka+ofs]*y1;
+				if (ny==0) {
+					rer += y0 * qk[ka+ofs];	// real
+					rei += y0 * qk[ka+1+ofs];	// imag
+					ror += y1 * qk[ka+2+ofs];	// real
+					roi += y1 * qk[ka+3+ofs];	// imag
+				}
+				#else
+				double tmp = ak[ka+1+ofs]*ct2 + ak[ka+ofs];
+				if (ny==0) {
+					rer += y0 * qk[2*(ka+ofs)];	// real
+					rei += y0 * qk[2*(ka+ofs)+1];	// imag
+					ror += y0 * qk[2*(ka+ofs)+2];	// real
+					roi += y0 * qk[2*(ka+ofs)+3];	// imag
+				}
+				#endif
+				else if (fabs(y1) > SHT_ACCURACY*SHT_SCALE_FACTOR + 1.0)
+				{	// rescale when value is significant
+					++ny;
+					y0 *= 1.0/SHT_SCALE_FACTOR;
+					y1 *= 1.0/SHT_SCALE_FACTOR;
+				}
+				#ifndef SHTNS_ISHIOKA
+				l+=2;	al+=4;
+				y0 = ak[ka+3+ofs]*cost*y1 + ak[ka+2+ofs]*y0;
+				ka+=4;
+				#else
+				tmp = tmp*y0 + y1;
+				l+=2;	al+=2;
+				y0 = y1;
+				y1 = tmp;
+				ka+=2;
+				#endif
+			}
+			if ((l==llim) && (ny==0)) {
+				rer += y0 * ql[2*l];
+				rei += y0 * ql[2*l+1];
+			}
+		}
+
+		/// store mangled for complex fft
+		#ifndef SHTNS_ISHIOKA
+		double nr = rer+ror;
+		double sr = rer-ror;
+		#else
+		roi *= cost;
+		double nr = rer+ror*cost;
+		double sr = rer-ror*cost;
+		#endif
+		const double sgn = (j^1) - j;	// 1 - 2*(j&1); +/-
+		rei = shfl_xor(rei, 1);
+		roi = shfl_xor(roi, 1);
+		double nix = sgn*(rei+roi);
+		double six = sgn*(rei-roi);
+		if (it < nlat_2) {
+			q[im*m_inc + it*k_inc]                     = nr - nix;
+			q[(nphi-im)*m_inc + it*k_inc]              = nr + nix;
+			q[im*m_inc + (nlat_2*2-1-it)*k_inc]        = sr + six;
+			q[(nphi-im)*m_inc + (nlat_2*2-1-it)*k_inc] = sr - six;
+		}
 	}
 }
 
@@ -1504,8 +1578,14 @@ static void leg_m_highllim(shtns_cfg shtns, const double *ql, double *q, const i
 	double *d_ct = shtns->d_ct;
 	cudaStream_t stream = shtns->comp_stream;
 
+	#ifndef SHTNS_ISHIOKA
 	const int BLOCKSIZE = 256;		// good value
 	const int NW = 1;
+	#else
+	const int BLOCKSIZE = 32;		// value to be tuned, but half the value of without Ishioka is likely good.
+	const int NW = 1;
+	d_alm = shtns->d_clm;
+	#endif
 
 	// Launch the Legendre CUDA Kernel
 	const int threadsPerBlock = BLOCKSIZE;	// can be from 32 to 1024, we should try to measure the fastest !
@@ -1513,8 +1593,13 @@ static void leg_m_highllim(shtns_cfg shtns, const double *ql, double *q, const i
 	if (spat_dist == 0) spat_dist = shtns->spat_stride;
 	dim3 blocks(blocksPerGrid, mmax+1);
 	dim3 threads(threadsPerBlock, 1);
+	#ifndef SHTNS_ISHIOKA
+	const int shmem = 2*threadsPerBlock*sizeof(double);
+	#else
+	const int shmem = 3*threadsPerBlock*sizeof(double);
+	#endif
 	for (int f=0; f<NFIELDS; f++) {
-		leg_m_highllim_kernel<S> <<<blocks, threads, 2*threadsPerBlock*sizeof(double), stream>>>(d_alm, d_ct, ql + f*shtns->nlm_stride, q + f*spat_dist, llim, nlat_2, lmax,mres, nphi);
+		leg_m_highllim_kernel<S> <<<blocks, threads, shmem, stream>>>(d_alm, d_ct, ql + f*shtns->nlm_stride, q + f*spat_dist, llim, nlat_2, lmax,mres, nphi);
 	}
 }
 
@@ -2094,11 +2179,11 @@ static void legendre(shtns_cfg shtns, const double *ql, double *q, const int lli
 	if (mmax==0) {
 		leg_m0<S,NFIELDS>(shtns, ql, q, llim);
 	} else {
-		if (llim <= SHT_L_RESCALE_FLY) {
-			leg_m_lowllim<S,NFIELDS>(shtns, ql, q, llim, mmax, spat_dist);
-		} else {
+		//if (llim <= SHT_L_RESCALE_FLY) {
+		//	leg_m_lowllim<S,NFIELDS>(shtns, ql, q, llim, mmax, spat_dist);
+		//} else {
 			leg_m_highllim<S,NFIELDS>(shtns, ql, q, llim, mmax);
-		}
+		//}
 	}
 }
 
