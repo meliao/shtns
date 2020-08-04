@@ -1071,7 +1071,7 @@ static __global__ void leg_m_lowllim_kernel(
 			}
 			y0[i] = 1.0;
 		}
-		
+
 	if ((NW>1) || (BLOCKSIZE > WARPSZE) || (_any(m - llim*y1[0] <= max(50,llim/200))))	// polar optimization (see Reinecke 2013), avoiding warp divergence
 	{
 		l = m - S;
@@ -1790,42 +1790,48 @@ ileg_m_lowllim_kernel(const double* __restrict__ al, const double* __restrict__ 
 	} else {	// im > 0
 		// re-assign each thread an l (transpose)
 		const int ll = j / (BLOCKSIZE/(2*LSPAN));		// 2*l + (real ? 0 : 1)
-
 		double my_reo[NFIELDS][2*LSPAN];			// in registers
 		int m = im*mres;
 		int l = (im*(2*(lmax+1)-(m+mres)))>>1;
+
 		#ifndef SHTNS_ISHIOKA
+		y1 = sqrt(1.0 - cost*cost);	// sin(theta)
 		al += 2*(l+m);
 		if (j < 2*LSPAN+2) ak[j] = al[j];
 		#else
+		y0 = cost * cost;			// cos(theta)^2
 		al += l+m;
+		y1 = sqrt(1.0 - y0);	// sin(theta)
 		if (j < LSPAN+2) ak[j] = al[j];
 		#endif
+
+		// polar optimization (see Reinecke 2013)
+		if ( (BLOCKSIZE == WARPSZE) && _all(m - llim*y1 > max(50,llim/200)) ) return;
+
 		ql += 2*(l + S*im);	// allow vector transforms where llim = lmax+1
 		const double sgn = j - (j^1);	//	2*(j&1) - 1;	// -/+
-		
 		const int ofs = (ll&3)*l_inc + j % (BLOCKSIZE/(2*LSPAN)); 
 		#pragma unroll
 		for (int f=0; f<NFIELDS; f++) {
-			y0         = (it < nlat_2) ? q[im*m_inc + it + f*q_dist] : 0.0;		// north imag (ani)
+			double t0  = (it < nlat_2) ? q[im*m_inc + it + f*q_dist] : 0.0;		// north imag (ani)
 			double qer = (it < nlat_2) ? q[(nphi-im)*m_inc + it + f*q_dist] : 0.0;	// north real (an)
-			y1         = (it < nlat_2) ? q[im*m_inc + nlat_2*2-1-it + f*q_dist] : 0.0;	// south imag (asi)
+			double t1  = (it < nlat_2) ? q[im*m_inc + nlat_2*2-1-it + f*q_dist] : 0.0;	// south imag (asi)
 			double qor = (it < nlat_2) ? q[(nphi-im)*m_inc + nlat_2*2-1-it + f*q_dist] : 0.0;	// south real (as)
-			double qei = y0-qer;		qer += y0;		// ani = -qei[lane+1],   bni = qei[lane-1]
-			double qoi = y1-qor;		qor += y1;		// bsi = -qoi[lane-1],   asi = qoi[lane+1];
-			y0 = shfl_xor(qei, 1);	// exchange between adjacent lanes.
-			y1 = shfl_xor(qoi, 1);
+			double qei = t0-qer;		qer += t0;		// ani = -qei[lane+1],   bni = qei[lane-1]
+			double qoi = t1-qor;		qor += t1;		// bsi = -qoi[lane-1],   asi = qoi[lane+1];
+			t0 = shfl_xor(qei, 1);	// exchange between adjacent lanes.
+			t1 = shfl_xor(qoi, 1);
 
 			if ((f>0) && (BLOCKSIZE > WARPSZE))		__syncthreads();	// _syncwarp not needed after shfl_xor
 
 			#ifndef SHTNS_ISHIOKA
-			yl[3*l_inc +j] = sgn*(y0 + y1);	// roi, exchange even and odd lanes
+			yl[3*l_inc +j] = sgn*(t0 + t1);	// roi, exchange even and odd lanes
 			yl[2*l_inc +j] = qer - qor;			// ror
 			#else
-			yl[3*l_inc +j] = (sgn*cost)*(y0 + y1);	// roi, exchange even and odd lanes
+			yl[3*l_inc +j] = (sgn*cost)*(t0 + t1);	// roi, exchange even and odd lanes
 			yl[2*l_inc +j] = (qer - qor)*cost;		// ror
 			#endif
-			yl[l_inc +j]   = sgn*(y0 - y1);	// rei, exchange evend and odd lanes
+			yl[l_inc +j]   = sgn*(t0 - t1);	// rei, exchange evend and odd lanes
 			yl[j] 		   = qer + qor;		// rer
 
 			if (BLOCKSIZE > WARPSZE) {	__syncthreads(); } else { _syncwarp; }
@@ -1836,11 +1842,8 @@ ileg_m_lowllim_kernel(const double* __restrict__ al, const double* __restrict__ 
 			}
 		}
 
-		#ifndef SHTNS_ISHIOKA
-		y1 = sqrt(1.0 - cost*cost);	// sin(theta)
-		#else
-		cost *= cost;			// cos(theta)^2
-		y1 = sqrt(1.0 - cost);	// sin(theta)
+		#ifdef SHTNS_ISHIOKA
+		cost = y0;		// cos(theta)^2
 		#endif
 		y0 = 0.5;				// y0
 		l = m - S;
