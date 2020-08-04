@@ -1334,7 +1334,7 @@ static __global__ void leg_m_lowllim_kernel(
 	}
 }
 
-template<int S, int NFIELDS>
+template<int S, int NFIELDS, bool HI_LLIM=false>
 static void leg_m_lowllim(shtns_cfg shtns, const double *ql, double *q, const int llim, const int mmax, int spat_dist=0)
 {
 	const int lmax = shtns->lmax;
@@ -1360,7 +1360,7 @@ static void leg_m_lowllim(shtns_cfg shtns, const double *ql, double *q, const in
 	if (spat_dist == 0) spat_dist = shtns->spat_stride;
 	dim3 blocks(blocksPerGrid, mmax+1);
 	dim3 threads(threadsPerBlock, 1);
-	leg_m_lowllim_kernel<BLOCKSIZE, S, NFIELDS, NW, false> <<<blocks, threads, 0, stream>>>(d_alm, d_ct, (double*) ql, (double*) q, llim, nlat_2, lmax,mres, nphi, shtns->nlm_stride, spat_dist);
+	leg_m_lowllim_kernel<BLOCKSIZE, S, NFIELDS, NW, HI_LLIM> <<<blocks, threads, 0, stream>>>(d_alm, d_ct, (double*) ql, (double*) q, llim, nlat_2, lmax,mres, nphi, shtns->nlm_stride, spat_dist);
 }
 
 /// requirements : blockSize must be 1 in the y-direction and THREADS_PER_BLOCK in the x-direction.
@@ -1983,7 +1983,7 @@ ileg_m_lowllim_kernel(const double* __restrict__ al, const double* __restrict__ 
 	}
 }
 
-template<int S, int NFIELDS> 
+template<int S, int NFIELDS, bool HI_LLIM=false>
 static void ileg_m_lowllim(shtns_cfg shtns, const double* q, double *ql, const int llim, int q_dist=0, int ql_dist=0)
 {
 	const int lmax = shtns->lmax;
@@ -2013,7 +2013,7 @@ static void ileg_m_lowllim(shtns_cfg shtns, const double* q, double *ql, const i
 	if (llim < mmax*mres) mmax = llim / mres;	// truncate mmax too !
 	dim3 blocks(blocksPerGrid, mmax+1);
 	dim3 threads(threadsPerBlock, 1);
-	ileg_m_lowllim_kernel<BLOCKSIZE, LSPAN_, S, NFIELDS, false><<<blocks, threads, 0, stream>>>(d_alm, d_ct, (double*) q, (double*) ql, llim, nlat_2, lmax,mres, nphi, q_dist, ql_dist);
+	ileg_m_lowllim_kernel<BLOCKSIZE, LSPAN_, S, NFIELDS, HI_LLIM><<<blocks, threads, 0, stream>>>(d_alm, d_ct, (double*) q, (double*) ql, llim, nlat_2, lmax,mres, nphi, q_dist, ql_dist);
 }
 
 
@@ -2226,7 +2226,7 @@ static void legendre(shtns_cfg shtns, const double *ql, double *q, const int lli
 		if (llim <= SHT_L_RESCALE_FLY) {
 			leg_m_lowllim<S,NFIELDS>(shtns, ql, q, llim, mmax, spat_dist);
 		} else {
-			leg_m_highllim<S,NFIELDS>(shtns, ql, q, llim, mmax);
+			leg_m_lowllim<S,NFIELDS,true>(shtns, ql, q, llim, mmax, spat_dist);
 		}
 	}
 }
@@ -2247,6 +2247,6 @@ static void ilegendre(shtns_cfg shtns, const double *q, double* ql, const int ll
 	if (llim <= SHT_L_RESCALE_FLY) {
 		ileg_m_lowllim<S, NFIELDS>(shtns, q, ql, llim, spat_dist, shtns->nlm_stride);
 	} else {
-		ileg_m_highllim<S, NFIELDS>(shtns, q, ql, llim, spat_dist, shtns->nlm_stride);
+		ileg_m_lowllim<S, NFIELDS, true>(shtns, q, ql, llim, spat_dist, shtns->nlm_stride);
 	}
 }
