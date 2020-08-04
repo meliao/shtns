@@ -47,6 +47,7 @@ __device__ double atomicAdd(double* address, double val)
 	#define shfl(...) __shfl(__VA_ARGS__)
 	#define _any(p) __any(p)
 	#define _all(p) __all(p)
+	#define _ballot(p) __ballot(p)
 	#define _syncwarp 0
 #else
 	#define shfl_xor(...) __shfl_xor_sync(0xFFFFFFFF, __VA_ARGS__)
@@ -54,6 +55,7 @@ __device__ double atomicAdd(double* address, double val)
 	#define shfl(...) __shfl_sync(0xFFFFFFFF, __VA_ARGS__)
 	#define _any(p) __any_sync(0xFFFFFFFF, p)
 	#define _all(p) __all_sync(0xFFFFFFFF, p)
+	#define _ballot(p) __ballot_sync(0xFFFFFFFF, p)
 	#define _syncwarp __syncwarp()
 #endif
 
@@ -1615,7 +1617,7 @@ static void leg_m_highllim(shtns_cfg shtns, const double *ql, double *q, const i
 }
 
 
-template<int BLOCKSIZE, int LSPAN, int S, int NFIELDS> __global__ void
+template<int BLOCKSIZE, int LSPAN, int S, int NFIELDS, bool HI_LLIM> __global__ void
 ileg_m_lowllim_kernel(const double* __restrict__ al, const double* __restrict__ ct, const double* __restrict__ q, double *ql, const int llim, const int nlat_2, const int lmax, const int mres, const int nphi, const int q_dist=0, const int ql_dist=0)
 {
 	const int it = BLOCKSIZE * blockIdx.x + threadIdx.x;
@@ -1625,6 +1627,7 @@ ileg_m_lowllim_kernel(const double* __restrict__ al, const double* __restrict__ 
 
 	static_assert((BLOCKSIZE % (2*LSPAN)) == 0, "BLOCKSIZE must be a multiple of 2*LSPAN");
 	static_assert( ((WARPSZE >= BLOCKSIZE/LSPAN) ? (WARPSZE % (BLOCKSIZE/LSPAN)) : ((BLOCKSIZE/LSPAN) % WARPSZE)) == 0, "WARPSZE and BLOCKSIZE/LSPAN must be multiples");
+	static_assert( (!HI_LLIM) || (BLOCKSIZE == WARPSZE), "for high llim, BLOCKSIZE must be 32");
 	#ifndef SHTNS_ISHIOKA
 	static_assert(LSPAN >= 4, "LSPAN must be >= 4");
 	static_assert((LSPAN % 2) == 0, "LSPAN must be a multiple of 2");
@@ -1835,20 +1838,37 @@ ileg_m_lowllim_kernel(const double* __restrict__ al, const double* __restrict__ 
 
 		#ifndef SHTNS_ISHIOKA
 		y1 = sqrt(1.0 - cost*cost);	// sin(theta)
-		y0 = 0.5 * ak[0];	// y0
 		#else
 		cost *= cost;			// cos(theta)^2
 		y1 = sqrt(1.0 - cost);	// sin(theta)
-		y0 = 0.5;				// y0
 		#endif
-
+		y0 = 0.5;				// y0
 		l = m - S;
+		int ny = 0;
+		int nsint = 0;
 		do {		// sin(theta)^(m-S)
-			if (l&1) y0 *= y1;
+			if (l&1) {
+				y0 *= y1;
+				if (HI_LLIM) {
+					ny += nsint;
+					if (y0 < (SHT_ACCURACY+1.0/SHT_SCALE_FACTOR)) {
+						ny--;
+						y0 *= SHT_SCALE_FACTOR;
+					}
+				}
+			}
 			y1 *= y1;
+			if (HI_LLIM) {
+				nsint += nsint;
+				if (y1 < 1.0/SHT_SCALE_FACTOR) {
+					nsint--;
+					y1 *= SHT_SCALE_FACTOR;
+				}
+			}
 		} while(l >>= 1);
 		if (it < nlat_2)     y0 *= ct[it + nlat_2];		// include quadrature weights.
 		#ifndef SHTNS_ISHIOKA
+		y0 *= ak[0];
 		y1 = ak[1]*y0*cost;
 		#else
 		y1 = (ak[1]*cost + ak[0]) * y0;
@@ -1865,78 +1885,91 @@ ileg_m_lowllim_kernel(const double* __restrict__ al, const double* __restrict__ 
 				y1 = ak[2*k+5]*cost*y0 + ak[2*k+4]*y1;
 				al += 4;
 			}
+			const unsigned ny_msk = 0;
 		#else	/* SHTNS_ISHIOKA */
 			for (int k=0; k<LSPAN/2; k+=2) {		// compute a block of the matrix, write it in shared mem.
 				double c0 = ak[2*k+3]*cost + ak[2*k+2];
 				double c1 = ak[2*k+5]*cost + ak[2*k+4];
-				yl[k*l_inc +j]     = y0;		// l and l+1
-				yl[(k+1)*l_inc +j] = y1;		// l+2 and l+3
+				if ((HI_LLIM) && (ny < 0)) {
+					if (fabs(y0) > SHT_ACCURACY*SHT_SCALE_FACTOR + 1.0)
+					{	// rescale when value is significant
+						++ny;
+						y0 *= 1.0/SHT_SCALE_FACTOR;
+						y1 *= 1.0/SHT_SCALE_FACTOR;
+					}					
+				}
 				al += 4;
+				yl[k*l_inc +j]     = (HI_LLIM && (ny<0)) ? 0.0 : y0;		// l and l+1
+				yl[(k+1)*l_inc +j] = (HI_LLIM && (ny<0)) ? 0.0 : y1;		// l+2 and l+3
 				y0 = c0 * y1 + y0;
 				y1 = c1 * y0 + y1;
 			}
+			const unsigned ny_msk = (HI_LLIM) ? _ballot(ny) : 0;		// all threads now know which y are non-zero.
 		#endif
 
-			// transposed work (at given l):
 			if (BLOCKSIZE > WARPSZE) {	__syncthreads(); } else { _syncwarp; }
-			const int NACC = (NFIELDS == 1) ? 2 : 1;		// number of independent accumulators per NFIELD.
-			double qlri[NFIELDS*NACC];		// accumulators
-			#ifndef SHTNS_ISHIOKA
-			const int itl = (ll>>1)*l_inc + j % (BLOCKSIZE/(2*LSPAN));
-			#else
-			const int itl = (ll>>2)*l_inc + j % (BLOCKSIZE/(2*LSPAN));
-			#endif
 
-			#pragma unroll
-			for (int a=0; a<NACC; a++) {	// NACC independent accumulators
-				#pragma unroll
-				for (int f=0; f<NFIELDS; f++)	qlri[f+a*NFIELDS]   = my_reo[f][a]   * yl[itl + a*(BLOCKSIZE/(2*LSPAN))];
-			}
-			#pragma unroll
-			for (int k=NACC; k<2*LSPAN; k+=NACC) {		// accumulate in NACC separate accumulators
+			if ((!HI_LLIM) || (ny_msk != 0xFFFF)) {
+				// transposed work (at given l):
+				const int NACC = (NFIELDS == 1) ? 2 : 1;		// number of independent accumulators per NFIELD.
+				double qlri[NFIELDS*NACC];		// accumulators
+				#ifndef SHTNS_ISHIOKA
+				const int itl = (ll>>1)*l_inc + j % (BLOCKSIZE/(2*LSPAN));
+				#else
+				const int itl = (ll>>2)*l_inc + j % (BLOCKSIZE/(2*LSPAN));
+				#endif
+
 				#pragma unroll
 				for (int a=0; a<NACC; a++) {	// NACC independent accumulators
 					#pragma unroll
-					for (int f=0; f<NFIELDS; f++)	qlri[f+a*NFIELDS]   += my_reo[f][k+a]   * yl[itl + (k+a)*(BLOCKSIZE/(2*LSPAN))];
+					for (int f=0; f<NFIELDS; f++)	qlri[f+a*NFIELDS]   = my_reo[f][a]   * yl[itl + a*(BLOCKSIZE/(2*LSPAN))];
 				}
-			}
-			// reduce the NACC independent accumulators
-			#pragma unroll
-			for (int a=0; a<NACC; a+=2) {
 				#pragma unroll
-				for (int f=0; f<NFIELDS; f++)	qlri[f+a*NFIELDS] += qlri[f+(a+1)*NFIELDS];
-			}
-			for (int a=2; a<NACC; a+=2) {
-				#pragma unroll
-				for (int f=0; f<NFIELDS; f++)	qlri[f] += qlri[f+a*NFIELDS];
-			}
-
-			if (BLOCKSIZE/(2*LSPAN) <= WARPSZE) {		// reduce_add within same l is in same warp too:
-				//if (WARPSZE % (BLOCKSIZE/(2*LSPAN))) printf("ERROR\n");
-				#pragma unroll
-				for (int ofs = BLOCKSIZE/(LSPAN*4); ofs > 0; ofs>>=1) {
+				for (int k=NACC; k<2*LSPAN; k+=NACC) {		// accumulate in NACC separate accumulators
 					#pragma unroll
-					for (int f=0; f<NFIELDS; f++)	qlri[f] += shfl_down(qlri[f], ofs, BLOCKSIZE/(LSPAN*2));
-				}
-				if ( ((j % (BLOCKSIZE/(2*LSPAN))) == 0) && ((l+(ll>>1))<=llim) ) {	// write result
-					if (nlat_2 <= BLOCKSIZE) {		// do we need atomic add or not ?
+					for (int a=0; a<NACC; a++) {	// NACC independent accumulators
 						#pragma unroll
-						for (int f=0; f<NFIELDS; f++)	ql[2*l+ll + f*ql_dist]   = qlri[f];
-					} else {
+						for (int f=0; f<NFIELDS; f++)	qlri[f+a*NFIELDS]   += my_reo[f][k+a]   * yl[itl + (k+a)*(BLOCKSIZE/(2*LSPAN))];
+					}
+				}
+				// reduce the NACC independent accumulators
+				#pragma unroll
+				for (int a=0; a<NACC; a+=2) {
+					#pragma unroll
+					for (int f=0; f<NFIELDS; f++)	qlri[f+a*NFIELDS] += qlri[f+(a+1)*NFIELDS];
+				}
+				for (int a=2; a<NACC; a+=2) {
+					#pragma unroll
+					for (int f=0; f<NFIELDS; f++)	qlri[f] += qlri[f+a*NFIELDS];
+				}
+
+				if (BLOCKSIZE/(2*LSPAN) <= WARPSZE) {		// reduce_add within same l is in same warp too:
+					//if (WARPSZE % (BLOCKSIZE/(2*LSPAN))) printf("ERROR\n");
+					#pragma unroll
+					for (int ofs = BLOCKSIZE/(LSPAN*4); ofs > 0; ofs>>=1) {
+						#pragma unroll
+						for (int f=0; f<NFIELDS; f++)	qlri[f] += shfl_down(qlri[f], ofs, BLOCKSIZE/(LSPAN*2));
+					}
+					if ( ((j % (BLOCKSIZE/(2*LSPAN))) == 0) && ((l+(ll>>1))<=llim) ) {	// write result
+						if (nlat_2 <= BLOCKSIZE) {		// do we need atomic add or not ?
+							#pragma unroll
+							for (int f=0; f<NFIELDS; f++)	ql[2*l+ll + f*ql_dist]   = qlri[f];
+						} else {
+							#pragma unroll
+							for (int f=0; f<NFIELDS; f++)	atomicAdd(ql+2*l+ll + f*ql_dist, qlri[f]);		// VERY slow atomic add on Kepler.
+						}
+					}
+				} else {	// only partial reduction possible, finish with atomicAdd():
+					//if ((BLOCKSIZE/(2*LSPAN)) % WARPSZE) printf("ERROR\n");
+					#pragma unroll
+					for (int ofs = WARPSZE; ofs > 0; ofs>>=1) {
+						#pragma unroll
+						for (int f=0; f<NFIELDS; f++)	qlri[f] += shfl_down(qlri[f], ofs, WARPSZE);
+					}
+					if ( ((j % WARPSZE) == 0) && ((l+(ll>>1))<=llim) ) {	// write result
 						#pragma unroll
 						for (int f=0; f<NFIELDS; f++)	atomicAdd(ql+2*l+ll + f*ql_dist, qlri[f]);		// VERY slow atomic add on Kepler.
 					}
-				}
-			} else {	// only partial reduction possible, finish with atomicAdd():
-				//if ((BLOCKSIZE/(2*LSPAN)) % WARPSZE) printf("ERROR\n");
-				#pragma unroll
-				for (int ofs = WARPSZE; ofs > 0; ofs>>=1) {
-					#pragma unroll
-					for (int f=0; f<NFIELDS; f++)	qlri[f] += shfl_down(qlri[f], ofs, WARPSZE);
-				}
-				if ( ((j % WARPSZE) == 0) && ((l+(ll>>1))<=llim) ) {	// write result
-					#pragma unroll
-					for (int f=0; f<NFIELDS; f++)	atomicAdd(ql+2*l+ll + f*ql_dist, qlri[f]);		// VERY slow atomic add on Kepler.
 				}
 			}
 
@@ -1980,7 +2013,7 @@ static void ileg_m_lowllim(shtns_cfg shtns, const double* q, double *ql, const i
 	if (llim < mmax*mres) mmax = llim / mres;	// truncate mmax too !
 	dim3 blocks(blocksPerGrid, mmax+1);
 	dim3 threads(threadsPerBlock, 1);
-	ileg_m_lowllim_kernel<BLOCKSIZE, LSPAN_, S, NFIELDS><<<blocks, threads, 0, stream>>>(d_alm, d_ct, (double*) q, (double*) ql, llim, nlat_2, lmax,mres, nphi, q_dist, ql_dist);
+	ileg_m_lowllim_kernel<BLOCKSIZE, LSPAN_, S, NFIELDS, false><<<blocks, threads, 0, stream>>>(d_alm, d_ct, (double*) q, (double*) ql, llim, nlat_2, lmax,mres, nphi, q_dist, ql_dist);
 }
 
 
