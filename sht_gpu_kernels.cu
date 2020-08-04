@@ -1081,7 +1081,8 @@ static __global__ void leg_m_kernel(
 				for (int i=0; i<NW; i++) y0[i] *= y1[i];
 				if (HI_LLIM) {
 					ny += nsint;
-					if (_any(y0[0] < (SHT_ACCURACY+1.0/SHT_SCALE_FACTOR))) {		// avoid warp divergence
+					//if (_any(y0[0] < (SHT_ACCURACY+1.0/SHT_SCALE_FACTOR))) {		// avoid warp divergence
+					if (y0[0] < (SHT_ACCURACY+1.0/SHT_SCALE_FACTOR)) {
 						y0[0] *= SHT_SCALE_FACTOR;
 						ny--;
 					}
@@ -1091,7 +1092,8 @@ static __global__ void leg_m_kernel(
 			for (int i=0; i<NW; i++) y1[i] *= y1[i];
 			if (HI_LLIM) {
 				nsint += nsint;
-				if (_any(y1[0] < 1.0/SHT_SCALE_FACTOR)) {		// avoid warp divergence
+				//if (_any(y1[0] < 1.0/SHT_SCALE_FACTOR)) {		// avoid warp divergence
+				if (y1[0] < 1.0/SHT_SCALE_FACTOR) {
 					nsint--;
 					y1[0] *= SHT_SCALE_FACTOR;
 				}
