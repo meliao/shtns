@@ -47,7 +47,6 @@ __device__ double atomicAdd(double* address, double val)
 	#define shfl(...) __shfl(__VA_ARGS__)
 	#define _any(p) __any(p)
 	#define _all(p) __all(p)
-	#define _ballot(p) __ballot(p)
 	#define _syncwarp 0
 #else
 	#define shfl_xor(...) __shfl_xor_sync(0xFFFFFFFF, __VA_ARGS__)
@@ -55,7 +54,6 @@ __device__ double atomicAdd(double* address, double val)
 	#define shfl(...) __shfl_sync(0xFFFFFFFF, __VA_ARGS__)
 	#define _any(p) __any_sync(0xFFFFFFFF, p)
 	#define _all(p) __all_sync(0xFFFFFFFF, p)
-	#define _ballot(p) __ballot_sync(0xFFFFFFFF, p)
 	#define _syncwarp __syncwarp()
 #endif
 
@@ -1888,7 +1886,7 @@ ileg_m_lowllim_kernel(const double* __restrict__ al, const double* __restrict__ 
 				y1 = ak[2*k+5]*cost*y0 + ak[2*k+4]*y1;
 				al += 4;
 			}
-			const bool ny_z = true;
+			const bool y_not_zero = true;
 		#else	/* SHTNS_ISHIOKA */
 			for (int k=0; k<LSPAN/2; k+=2) {		// compute a block of the matrix, write it in shared mem.
 				double c0 = ak[2*k+3]*cost + ak[2*k+2];
@@ -1907,12 +1905,12 @@ ileg_m_lowllim_kernel(const double* __restrict__ al, const double* __restrict__ 
 				y0 = c0 * y1 + y0;
 				y1 = c1 * y0 + y1;
 			}
-			const bool ny_z = (HI_LLIM) ? _any(ny==0) : true;		// all threads now know which y are non-zero.
+			const bool y_not_zero = (HI_LLIM) ? _any(ny==0) : true;		// special case where all y are zero.
 		#endif
 
 			if (BLOCKSIZE > WARPSZE) {	__syncthreads(); } else { _syncwarp; }
 
-			if ((!HI_LLIM) || (ny_z)) {
+			if ((!HI_LLIM) || (y_not_zero)) {		// when all y are zero, we can skip this.
 				// transposed work (at given l):
 				const int NACC = (NFIELDS == 1) ? 2 : 1;		// number of independent accumulators per NFIELD.
 				double qlri[NFIELDS*NACC];		// accumulators
