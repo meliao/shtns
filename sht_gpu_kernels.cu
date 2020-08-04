@@ -1116,23 +1116,32 @@ static __global__ void leg_m_kernel(
 		while (l<=llim - BLOCKSIZE/2) {	// compute even and odd parts
 			#pragma unroll
 			for (int k = 0; k<BLOCKSIZE; k+=4) {
-				#pragma unroll
-				for (int f=0; f<NFIELDS; f++) {
+				if ((!HI_LLIM) || (ny==0)) {
 					#pragma unroll
-					for (int i=0; i<NW; i++) {
-						rer[f][i] += y0[i] * qk[f][k];		// real
-						rei[f][i] += y0[i] * qk[f][k+1];	// imag
+					for (int f=0; f<NFIELDS; f++) {
+						#pragma unroll
+						for (int i=0; i<NW; i++) {
+							rer[f][i] += y0[i] * qk[f][k];		// real
+							rei[f][i] += y0[i] * qk[f][k+1];	// imag
+						}
 					}
 				}
 				#pragma unroll
 				for (int i=0; i<NW; i++) 	y0[i] = ak[k+1]*(cost[i]*y1[i]) + ak[k]*y0[i];
-				#pragma unroll
-				for (int f=0; f<NFIELDS; f++) {
+				if ((!HI_LLIM) || (ny==0)) {
 					#pragma unroll
-					for (int i=0; i<NW; i++) {
-						ror[f][i] += y1[i] * qk[f][k+2];	// real
-						roi[f][i] += y1[i] * qk[f][k+3];	// imag
+					for (int f=0; f<NFIELDS; f++) {
+						#pragma unroll
+						for (int i=0; i<NW; i++) {
+							ror[f][i] += y1[i] * qk[f][k+2];	// real
+							roi[f][i] += y1[i] * qk[f][k+3];	// imag
+						}
 					}
+				} else if (fabs(y0[0]) > SHT_ACCURACY*SHT_SCALE_FACTOR + 1.0)
+				{	// rescale when value is significant
+					++ny;
+					y0[0] *= 1.0/SHT_SCALE_FACTOR;
+					y1[0] *= 1.0/SHT_SCALE_FACTOR;
 				}
 				#pragma unroll
 				for (int i=0; i<NW; i++) 	y1[i] = ak[k+3]*(cost[i]*y0[i]) + ak[k+2]*y1[i];
@@ -1149,35 +1158,46 @@ static __global__ void leg_m_kernel(
 		}
 		int k=0;
 		while (l<llim) {	// compute even and odd parts
-			#pragma unroll
-			for (int f=0; f<NFIELDS; f++) {
+			if ((!HI_LLIM) || (ny==0)) {
 				#pragma unroll
-				for (int i=0; i<NW; i++) {
-					rer[f][i] += y0[i] * qk[f][k];		// real
-					rei[f][i] += y0[i] * qk[f][k+1];	// imag
+				for (int f=0; f<NFIELDS; f++) {
+					#pragma unroll
+					for (int i=0; i<NW; i++) {
+						rer[f][i] += y0[i] * qk[f][k];		// real
+						rei[f][i] += y0[i] * qk[f][k+1];	// imag
+					}
 				}
 			}
 			#pragma unroll
 			for (int i=0; i<NW; i++) 	y0[i] = ak[k+1]*(cost[i]*y1[i]) + ak[k]*y0[i];
-			#pragma unroll
-			for (int f=0; f<NFIELDS; f++) {
+			if ((!HI_LLIM) || (ny==0)) {
 				#pragma unroll
-				for (int i=0; i<NW; i++) {
-					ror[f][i] += y1[i] * qk[f][k+2];	// real
-					roi[f][i] += y1[i] * qk[f][k+3];	// imag
+				for (int f=0; f<NFIELDS; f++) {
+					#pragma unroll
+					for (int i=0; i<NW; i++) {
+						ror[f][i] += y1[i] * qk[f][k+2];	// real
+						roi[f][i] += y1[i] * qk[f][k+3];	// imag
+					}
 				}
+			} else if (fabs(y0[0]) > SHT_ACCURACY*SHT_SCALE_FACTOR + 1.0)
+			{	// rescale when value is significant
+				++ny;
+				y0[0] *= 1.0/SHT_SCALE_FACTOR;
+				y1[0] *= 1.0/SHT_SCALE_FACTOR;
 			}
 			#pragma unroll
 			for (int i=0; i<NW; i++) 	y1[i] = ak[k+3]*(cost[i]*y0[i]) + ak[k+2]*y1[i];
 			l+=2;	k+=4;
 		}
 		if (l==llim) {
-			#pragma unroll
-			for (int f=0; f<NFIELDS; f++) {
+			if ((!HI_LLIM) || (ny==0)) {
 				#pragma unroll
-				for (int i=0; i<NW; i++) {
-					rer[f][i] += y0[i] * qk[f][k];		// real
-					rei[f][i] += y0[i] * qk[f][k+1];	// imag
+				for (int f=0; f<NFIELDS; f++) {
+					#pragma unroll
+					for (int i=0; i<NW; i++) {
+						rer[f][i] += y0[i] * qk[f][k];		// real
+						rei[f][i] += y0[i] * qk[f][k+1];	// imag
+					}
 				}
 			}
 		}
@@ -1858,7 +1878,7 @@ ileg_m_kernel(const double* __restrict__ al, const double* __restrict__ ct, cons
 					for (int f=0; f<NFIELDS; f++)	qll[f] += shfl_down(qll[f], ofs, BLOCKSIZE/LSPAN);
 				}
 				if ( ((j % (BLOCKSIZE/LSPAN)) == 0) && ((l+ll)<=llim) ) {	// write result
-					if (nlat_2 <= BLOCKSIZE) {		// do we need atomic add or not ?
+					if ((!HI_LLIM) && (nlat_2 <= BLOCKSIZE)) {		// do we need atomic add or not ?
 						#pragma unroll
 						for (int f=0; f<NFIELDS; f++)	ql[2*(l+ll) + f*ql_dist] = qll[f];
 					} else {
@@ -1998,14 +2018,22 @@ ileg_m_kernel(const double* __restrict__ al, const double* __restrict__ ct, cons
 			if (BLOCKSIZE > WARPSZE) {	__syncthreads(); } else { _syncwarp; }
 		#ifndef SHTNS_ISHIOKA
 			for (int k=0; k<LSPAN; k+=2) {		// compute a block of the matrix, write it in shared mem.
-				yl[k*l_inc +j]     = y0;
+				yl[k*l_inc +j]     = (HI_LLIM && (ny<0)) ? 0.0 : y0;
 				y0 = ak[2*k+3]*cost*y1 + ak[2*k+2]*y0;
-				yl[(k+1)*l_inc +j] = y1;
+				yl[(k+1)*l_inc +j] = (HI_LLIM && (ny<0)) ? 0.0 : y1;
 				y1 = ak[2*k+5]*cost*y0 + ak[2*k+4]*y1;
 				al += 4;
+				if ((HI_LLIM) && (ny < 0)) {
+					if (fabs(y0) > SHT_ACCURACY*SHT_SCALE_FACTOR + 1.0)
+					{	// rescale when value is significant
+						++ny;
+						y0 *= 1.0/SHT_SCALE_FACTOR;
+						y1 *= 1.0/SHT_SCALE_FACTOR;
+					}
+				}
 			}
-			const bool y_not_zero = true;
 		#else	/* SHTNS_ISHIOKA */
+			#pragma unroll
 			for (int k=0; k<LSPAN/2; k+=2) {		// compute a block of the matrix, write it in shared mem.
 				double c0 = ak[2*k+3]*cost + ak[2*k+2];
 				double c1 = ak[2*k+5]*cost + ak[2*k+4];
@@ -2023,8 +2051,8 @@ ileg_m_kernel(const double* __restrict__ al, const double* __restrict__ ct, cons
 				y0 = c0 * y1 + y0;
 				y1 = c1 * y0 + y1;
 			}
-			const bool y_not_zero = (HI_LLIM) ? _any(ny==0) : true;		// special case where all y are zero.
 		#endif
+			const bool y_not_zero = (HI_LLIM) ? _any(ny==0) : true;		// special case where all y are zero.
 
 			if (BLOCKSIZE > WARPSZE) {	__syncthreads(); } else { _syncwarp; }
 
@@ -2070,7 +2098,7 @@ ileg_m_kernel(const double* __restrict__ al, const double* __restrict__ ct, cons
 						for (int f=0; f<NFIELDS; f++)	qlri[f] += shfl_down(qlri[f], ofs, BLOCKSIZE/(LSPAN*2));
 					}
 					if ( ((j % (BLOCKSIZE/(2*LSPAN))) == 0) && ((l+(ll>>1))<=llim) ) {	// write result
-						if (nlat_2 <= BLOCKSIZE) {		// do we need atomic add or not ?
+						if ((!HI_LLIM) && (nlat_2 <= BLOCKSIZE)) {		// do we need atomic add or not ?
 							#pragma unroll
 							for (int f=0; f<NFIELDS; f++)	ql[2*l+ll + f*ql_dist]   = qlri[f];
 						} else {
