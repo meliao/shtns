@@ -1888,7 +1888,7 @@ ileg_m_lowllim_kernel(const double* __restrict__ al, const double* __restrict__ 
 				y1 = ak[2*k+5]*cost*y0 + ak[2*k+4]*y1;
 				al += 4;
 			}
-			const unsigned ny_msk = 0;
+			const bool ny_z = true;
 		#else	/* SHTNS_ISHIOKA */
 			for (int k=0; k<LSPAN/2; k+=2) {		// compute a block of the matrix, write it in shared mem.
 				double c0 = ak[2*k+3]*cost + ak[2*k+2];
@@ -1899,7 +1899,7 @@ ileg_m_lowllim_kernel(const double* __restrict__ al, const double* __restrict__ 
 						++ny;
 						y0 *= 1.0/SHT_SCALE_FACTOR;
 						y1 *= 1.0/SHT_SCALE_FACTOR;
-					}					
+					}
 				}
 				al += 4;
 				yl[k*l_inc +j]     = (HI_LLIM && (ny<0)) ? 0.0 : y0;		// l and l+1
@@ -1907,12 +1907,12 @@ ileg_m_lowllim_kernel(const double* __restrict__ al, const double* __restrict__ 
 				y0 = c0 * y1 + y0;
 				y1 = c1 * y0 + y1;
 			}
-			const unsigned ny_msk = (HI_LLIM) ? _ballot(ny) : 0;		// all threads now know which y are non-zero.
+			const bool ny_z = (HI_LLIM) ? _any(ny==0) : true;		// all threads now know which y are non-zero.
 		#endif
 
 			if (BLOCKSIZE > WARPSZE) {	__syncthreads(); } else { _syncwarp; }
 
-			if ((!HI_LLIM) || (ny_msk != 0xFFFF)) {
+			if ((!HI_LLIM) || (ny_z)) {
 				// transposed work (at given l):
 				const int NACC = (NFIELDS == 1) ? 2 : 1;		// number of independent accumulators per NFIELD.
 				double qlri[NFIELDS*NACC];		// accumulators
