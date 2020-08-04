@@ -826,7 +826,7 @@ void scal2sphtor_gpu(shtns_cfg shtns, cplx* d_Vlm, cplx* d_Wlm, cplx* d_Slm, cpl
 /// llim MUST BE <= 1800
 /// S can only be 0 (for scalar) or 1 (for spin 1 / vector)
 template<int BLOCKSIZE, int S, int NFIELDS, int NW, bool HI_LLIM>
-static __global__ void leg_m_lowllim_kernel(
+static __global__ void leg_m_kernel(
 	const double* __restrict__ al, const double* __restrict__ ct, const double* __restrict__ ql, double *q, 
 	const int llim, const int nlat_2, const int lmax, const int mres, const int nphi, const int ql_dist=0, const int q_dist=0)
 {
@@ -1333,7 +1333,7 @@ static __global__ void leg_m_lowllim_kernel(
 }
 
 template<int S, int NFIELDS, bool HI_LLIM=false>
-static void leg_m_lowllim(shtns_cfg shtns, const double *ql, double *q, const int llim, const int mmax, int spat_dist=0)
+static void leg_m(shtns_cfg shtns, const double *ql, double *q, const int llim, const int mmax, int spat_dist=0)
 {
 	const int lmax = shtns->lmax;
 	const int mres = shtns->mres;
@@ -1347,7 +1347,7 @@ static void leg_m_lowllim(shtns_cfg shtns, const double *ql, double *q, const in
 	const int BLOCKSIZE = 256;		// good value
 	const int NW = 2;
 	#else
-	const int BLOCKSIZE = 32;		// value to be tuned, but half the value of without Ishioka is likely good.
+	const int BLOCKSIZE = 32;		// 32 allows to use polar optimization; 128 and NW=2 are sometimes better though.
 	const int NW = 1;
 	d_alm = shtns->d_clm;
 	#endif
@@ -1358,265 +1358,11 @@ static void leg_m_lowllim(shtns_cfg shtns, const double *ql, double *q, const in
 	if (spat_dist == 0) spat_dist = shtns->spat_stride;
 	dim3 blocks(blocksPerGrid, mmax+1);
 	dim3 threads(threadsPerBlock, 1);
-	leg_m_lowllim_kernel<BLOCKSIZE, S, NFIELDS, NW, HI_LLIM> <<<blocks, threads, 0, stream>>>(d_alm, d_ct, (double*) ql, (double*) q, llim, nlat_2, lmax,mres, nphi, shtns->nlm_stride, spat_dist);
+	leg_m_kernel<BLOCKSIZE, S, NFIELDS, NW, HI_LLIM> <<<blocks, threads, 0, stream>>>(d_alm, d_ct, (double*) ql, (double*) q, llim, nlat_2, lmax,mres, nphi, shtns->nlm_stride, spat_dist);
 }
-
-/// requirements : blockSize must be 1 in the y-direction and THREADS_PER_BLOCK in the x-direction.
-/// llim can be arbitrarily large (> 1800)
-template<int S> __global__ void
-leg_m_highllim_kernel(const double *al, const double *ct, const double *ql, double *q, const int llim, const int nlat_2, const int lmax, const int mres, const int nphi)
-{
-	const int it = blockDim.x * blockIdx.x + threadIdx.x;
-	const int im = blockIdx.y;
-	const int j = threadIdx.x;
-	const int m_inc = 2*nlat_2;
-	const int k_inc = 1;
-
-	extern __shared__ double ak[];			// array of size blockDim.x
-	#ifndef SHTNS_ISHIOKA
-	double* const qk = ak + blockDim.x;		// array of size blockDim.x
-	#else
-	double* const qk = ak + blockDim.x + (j/WARPSZE)*2*WARPSZE;		// array of size 2*blockDim.x with SHTNS_ISHIOKA
-	#endif
-
-	const double cost = (it < nlat_2) ? ct[it] : 0.0;
-	#ifdef SHTNS_ISHIOKA
-	const double ct2 = cost*cost;
-	#endif
-
-	if (im==0) {
-		int l = 0;
-		#ifndef SHTNS_ISHIOKA
-		double y0 = al[0];
-		if (S==1) y0 *= rsqrt(1.0 - cost*cost);
-		double y1 = y0 * al[1] * cost;
-		double re = y0 * ql[0];
-		double ro = y1 * ql[2];
-		#else
-		double y0 = (S==1) ? rsqrt(1.0 - ct2) : 1.0;
-		double y1 = (al[1]*ct2 + al[0])*y0;
-		double re = y0 * ql[0];
-		double ro = y0 * ql[2];
-		#endif
-		l+=2;	al+=2;
-		#ifndef SHTNS_ISHIOKA
-		while(l<llim) {
-			y0  = al[1]*(cost*y1) + al[0]*y0;
-			re += y0 * ql[2*l];
-			y1  = al[3]*(cost*y0) + al[2]*y1;
-			ro += y1 * ql[2*l+2];
-			l+=2;	al+=4;
-		}
-		if (l==llim) {
-			y0  = al[1]*cost*y1 + al[0]*y0;
-			re += y0 * ql[2*l];
-		}
-		#else
-		while(l<llim) {
-			double tmp = al[1]*ct2 + al[0];
-			re += y1 * ql[2*l];
-			ro += y1 * ql[2*l+2];
-			tmp = tmp*y1 + y0;
-			y0 = y1;
-			l+=2;	al+=2;
-			y1 = tmp;
-		}
-		if (l==llim) {
-			re += y1 * ql[2*l];
-		}
-		#endif
-		if (it < nlat_2) {
-			// store mangled for complex fft
-			#ifndef SHTNS_ISHIOKA
-			q[it*k_inc] = re+ro;
-			q[(nlat_2*2-1-it)*k_inc] = re-ro;
-			#else
-			q[it*k_inc] = re+ro*cost;
-			q[(nlat_2*2-1-it)*k_inc] = re-ro*cost;
-			#endif
-		}
-	} else { 	// m>0
-		double rer,ror, rei,roi, y0, y1;
-		int m = im*mres;
-		int l = (im*(2*(lmax+1)-(m+mres)))>>1;
-		#ifndef SHTNS_ISHIOKA
-		al += 2*(l+m);
-		y1 = sqrt(1.0 - cost*cost);	// sin(theta)
-		#else
-		al += l+m;
-		y1 = sqrt(1.0 - ct2);	// sin(theta)
-		#endif
-		ql += 2*(l + S*im);
-		ror = 0.0;	roi = 0.0;
-		rer = 0.0;	rei = 0.0;
-		if (_any(m - llim*y1 <= max(50,llim/200))) {		// polar optimization (see Reinecke 2013), avoiding warp divergence
-			y0 = 1.0;	// y0
-			l = m - S;
-			int ny = 0;
-			int nsint = 0;
-			do {		// sin(theta)^(m-S)		(use rescaling to avoid underflow)
-				if (l&1) {
-					y0 *= y1;
-					ny += nsint;
-					if (_any(y0 < (SHT_ACCURACY+1.0/SHT_SCALE_FACTOR))) {		// avoid warp divergence
-					ny--;
-					y0 *= SHT_SCALE_FACTOR;
-					}
-				}
-				y1 *= y1;
-				nsint += nsint;
-				if (_any(y1 < 1.0/SHT_SCALE_FACTOR)) {		// avoid warp divergence
-					nsint--;
-					y1 *= SHT_SCALE_FACTOR;
-				}
-			} while(l >>= 1);
-			#ifndef SHTNS_ISHIOKA
-			y0 *= al[0];
-	//	    y1 = al[1]*y0*cost;
-			#endif
-			y1 = 0.0;
-			const int ofs = j & 0xFFE0;
-
-			l=m;	int ka = WARPSZE;
-			while ( _all(ny<0) && (l<llim) ) {
-				if (ka+4 >= WARPSZE) {
-					ak[j] = al[(j&31)];
-					ka=0;
-					_syncwarp;
-				}
-				#ifndef SHTNS_ISHIOKA
-				y1 = ak[ka+1+ofs]*cost*y0 + ak[ka+ofs]*y1;
-				y0 = ak[ka+3+ofs]*cost*y1 + ak[ka+2+ofs]*y0;
-				l+=2;	al+=4;	ka+=4;
-				#else
-				double t0 = ak[ka+1+ofs]*ct2 + ak[ka+ofs];
-				double t1 = ak[ka+3+ofs]*ct2 + ak[ka+2+ofs];
-				l+=4;	al+=4;	ka+=4;
-				y1 = t0*y0 + y1;
-				y0 = t1*y1 + y0;
-				#endif
-				if (fabs(y1) > SHT_ACCURACY*SHT_SCALE_FACTOR + 1.0)
-				{	// rescale when value is significant
-					++ny;
-					y0 *= 1.0/SHT_SCALE_FACTOR;
-					y1 *= 1.0/SHT_SCALE_FACTOR;
-				}
-			}
-
-			ka = WARPSZE;
-			while (l<llim) {
-				if (ka+4 >= WARPSZE) {		// cache coefficients
-					ak[j] = al[(j&31)];
-					qk[j] = ql[2*l+(j&31)];
-					#ifdef SHTNS_ISHIOKA
-					qk[j + WARPSZE] = ql[2*l+(j&31) + WARPSZE];
-					#endif
-					ka = 0;
-					_syncwarp;
-				}
-				#ifndef SHTNS_ISHIOKA
-				y1 = ak[ka+1+ofs]*cost*y0 + ak[ka+ofs]*y1;
-				if (ny==0) {
-					rer += y0 * qk[ka+ofs];	// real
-					rei += y0 * qk[ka+1+ofs];	// imag
-					ror += y1 * qk[ka+2+ofs];	// real
-					roi += y1 * qk[ka+3+ofs];	// imag
-				}
-				#else
-				double tmp = ak[ka+1+ofs]*ct2 + ak[ka+ofs];
-				if (ny==0) {
-					rer += y0 * ql[2*l];	//qk[2*(ka+ofs)];	// real
-					rei += y0 * ql[2*l+1];	//qk[2*(ka+ofs)+1];	// imag
-					ror += y0 * ql[2*l+2];	//qk[2*(ka+ofs)+2];	// real
-					roi += y0 * ql[2*l+3];	//qk[2*(ka+ofs)+3];	// imag
-				}
-				#endif
-				else if (fabs(y1) > SHT_ACCURACY*SHT_SCALE_FACTOR + 1.0)
-				{	// rescale when value is significant
-					++ny;
-					y0 *= 1.0/SHT_SCALE_FACTOR;
-					y1 *= 1.0/SHT_SCALE_FACTOR;
-				}
-				#ifndef SHTNS_ISHIOKA
-				l+=2;	al+=4;
-				y0 = ak[ka+3+ofs]*cost*y1 + ak[ka+2+ofs]*y0;
-				ka+=4;
-				#else
-				tmp = tmp*y0 + y1;
-				l+=2;	al+=2;
-				y0 = y1;
-				y1 = tmp;
-				ka+=2;
-				#endif
-			}
-			if ((l==llim) && (ny==0)) {
-				rer += y0 * ql[2*l];
-				rei += y0 * ql[2*l+1];
-			}
-		}
-
-		/// store mangled for complex fft
-		#ifndef SHTNS_ISHIOKA
-		double nr = rer+ror;
-		double sr = rer-ror;
-		#else
-		roi *= cost;
-		double nr = rer+ror*cost;
-		double sr = rer-ror*cost;
-		#endif
-		const double sgn = (j^1) - j;	// 1 - 2*(j&1); +/-
-		rei = shfl_xor(rei, 1);
-		roi = shfl_xor(roi, 1);
-		double nix = sgn*(rei+roi);
-		double six = sgn*(rei-roi);
-		if (it < nlat_2) {
-			q[im*m_inc + it*k_inc]                     = nr - nix;
-			q[(nphi-im)*m_inc + it*k_inc]              = nr + nix;
-			q[im*m_inc + (nlat_2*2-1-it)*k_inc]        = sr + six;
-			q[(nphi-im)*m_inc + (nlat_2*2-1-it)*k_inc] = sr - six;
-		}
-	}
-}
-
-template<int S, int NFIELDS>
-static void leg_m_highllim(shtns_cfg shtns, const double *ql, double *q, const int llim, const int mmax, int spat_dist = 0)
-{
-	const int lmax = shtns->lmax;
-	const int mres = shtns->mres;
-	const int nlat_2 = shtns->nlat_2;
-	const int nphi = shtns->nphi;
-	double *d_alm = shtns->d_alm;
-	double *d_ct = shtns->d_ct;
-	cudaStream_t stream = shtns->comp_stream;
-
-	#ifndef SHTNS_ISHIOKA
-	const int BLOCKSIZE = 256;		// good value
-	const int NW = 1;
-	#else
-	const int BLOCKSIZE = 32;		// value to be tuned, but half the value of without Ishioka is likely good.
-	const int NW = 1;
-	d_alm = shtns->d_clm;
-	#endif
-
-	// Launch the Legendre CUDA Kernel
-	const int threadsPerBlock = BLOCKSIZE;	// can be from 32 to 1024, we should try to measure the fastest !
-	const int blocksPerGrid = (nlat_2 + BLOCKSIZE*NW - 1) / (BLOCKSIZE*NW);
-	if (spat_dist == 0) spat_dist = shtns->spat_stride;
-	dim3 blocks(blocksPerGrid, mmax+1);
-	dim3 threads(threadsPerBlock, 1);
-	#ifndef SHTNS_ISHIOKA
-	const int shmem = 2*threadsPerBlock*sizeof(double);
-	#else
-	const int shmem = 3*threadsPerBlock*sizeof(double);
-	#endif
-	for (int f=0; f<NFIELDS; f++) {
-		leg_m_highllim_kernel<S> <<<blocks, threads, shmem, stream>>>(d_alm, d_ct, ql + f*shtns->nlm_stride, q + f*spat_dist, llim, nlat_2, lmax,mres, nphi);
-	}
-}
-
 
 template<int BLOCKSIZE, int LSPAN, int S, int NFIELDS, bool HI_LLIM> __global__ void
-ileg_m_lowllim_kernel(const double* __restrict__ al, const double* __restrict__ ct, const double* __restrict__ q, double *ql, const int llim, const int nlat_2, const int lmax, const int mres, const int nphi, const int q_dist=0, const int ql_dist=0)
+ileg_m_kernel(const double* __restrict__ al, const double* __restrict__ ct, const double* __restrict__ q, double *ql, const int llim, const int nlat_2, const int lmax, const int mres, const int nphi, const int q_dist=0, const int ql_dist=0)
 {
 	const int it = BLOCKSIZE * blockIdx.x + threadIdx.x;
 	const int j = threadIdx.x;
@@ -1985,7 +1731,7 @@ ileg_m_lowllim_kernel(const double* __restrict__ al, const double* __restrict__ 
 }
 
 template<int S, int NFIELDS, bool HI_LLIM=false>
-static void ileg_m_lowllim(shtns_cfg shtns, const double* q, double *ql, const int llim, int q_dist=0, int ql_dist=0)
+static void ileg_m(shtns_cfg shtns, const double* q, double *ql, const int llim, int q_dist=0, int ql_dist=0)
 {
 	const int lmax = shtns->lmax;
 	const int mres = shtns->mres;
@@ -1997,12 +1743,12 @@ static void ileg_m_lowllim(shtns_cfg shtns, const double* q, double *ql, const i
 	cudaStream_t stream = shtns->comp_stream;
 
 	#ifndef SHTNS_ISHIOKA
-	const int BLOCKSIZE = 256/NFIELDS;
+	const int BLOCKSIZE = (HI_LLIM) ? 32 : 256/NFIELDS;
 	const int LSPAN_ = 8/NFIELDS;
 	#else
 	const int BLOCKSIZE = 32;
 	const int LSPAN_ = 16/NFIELDS;
-	// on V100, for lmax=1024, BLOCKSIZE=32, LSPAN_=16 is best.  BLOCKSIZE=64, LSPAN=32 is also interesting.
+	// on V100, for lmax=1024, BLOCKSIZE=32, LSPAN_=16 is best.
 	d_alm = shtns->d_clm;
 	#endif
 	const int NW = 1;
@@ -2014,208 +1760,8 @@ static void ileg_m_lowllim(shtns_cfg shtns, const double* q, double *ql, const i
 	if (llim < mmax*mres) mmax = llim / mres;	// truncate mmax too !
 	dim3 blocks(blocksPerGrid, mmax+1);
 	dim3 threads(threadsPerBlock, 1);
-	ileg_m_lowllim_kernel<BLOCKSIZE, LSPAN_, S, NFIELDS, HI_LLIM><<<blocks, threads, 0, stream>>>(d_alm, d_ct, (double*) q, (double*) ql, llim, nlat_2, lmax,mres, nphi, q_dist, ql_dist);
+	ileg_m_kernel<BLOCKSIZE, LSPAN_, S, NFIELDS, HI_LLIM><<<blocks, threads, 0, stream>>>(d_alm, d_ct, (double*) q, (double*) ql, llim, nlat_2, lmax,mres, nphi, q_dist, ql_dist);
 }
-
-
-template<int BLOCKSIZE, int LSPAN, int S> __global__ void
-ileg_m_highllim_kernel(const double *al, const double *ct, const double *q, double *ql, const int llim, const int nlat_2, const int lmax, const int mres, const int nphi)
-{
-	const int it = BLOCKSIZE * blockIdx.x + threadIdx.x;
-	const int j = threadIdx.x;
-	const int im = blockIdx.y;
-	const int m_inc = 2*nlat_2;
-//    const int k_inc = 1;
-
-	__shared__ double ak[2*LSPAN+2];	// cache
-	__shared__ double yl[LSPAN*BLOCKSIZE];
-	__shared__ double reo[4*BLOCKSIZE];
-	const int l_inc = BLOCKSIZE;
-	const double cost = (it < nlat_2) ? ct[it] : 0.0;
-	double y0, y1;
-
-
-	if (im == 0) {
-		if (j < 2*LSPAN+2) ak[j] = al[j];
-		if (BLOCKSIZE > WARPSZE)	__syncthreads();
-		y0 = (it < nlat_2) ? q[it] : 0.0;		// north
-		y1 = (it < nlat_2) ? q[nlat_2*2-1 - it] : 0.0;	// south
-		reo[j] = y0+y1;				// even
-		reo[BLOCKSIZE +j] = y0-y1;		// odd
-
-		int l = 0;
-		y0 = (it < nlat_2) ? ct[it + nlat_2] : 0.0;		// weights are stored just after ct.
-		if (S==1) y0 *= rsqrt(1.0 - cost*cost);
-		y0 *= ak[0];
-		y1 = y0 * ak[1] * cost;
-		yl[j] = y0;
-		yl[l_inc +j] = y1;
-		al+=2;
-		while (l <= llim) {
-			for (int k=0; k<LSPAN; k+=2) {		// compute a block of the matrix, write it in shared mem.
-				yl[k*l_inc +j]     = y0;
-				y0 = ak[2*k+3]*cost*y1 + ak[2*k+2]*y0;
-				yl[(k+1)*l_inc +j] = y1;
-				y1 = ak[2*k+5]*cost*y0 + ak[2*k+4]*y1;
-				al += 4;
-			}
-			if (BLOCKSIZE > WARPSZE)	__syncthreads();
-			double qll = 0.0;	// accumulator
-			// now re-assign each thread an l (transpose)
-			const int ll = j / (BLOCKSIZE/LSPAN);
-			for (int i=0; i<BLOCKSIZE; i+= BLOCKSIZE/LSPAN) {
-				int it = j % (BLOCKSIZE/LSPAN) + i;
-				qll += reo[(ll&1)*BLOCKSIZE +it] * yl[ll*l_inc +it];
-			}
-
-			// reduce_add within same l must be in same warp too:
-			if (BLOCKSIZE/LSPAN > WARPSZE) printf("ERROR\n");
-
-			for (int ofs = BLOCKSIZE/(LSPAN*2); ofs > 0; ofs>>=1) {
-				qll += shfl_down(qll, ofs, BLOCKSIZE/LSPAN);
-			}
-			if ( ((j % (BLOCKSIZE/LSPAN)) == 0) && ((l+ll)<=llim) ) {	// write result
-				if (nlat_2 <= BLOCKSIZE) {		// do we need atomic add or not ?
-					ql[2*(l+ll)] = qll;
-				} else {
-					atomicAdd(ql+2*(l+ll), qll);		// VERY slow atomic add on Kepler.
-				}
-			}
-			if (j<2*LSPAN) ak[j+2] = al[j];
-			if (BLOCKSIZE > WARPSZE)	__syncthreads();
-			l+=LSPAN;
-		}
-	} else {	// im > 0
-		int m = im*mres;
-		int l = (im*(2*(lmax+1)-(m+mres)))>>1;
-		al += 2*(l+m);
-		ql += 2*(l + S*im);	// allow vector transforms where llim = lmax+1
-
-		if (j < 2*LSPAN+2) ak[j] = al[j];
-		if (BLOCKSIZE > WARPSZE)	__syncthreads();
-		const double sgn = j - (j^1);	// 2*(j&1) - 1;	// -/+
-		y0    = (it < nlat_2) ? q[im*m_inc + it] : 0.0;		// north imag (ani)
-		double qer    = (it < nlat_2) ? q[(nphi-im)*m_inc + it] : 0.0;	// north real (an)
-		y1    = (it < nlat_2) ? q[im*m_inc + nlat_2*2-1-it] : 0.0;	// south imag (asi)
-		double qor    = (it < nlat_2) ? q[(nphi-im)*m_inc + nlat_2*2-1-it] : 0.0;	// south real (as)
-		double qei = y0-qer;		qer += y0;		// ani = -qei[lane+1],   bni = qei[lane-1]
-		double qoi = y1-qor;		qor += y1;		// bsi = -qoi[lane-1],   asi = qoi[lane+1];
-		y0 = shfl_xor(qei, 1);	// exchange between adjacent lanes.
-		y1 = shfl_xor(qoi, 1);
-		reo[j] 			    = qer + qor;	// rer
-		reo[BLOCKSIZE +j]   = qer - qor;	// ror
-		reo[2*BLOCKSIZE +j] = sgn*(y0 - y1);	// rei
-		reo[3*BLOCKSIZE +j] = sgn*(y0 + y1);	// roi
-
-		y1 = sqrt(1.0 - cost*cost);	// sin(theta)
-
-		y0 = 0.5;	// y0
-		l = m - S;
-		int ny = 0;
-		int nsint = 0;
-		do {		// sin(theta)^(m-S)		(use rescaling to avoid underflow)
-			if (l&1) {
-				y0 *= y1;
-				ny += nsint;
-				// the use of _any leads to wrong results. On KEPLER it is also slower.
-	//		    if (_any(y0 < (SHT_ACCURACY+1.0/SHT_SCALE_FACTOR))) {		// avoid warp divergence
-				if (y0 < (SHT_ACCURACY+1.0/SHT_SCALE_FACTOR)) {
-					ny--;
-					y0 *= SHT_SCALE_FACTOR;
-				}
-			}
-			y1 *= y1;
-			nsint += nsint;
-	//		if (_any(y1 < 1.0/SHT_SCALE_FACTOR)) {		// avoid warp divergence
-			if (y1 < 1.0/SHT_SCALE_FACTOR) {
-				nsint--;
-				y1 *= SHT_SCALE_FACTOR;
-			}
-		} while(l >>= 1);
-		y0 *= ak[0];
-		if (it < nlat_2)     y0 *= ct[it + nlat_2];		// include quadrature weights.
-		y1 = ak[1]*y0*cost;
-
-
-		l=m;		al+=2;
-		while (l <= llim) {
-			for (int k=0; k<LSPAN; k+=2) {		// compute a block of the matrix, write it in shared mem.
-				yl[k*l_inc +j]     = (ny==0) ? y0 : 0.0;
-				y0 = ak[2*k+3]*cost*y1 + ak[2*k+2]*y0;
-				yl[(k+1)*l_inc +j] = (ny==0) ? y1 : 0.0;
-				y1 = ak[2*k+5]*cost*y0 + ak[2*k+4]*y1;
-				if (ny<0) {
-	//			if (_any(fabs(y0) > SHT_ACCURACY*SHT_SCALE_FACTOR + 1.0))
-					if (fabs(y0) > SHT_ACCURACY*SHT_SCALE_FACTOR + 1.0)
-					{	// rescale when value is significant
-						++ny;
-						y0 *= 1.0/SHT_SCALE_FACTOR;
-						y1 *= 1.0/SHT_SCALE_FACTOR;
-					}
-				}
-				al += 4;
-			}
-
-			if (BLOCKSIZE > WARPSZE)	__syncthreads();
-			double qlri = 0.0;	// accumulator
-			// now re-assign each thread an l (transpose)
-			const int ll = j / (BLOCKSIZE/LSPAN);
-			const int ri = j / (BLOCKSIZE/(2*LSPAN)) % 2;	// real (0) or imag (1)
-			if (ll+l <= llim) {
-				for (int i=0; i<BLOCKSIZE; i+= BLOCKSIZE/(2*LSPAN)) {
-				int it = j % (BLOCKSIZE/(2*LSPAN)) + i;
-				qlri += reo[((ll&1)+2*ri)*BLOCKSIZE +it]   * yl[ll*l_inc +it];
-				}
-			}
-
-			// reduce_add within same l must be in same warp too:
-			if (BLOCKSIZE/(2*LSPAN) > WARPSZE) printf("ERROR\n");
-
-			for (int ofs = BLOCKSIZE/(LSPAN*4); ofs > 0; ofs>>=1) {
-				qlri += shfl_down(qlri, ofs, BLOCKSIZE/(LSPAN*2));
-			}
-			if ( ((j % (BLOCKSIZE/(2*LSPAN))) == 0) && ((l+ll)<=llim) ) {	// write result
-				if (nlat_2 <= BLOCKSIZE) {		// do we need atomic add or not ?
-				ql[2*(l+ll)+ri]   = qlri;
-				} else {
-				atomicAdd(ql+2*(l+ll)+ri, qlri);		// VERY slow atomic add on Kepler.
-				}
-			}
-			if (j<2*LSPAN) ak[j+2] = al[j];
-			if (BLOCKSIZE > WARPSZE)	__syncthreads();
-			l+=LSPAN;
-		}
-	}
-}
-
-template<int S, int NFIELDS>
-static void ileg_m_highllim(shtns_cfg shtns, const double* q, double *ql, const int llim, int q_dist=0, int ql_dist=0)
-{
-	const int lmax = shtns->lmax;
-	const int mres = shtns->mres;
-	const int nlat_2 = shtns->nlat_2;
-	const int nphi = shtns->nphi;
-	int mmax = shtns->mmax;
-	double *d_alm = shtns->d_alm;
-	double *d_ct = shtns->d_ct;
-	cudaStream_t stream = shtns->comp_stream;
-
-	const int BLOCKSIZE = 256/NFIELDS;
-	const int LSPAN_ = 8/NFIELDS;
-	const int NW = 1;
-
-	const int threadsPerBlock = BLOCKSIZE;	// can be from 32 to 1024, we should try to measure the fastest !
-	const int blocksPerGrid = (nlat_2 + BLOCKSIZE*NW - 1) / (BLOCKSIZE*NW);
-	if (q_dist == 0) q_dist = shtns->spat_stride;
-	if (ql_dist == 0) ql_dist = shtns->nlm_stride;
-	if (llim < mmax*mres) mmax = llim / mres;	// truncate mmax too !
-	dim3 blocks(blocksPerGrid, mmax+1);
-	dim3 threads(threadsPerBlock, 1);
-	for (int f=0; f<NFIELDS; f++) {
-		ileg_m_highllim_kernel<BLOCKSIZE, LSPAN_, S><<<blocks, threads, 0, stream>>>(d_alm, d_ct, q + f*q_dist, ql + f*ql_dist, llim, nlat_2, lmax,mres, nphi);
-	}
-}
-
 
 template<int S, int NFIELDS>
 static void legendre(shtns_cfg shtns, const double *ql, double *q, const int llim, const int mmax, int spat_dist = 0)
@@ -2225,9 +1771,9 @@ static void legendre(shtns_cfg shtns, const double *ql, double *q, const int lli
 		leg_m0<S,NFIELDS>(shtns, ql, q, llim);
 	} else {
 		if (llim <= SHT_L_RESCALE_FLY) {
-			leg_m_lowllim<S,NFIELDS>(shtns, ql, q, llim, mmax, spat_dist);
+			leg_m<S,NFIELDS>(shtns, ql, q, llim, mmax, spat_dist);
 		} else {
-			leg_m_lowllim<S,NFIELDS,true>(shtns, ql, q, llim, mmax, spat_dist);
+			leg_m<S,NFIELDS,true>(shtns, ql, q, llim, mmax, spat_dist);
 		}
 	}
 }
@@ -2246,8 +1792,8 @@ static void ilegendre(shtns_cfg shtns, const double *q, double* ql, const int ll
 		ileg_m0<S, NFIELDS>(shtns, q, ql, llim, spat_dist, shtns->nlm_stride);
 	} else
 	if (llim <= SHT_L_RESCALE_FLY) {
-		ileg_m_lowllim<S, NFIELDS>(shtns, q, ql, llim, spat_dist, shtns->nlm_stride);
+		ileg_m<S, NFIELDS>(shtns, q, ql, llim, spat_dist, shtns->nlm_stride);
 	} else {
-		ileg_m_lowllim<S, NFIELDS, true>(shtns, q, ql, llim, spat_dist, shtns->nlm_stride);
+		ileg_m<S, NFIELDS, true>(shtns, q, ql, llim, spat_dist, shtns->nlm_stride);
 	}
 }
