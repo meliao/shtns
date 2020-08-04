@@ -450,10 +450,12 @@ void cuda_SH_to_spat(shtns_cfg shtns, cplx* d_Qlm, double *d_Vr, const long int 
 
 	cplx* d_Qlm_ish = d_Qlm;
 	#ifdef SHTNS_ISHIOKA
-	d_Qlm_ish = (cplx*) shtns->gpu_mem;
-	//cudaMalloc((void **)&d_Qlm_ish, (2*shtns->nlm + MAX_THREADS_PER_BLOCK-1)*sizeof(double));	// allow some overflow.
-	for (int f=0; f<NFIELDS; f++)
-		sh2ishioka_gpu(shtns, d_Qlm + f * shtns->nlm_stride, d_Qlm_ish + f * shtns->nlm_stride, llim, mmax);
+	if (llim < SHT_L_RESCALE_FLY) {
+		d_Qlm_ish = (cplx*) shtns->gpu_mem;
+		//cudaMalloc((void **)&d_Qlm_ish, (2*shtns->nlm + MAX_THREADS_PER_BLOCK-1)*sizeof(double));	// allow some overflow.
+		for (int f=0; f<NFIELDS; f++)
+			sh2ishioka_gpu(shtns, d_Qlm + f * shtns->nlm_stride, d_Qlm_ish + f * shtns->nlm_stride, llim, mmax);
+	}
 	#endif
 	
 	legendre<S,NFIELDS>(shtns, (double*) d_Qlm_ish, d_Vr, llim, mmax, spat_dist);
@@ -477,10 +479,14 @@ void cuda_spat_to_SH(shtns_cfg shtns, double *d_Vr, cplx* d_Qlm, const long int 
 	#ifndef SHTNS_ISHIOKA
 	ilegendre<S, NFIELDS>(shtns, d_Vr, (double*) d_Qlm, llim, spat_dist);
 	#else
-	cplx* d_Qlm_ish = (cplx*) shtns->gpu_mem;
-	ilegendre<S, NFIELDS>(shtns, d_Vr, (double*) d_Qlm_ish, llim, spat_dist);
-	for (int f=0; f<NFIELDS; f++)
-		ishioka2sh_gpu(shtns, d_Qlm_ish + f * shtns->nlm_stride, d_Qlm + f * shtns->nlm_stride, llim, mmax);
+	if (llim < SHT_L_RESCALE_FLY) {
+		cplx* d_Qlm_ish = (cplx*) shtns->gpu_mem;
+		ilegendre<S, NFIELDS>(shtns, d_Vr, (double*) d_Qlm_ish, llim, spat_dist);
+		for (int f=0; f<NFIELDS; f++)
+			ishioka2sh_gpu(shtns, d_Qlm_ish + f * shtns->nlm_stride, d_Qlm + f * shtns->nlm_stride, llim, mmax);
+	} else {
+		ilegendre<S, NFIELDS>(shtns, d_Vr, (double*) d_Qlm, llim, spat_dist);
+	}
 	#endif
 }
 
