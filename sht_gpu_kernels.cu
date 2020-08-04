@@ -351,31 +351,6 @@ leg_m0_kernel(const double *al, const double *ct, const double *ql, double *q, c
 			#endif
 		}
 	}
-/*
-	if (it < nlat_2) {
-		int l = 0;
-	double cost = ct[it];
-		double y0 = al[0];
-		double re = y0 * ql[0];
-		double y1 = y0 * al[1] * cost;
-		double ro = y1 * ql[1];
-		al+=2;    l+=2;
-		while(l<llim) {
-			y0  = al[1]*(cost*y1) + al[0]*y0;
-			re += y0 * ql[l];
-			y1  = al[3]*(cost*y0) + al[2]*y1;
-			ro += y1 * ql[l+1];
-			al+=4;	l+=2;
-		}
-		if (l==llim) {
-			y0  = al[1]*cost*y1 + al[0]*y0;
-			re "Les défenseurs du nucléaire sont souvent dans la défense d'une économie très productiviste, favorable à la croissance, alors que les écologistes pensent d'abord à la maîtrise de nos consommations", résume, pour sa part, le chercheur Simon Persico, spécialiste des politiques environnementales.+= y0 * ql[l];
-		}
-
-		q[it] = re+ro;
-		q[nlat_2*2-1-it] = re-ro;
-	}
-	*/
 }
 
 template<int S, int NFIELDS>
@@ -850,7 +825,7 @@ void scal2sphtor_gpu(shtns_cfg shtns, cplx* d_Vlm, cplx* d_Wlm, cplx* d_Slm, cpl
 /// requirements : blockSize must be 1 in the y-direction and THREADS_PER_BLOCK in the x-direction.
 /// llim MUST BE <= 1800
 /// S can only be 0 (for scalar) or 1 (for spin 1 / vector)
-template<int BLOCKSIZE, int S, int NFIELDS, int NW>
+template<int BLOCKSIZE, int S, int NFIELDS, int NW, bool HI_LLIM>
 static __global__ void leg_m_lowllim_kernel(
 	const double* __restrict__ al, const double* __restrict__ ct, const double* __restrict__ ql, double *q, 
 	const int llim, const int nlat_2, const int lmax, const int mres, const int nphi, const int ql_dist=0, const int q_dist=0)
@@ -867,6 +842,8 @@ static __global__ void leg_m_lowllim_kernel(
 	#else
 	__shared__ double qk[NFIELDS][BLOCKSIZE*2];	// size 2*blockDim.x * NFIELDS
 	#endif
+	
+	static_assert( (!HI_LLIM) || ((NW==1) && (BLOCKSIZE == WARPSZE)), "high llim works with NW=1 and BLOCKSIZE=32" );
 
 	double cost[NW];
 	double y0[NW];
@@ -1096,13 +1073,29 @@ static __global__ void leg_m_lowllim_kernel(
 	if ((NW>1) || (BLOCKSIZE > WARPSZE) || (_any(m - llim*y1[0] <= max(50,llim/200))))	// polar optimization (see Reinecke 2013), avoiding warp divergence
 	{
 		l = m - S;
+		int nsint = 0;
+		int ny = 0;
 		do {		// sin(theta)^(m-S)
 			if (l&1) {
 				#pragma unroll
 				for (int i=0; i<NW; i++) y0[i] *= y1[i];
+				if (HI_LLIM) {
+					ny += nsint;
+					if (_any(y0[0] < (SHT_ACCURACY+1.0/SHT_SCALE_FACTOR))) {		// avoid warp divergence
+						y0[0] *= SHT_SCALE_FACTOR;
+						ny--;
+					}
+				}
 			}
 			#pragma unroll
 			for (int i=0; i<NW; i++) y1[i] *= y1[i];
+			if (HI_LLIM) {
+				nsint += nsint;
+				if (_any(y1[0] < 1.0/SHT_SCALE_FACTOR)) {		// avoid warp divergence
+					nsint--;
+					y1[0] *= SHT_SCALE_FACTOR;
+				}
+			}
 		} while(l >>= 1);
 
 	#ifndef SHTNS_ISHIOKA
@@ -1194,29 +1187,38 @@ static __global__ void leg_m_lowllim_kernel(
 				double tmp[NW];
 				#pragma unroll
 				for (int i=0; i<NW; i++)	tmp[i] = ak[k+1]*ct2[i] + ak[k];
-				#pragma unroll
-				for (int f=0; f<NFIELDS; f++) {
+				if ((!HI_LLIM) || (ny==0)) {
 					#pragma unroll
-					for (int i=0; i<NW; i++) {
-						rer[f][i] += y0[i] * qk[f][2*k];	// real
-						rei[f][i] += y0[i] * qk[f][2*k+1];	// imag
-						ror[f][i] += y0[i] * qk[f][2*k+2];	// real
-						roi[f][i] += y0[i] * qk[f][2*k+3];	// imag
+					for (int f=0; f<NFIELDS; f++) {
+						#pragma unroll
+						for (int i=0; i<NW; i++) {
+							rer[f][i] += y0[i] * qk[f][2*k];	// real
+							rei[f][i] += y0[i] * qk[f][2*k+1];	// imag
+							ror[f][i] += y0[i] * qk[f][2*k+2];	// real
+							roi[f][i] += y0[i] * qk[f][2*k+3];	// imag
+						}
 					}
 				}
 				#pragma unroll
 				for (int i=0; i<NW; i++)	y0[i] = tmp[i] * y1[i] + y0[i];
 				#pragma unroll
 				for (int i=0; i<NW; i++)	tmp[i] = ak[k+3]*ct2[i] + ak[k+2];
-				#pragma unroll
-				for (int f=0; f<NFIELDS; f++) {
+				if ((!HI_LLIM) || (ny==0)) {
 					#pragma unroll
-					for (int i=0; i<NW; i++) {
-						rer[f][i] += y1[i] * qk[f][2*k+4];	// real
-						rei[f][i] += y1[i] * qk[f][2*k+5];	// imag
-						ror[f][i] += y1[i] * qk[f][2*k+6];	// real
-						roi[f][i] += y1[i] * qk[f][2*k+7];	// imag
+					for (int f=0; f<NFIELDS; f++) {
+						#pragma unroll
+						for (int i=0; i<NW; i++) {
+							rer[f][i] += y1[i] * qk[f][2*k+4];	// real
+							rei[f][i] += y1[i] * qk[f][2*k+5];	// imag
+							ror[f][i] += y1[i] * qk[f][2*k+6];	// real
+							roi[f][i] += y1[i] * qk[f][2*k+7];	// imag
+						}
 					}
+				} else if (fabs(y0[0]) > SHT_ACCURACY*SHT_SCALE_FACTOR + 1.0)
+				{	// rescale when value is significant
+					++ny;
+					y0[0] *= 1.0/SHT_SCALE_FACTOR;
+					y1[0] *= 1.0/SHT_SCALE_FACTOR;
 				}
 				#pragma unroll
 				for (int i=0; i<NW; i++)	y1[i] = tmp[i] * y0[i] + y1[i];
@@ -1240,15 +1242,22 @@ static __global__ void leg_m_lowllim_kernel(
 			double tmp[NW];
 			#pragma unroll
 			for (int i=0; i<NW; i++)	tmp[i] = ak[k+1]*ct2[i] + ak[k];
-			#pragma unroll
-			for (int f=0; f<NFIELDS; f++) {
+			if ((!HI_LLIM) || (ny==0)) {
 				#pragma unroll
-				for (int i=0; i<NW; i++) {
-					rer[f][i] += y0[i] * qk[f][2*k];	// real
-					rei[f][i] += y0[i] * qk[f][2*k+1];	// imag
-					ror[f][i] += y0[i] * qk[f][2*k+2];	// real
-					roi[f][i] += y0[i] * qk[f][2*k+3];	// imag
+				for (int f=0; f<NFIELDS; f++) {
+					#pragma unroll
+					for (int i=0; i<NW; i++) {
+						rer[f][i] += y0[i] * qk[f][2*k];	// real
+						rei[f][i] += y0[i] * qk[f][2*k+1];	// imag
+						ror[f][i] += y0[i] * qk[f][2*k+2];	// real
+						roi[f][i] += y0[i] * qk[f][2*k+3];	// imag
+					}
 				}
+			} else if (fabs(y1[0]) > SHT_ACCURACY*SHT_SCALE_FACTOR + 1.0)
+			{	// rescale when value is significant
+				++ny;
+				y0[0] *= 1.0/SHT_SCALE_FACTOR;
+				y1[0] *= 1.0/SHT_SCALE_FACTOR;
 			}
 			#pragma unroll
 			for (int i=0; i<NW; i++) tmp[i] = tmp[i] * y1[i] + y0[i];
@@ -1259,12 +1268,14 @@ static __global__ void leg_m_lowllim_kernel(
 			for (int i=0; i<NW; i++) y1[i] = tmp[i];
 		}
 		if (l==llim) {
-			#pragma unroll
-			for (int f=0; f<NFIELDS; f++) {
+			if ((!HI_LLIM) || (ny==0)) {
 				#pragma unroll
-				for (int i=0; i<NW; i++) {
-					rer[f][i] += y0[i] * qk[f][2*k];	// real
-					rei[f][i] += y0[i] * qk[f][2*k+1];	// imag
+				for (int f=0; f<NFIELDS; f++) {
+					#pragma unroll
+					for (int i=0; i<NW; i++) {
+						rer[f][i] += y0[i] * qk[f][2*k];	// real
+						rei[f][i] += y0[i] * qk[f][2*k+1];	// imag
+					}
 				}
 			}
 		}
@@ -1347,7 +1358,7 @@ static void leg_m_lowllim(shtns_cfg shtns, const double *ql, double *q, const in
 	if (spat_dist == 0) spat_dist = shtns->spat_stride;
 	dim3 blocks(blocksPerGrid, mmax+1);
 	dim3 threads(threadsPerBlock, 1);
-	leg_m_lowllim_kernel<BLOCKSIZE, S, NFIELDS, NW> <<<blocks, threads, 0, stream>>>(d_alm, d_ct, (double*) ql, (double*) q, llim, nlat_2, lmax,mres, nphi, shtns->nlm_stride, spat_dist);
+	leg_m_lowllim_kernel<BLOCKSIZE, S, NFIELDS, NW, false> <<<blocks, threads, 0, stream>>>(d_alm, d_ct, (double*) ql, (double*) q, llim, nlat_2, lmax,mres, nphi, shtns->nlm_stride, spat_dist);
 }
 
 /// requirements : blockSize must be 1 in the y-direction and THREADS_PER_BLOCK in the x-direction.
@@ -2179,11 +2190,11 @@ static void legendre(shtns_cfg shtns, const double *ql, double *q, const int lli
 	if (mmax==0) {
 		leg_m0<S,NFIELDS>(shtns, ql, q, llim);
 	} else {
-		//if (llim <= SHT_L_RESCALE_FLY) {
-		//	leg_m_lowllim<S,NFIELDS>(shtns, ql, q, llim, mmax, spat_dist);
-		//} else {
+		if (llim <= SHT_L_RESCALE_FLY) {
+			leg_m_lowllim<S,NFIELDS>(shtns, ql, q, llim, mmax, spat_dist);
+		} else {
 			leg_m_highllim<S,NFIELDS>(shtns, ql, q, llim, mmax);
-		//}
+		}
 	}
 }
 
