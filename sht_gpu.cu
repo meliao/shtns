@@ -145,6 +145,7 @@ void cushtns_release_gpu(shtns_cfg shtns)
 	#ifdef SHTNS_ISHIOKA
 	if (shtns->d_xlm) cudaFree(shtns->d_xlm);
 	if (shtns->d_clm) cudaFree(shtns->d_clm);
+	if (shtns->d_qlm_ish) cudaFree(shtns->d_qlm_ish);
 	#endif
 	if (shtns->d_mx_stdt) cudaFree(shtns->d_mx_stdt);
 	if (shtns->d_mx_van) cudaFree(shtns->d_mx_van);
@@ -197,7 +198,7 @@ static int init_cuda_buffer_fft(shtns_cfg shtns)
 	}
 
 	// Allocate working arrays for SHT on GPU:
-	double* gpu_mem = NULL;
+	double* gpu_mem = 0;
 	const int nlm2 = shtns->nlm + (shtns->mmax+1);		// one more data per m
 	const size_t nlm_stride = ((2*nlm2+WARPSZE-1)/WARPSZE) * WARPSZE;
 	const size_t spat_stride = ((shtns->nlat*shtns->nphi+WARPSZE-1)/WARPSZE) * WARPSZE;
@@ -212,6 +213,10 @@ static int init_cuda_buffer_fft(shtns_cfg shtns)
 		// we also need a buffer on the CPU when the FFT is out-of-place:
 		shtns->xfft_cpu = (double*) shtns_malloc(spat_stride * sizeof(double));
 	}
+	#ifdef SHTNS_ISHIOKA
+		// memory for sh2ishioka kernels.
+		cudaMalloc( (void **)&shtns->d_qlm_ish, nlm_stride * sizeof(double));
+	#endif
 
 	shtns->nlm_stride = nlm_stride;
 	shtns->spat_stride = dual_stride;
@@ -450,20 +455,13 @@ void cuda_SH_to_spat(shtns_cfg shtns, cplx* d_Qlm, double *d_Vr, const long int 
 
 	cplx* d_Qlm_ish = d_Qlm;
 	#ifdef SHTNS_ISHIOKA
-	if (llim < SHT_L_RESCALE_FLY) {
-		d_Qlm_ish = (cplx*) shtns->gpu_mem;
-		//cudaMalloc((void **)&d_Qlm_ish, (2*shtns->nlm + MAX_THREADS_PER_BLOCK-1)*sizeof(double));	// allow some overflow.
+		d_Qlm_ish = (cplx*) shtns->d_qlm_ish;
 		for (int f=0; f<NFIELDS; f++)
 			sh2ishioka_gpu(shtns, d_Qlm + f * shtns->nlm_stride, d_Qlm_ish + f * shtns->nlm_stride, llim, mmax);
-	}
 	#endif
-	
+
 	legendre<S,NFIELDS>(shtns, (double*) d_Qlm_ish, d_Vr, llim, mmax, spat_dist);
 	for (int f=0; f<NFIELDS; f++)  fourier_to_spat_gpu(shtns, d_Vr + f*spat_dist, mmax);
-	
-	#ifdef SHTNS_ISHIOKA
-	//cudaFree(d_Qlm_ish);
-	#endif
 }
 
 /// Perform SH transform on data that is already on the GPU. d_Qlm and d_Vr are pointers to GPU memory (obtained by cudaMalloc() for instance)
@@ -475,18 +473,14 @@ void cuda_spat_to_SH(shtns_cfg shtns, double *d_Vr, cplx* d_Qlm, const long int 
 	if (spat_dist == 0) spat_dist = shtns->spat_stride;
 	if (llim < mmax*mres)	mmax = llim / mres;		// truncate mmax too !
 	for (int f=0; f<NFIELDS; f++) spat_to_fourier_gpu(shtns, d_Vr + f*spat_dist, mmax);
-	
-	#ifndef SHTNS_ISHIOKA
-	ilegendre<S, NFIELDS>(shtns, d_Vr, (double*) d_Qlm, llim, spat_dist);
-	#else
-	if (llim < SHT_L_RESCALE_FLY) {
-		cplx* d_Qlm_ish = (cplx*) shtns->gpu_mem;
+
+	#ifdef SHTNS_ISHIOKA
+		cplx* d_Qlm_ish = (cplx*) shtns->d_qlm_ish;
 		ilegendre<S, NFIELDS>(shtns, d_Vr, (double*) d_Qlm_ish, llim, spat_dist);
 		for (int f=0; f<NFIELDS; f++)
 			ishioka2sh_gpu(shtns, d_Qlm_ish + f * shtns->nlm_stride, d_Qlm + f * shtns->nlm_stride, llim, mmax);
-	} else {
+	#else
 		ilegendre<S, NFIELDS>(shtns, d_Vr, (double*) d_Qlm, llim, spat_dist);
-	}
 	#endif
 }
 
@@ -1284,7 +1278,6 @@ void spat_to_SH_gpu(shtns_cfg shtns, double *Vr, cplx *Qlm, const long int llim)
 	double *d_q;
 
 	// Allocate the device work vectors qlm and q
-    //err = cudaMalloc((void **)&d_qlm, ((2*nlm +31 + nlat*nphi+31)/32)*32*sizeof(double));
     d_qlm = shtns->gpu_mem;
     d_q = d_qlm + shtns->nlm_stride;
 
@@ -1310,8 +1303,6 @@ void spat_to_SH_gpu(shtns_cfg shtns, double *Vr, cplx *Qlm, const long int llim)
 		ishioka_to_SH(shtns->xlm + 3*im*(2*(LMAX+4) -m+mres)/4, Qlm + l+m, llim-m, Qlm + l+m);
 	}
 	#endif
-
-	//cudaFree(d_qlm);
 }
 
 

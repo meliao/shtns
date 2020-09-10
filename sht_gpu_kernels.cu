@@ -1072,7 +1072,7 @@ static __global__ void leg_m_kernel(
 			y0[i] = 1.0;
 		}
 
-	if ((NW>1) || (BLOCKSIZE > WARPSZE) || (_any(m - llim*y1[0] <= max(50,llim/200))))	// polar optimization (see Reinecke 2013), avoiding warp divergence
+	if ((NW>1) || (BLOCKSIZE > WARPSZE) || (_any(m - llim*y1[0] <= max(80, llim>>7))))	// polar optimization (see Reinecke 2013), avoiding warp divergence
 	{
 		l = m - S;
 		int nsint = 0;
@@ -1366,8 +1366,10 @@ static void leg_m(shtns_cfg shtns, const double *ql, double *q, const int llim, 
 	cudaStream_t stream = shtns->comp_stream;
 
 	#ifndef SHTNS_ISHIOKA
-	const int BLOCKSIZE = 256;		// good value
-	const int NW = 2;
+	//const int BLOCKSIZE = 256;		// good value
+	//const int NW = 2;
+	const int BLOCKSIZE = 32;		// 32 allows to use polar optimization; 128 and NW=2 are sometimes better though.
+	const int NW = 1;
 	#else
 	const int BLOCKSIZE = 32;		// 32 allows to use polar optimization; 128 and NW=2 are sometimes better though.
 	const int NW = 1;
@@ -1435,7 +1437,7 @@ leg_m_highllim_kernel(const double *al, const double *ct, const double *ql, doub
 	ror = 0.0;	roi = 0.0;
 	rer = 0.0;	rei = 0.0;
 	y1 = sqrt(1.0 - cost*cost);	// sin(theta)
-	if (_any(m - llim*y1 <= max(50,llim/200))) {		// polar optimization (see Reinecke 2013), avoiding warp divergence
+	if (_any(m - llim*y1 <= max(80, llim>>7))) {		// polar optimization (see Reinecke 2013), avoiding warp divergence
 		y0 = 1.0;	// y0
 		l = m - S;
 		int ny = 0;
@@ -1942,7 +1944,7 @@ ileg_m_kernel(const double* __restrict__ al, const double* __restrict__ ct, cons
 		#endif
 
 		// polar optimization (see Reinecke 2013)
-		if ( (BLOCKSIZE == WARPSZE) && _all(m - llim*y1 > max(50,llim/200)) ) return;
+		if ( (BLOCKSIZE == WARPSZE) && _all(m - llim*y1 > max(80, llim>>7)) ) return;
 
 		ql += 2*(l + S*im);	// allow vector transforms where llim = lmax+1
 		const double sgn = j - (j^1);	//	2*(j&1) - 1;	// -/+
@@ -2173,8 +2175,8 @@ static void legendre(shtns_cfg shtns, const double *ql, double *q, const int lli
 		if (llim <= SHT_L_RESCALE_FLY) {
 			leg_m<S,NFIELDS>(shtns, ql, q, llim, mmax, spat_dist);
 		} else {
-			//leg_m<S,NFIELDS,true>(shtns, ql, q, llim, mmax, spat_dist);
-			leg_m_highllim<S,NFIELDS>(shtns, ql, q, llim, mmax, spat_dist);
+			leg_m<S,NFIELDS,true>(shtns, ql, q, llim, mmax, spat_dist);
+			//leg_m_highllim<S,NFIELDS>(shtns, ql, q, llim, mmax, spat_dist);
 		}
 	}
 }
@@ -2195,7 +2197,7 @@ static void ilegendre(shtns_cfg shtns, const double *q, double* ql, const int ll
 	if (llim <= SHT_L_RESCALE_FLY) {
 		ileg_m<S, NFIELDS>(shtns, q, ql, llim, spat_dist, shtns->nlm_stride);
 	} else {
-		//ileg_m<S, NFIELDS, true>(shtns, q, ql, llim, spat_dist, shtns->nlm_stride);
-		ileg_m_highllim<S, NFIELDS>(shtns, q, ql, llim, spat_dist, shtns->nlm_stride);
+		ileg_m<S, NFIELDS, true>(shtns, q, ql, llim, spat_dist, shtns->nlm_stride);
+		//ileg_m_highllim<S, NFIELDS>(shtns, q, ql, llim, spat_dist, shtns->nlm_stride);
 	}
 }

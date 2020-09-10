@@ -168,6 +168,9 @@ struct shtns_info {		// MUST start with "int nlm;"
 	double* d_mx_stdt;
 	double* d_mx_van;
 	double* gpu_mem;
+	#ifdef SHTNS_ISHIOKA
+		double* d_qlm_ish;
+	#endif
 	double* xfft;
 	double* xfft_cpu;
 	size_t nlm_stride, spat_stride;
