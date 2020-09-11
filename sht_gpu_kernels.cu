@@ -666,13 +666,17 @@ ishioka2sh_kernel(const double* __restrict__ xlm, const double* __restrict__ ql_
 
 	__syncthreads();
 
-	if ((l<=llim_m) && (j<blockDim.x-4)) {
-		int ix = 3*(j>>2)+3;		// 3*l/2.
-		double q = ql_[j+4] * xl_[ix + (j&2)];	// ix for l-m even, ix+2 for l-m odd
-		if ((j&2)==0) {		// for l-m even
-			q += ql_[j] * xl_[ix-2];			// contribution of l-2
+	if (j<blockDim.x-4) {
+		q = 0.0;
+		if (l<=llim_m) {
+			int ix = 3*(j>>2)+3;		// 3*l/2.
+			q = ql_[j+4] * xl_[ix + (j&2)];	// ix for l-m even, ix+2 for l-m odd
+			if ((j&2)==0) {		// for l-m even
+				q += ql_[j] * xl_[ix-2];			// contribution of l-2
+			}
 		}
-		ql[q_ofs +j] = q;	// coalesced store
+		if (l<=lmax-m)
+			ql[q_ofs +j] = q;	// coalesced store (including zero-out for llim<l<=lmax)
 	}
 }
 
@@ -782,7 +786,7 @@ void sh2ishioka_gpu(shtns_cfg shtns, cplx* d_Qlm, cplx* d_Qlm_ish, int llim, int
 {
 	int blksze = (((llim+2)*2+WARPSZE-1)/WARPSZE) * WARPSZE;
 	if (blksze > MAX_THREADS_PER_BLOCK) blksze = MAX_THREADS_PER_BLOCK;
-	dim3 blocks((2*(shtns->lmax+3)+blksze-5)/(blksze-4), mmax+1);
+	dim3 blocks((2*(llim+3)+blksze-5)/(blksze-4), mmax+1);
 	dim3 threads(blksze, 1);
 	sh2ishioka_kernel <<< blocks, threads,(blksze/4*7-3)*sizeof(double), shtns->comp_stream >>>
 		(shtns->d_xlm, (double*) d_Qlm, (double*) d_Qlm_ish, llim, shtns->lmax, shtns->mres);
@@ -792,7 +796,7 @@ void sh2ishioka_gpu(shtns_cfg shtns, cplx* d_Qlm, cplx* d_Qlm_ish, int llim, int
 
 void ishioka2sh_gpu(shtns_cfg shtns, cplx* d_Qlm_ish, cplx* d_Qlm, int llim, int mmax)
 {
-	int blksze = (((llim+2)*2+WARPSZE-1)/WARPSZE) * WARPSZE;
+	int blksze = (((shtns->lmax+2)*2+WARPSZE-1)/WARPSZE) * WARPSZE;
 	if (blksze > MAX_THREADS_PER_BLOCK) blksze = MAX_THREADS_PER_BLOCK;
 	dim3 blocks((2*(shtns->lmax+3)+blksze-5)/(blksze-4), mmax+1);
 	dim3 threads(blksze, 1);
@@ -800,6 +804,10 @@ void ishioka2sh_gpu(shtns_cfg shtns, cplx* d_Qlm_ish, cplx* d_Qlm, int llim, int
 		(shtns->d_xlm, (double*) d_Qlm_ish, (double*) d_Qlm, llim, shtns->lmax, shtns->mres);
 	cudaError_t err = cudaGetLastError();
 	if (err != cudaSuccess) { printf("ishioka2sh_gpu error : %s!\n", cudaGetErrorString(err));	return; }
+	if (mmax < shtns->mmax) {		// set to zero m>mmax
+		long nlm = nlm_calc(shtns->lmax, mmax, shtns->mres);
+		cudaMemsetAsync(d_Qlm+nlm, 0, sizeof(double) * (shtns->nlm - nlm), shtns->comp_stream);
+	}
 }
 
 void sphtor2scal_gpu(shtns_cfg shtns, cplx* d_Slm, cplx* d_Tlm, cplx* d_Vlm, cplx* d_Wlm, int llim, int mmax)

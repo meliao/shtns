@@ -1263,7 +1263,6 @@ extern "C"
 void spat_to_SH_gpu(shtns_cfg shtns, double *Vr, cplx *Qlm, const long int llim)
 {
 	cudaError_t err = cudaSuccess;
-	const int nlm = shtns->nlm;
 	const int nlat = shtns->nlat;
 	const int nphi = shtns->nphi;
 
@@ -1283,6 +1282,14 @@ void spat_to_SH_gpu(shtns_cfg shtns, double *Vr, cplx *Qlm, const long int llim)
 	err = cudaGetLastError();
 	if (err != cudaSuccess) { printf("spat_to_SH_gpu CUDA error : %s!\n", cudaGetErrorString(err));	return; }
 
+	int mmax = shtns->mmax;
+	int mres = shtns->mres;
+	int nlm = shtns->nlm;
+	if (llim < mmax*mres) {
+		mmax = llim / mres;	// truncate mmax too !
+		nlm = nlm_calc( shtns->lmax, mmax, mres);		// transfer less data
+		memset(Qlm+nlm, 0, 2*(shtns->nlm - nlm)*sizeof(double));	// zero out on cpu (during the transform on GPU).
+	}
 	// copy back spectral data
 	err = cudaMemcpy(Qlm, d_qlm, 2*nlm*sizeof(double), cudaMemcpyDeviceToHost);
 	if (err != cudaSuccess) { printf("spat_to_SH_gpu failed copy back\n");	return; }
