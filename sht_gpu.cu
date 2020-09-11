@@ -145,12 +145,12 @@ void cushtns_release_gpu(shtns_cfg shtns)
 	#ifdef SHTNS_ISHIOKA
 	if (shtns->d_xlm) cudaFree(shtns->d_xlm);
 	if (shtns->d_clm) cudaFree(shtns->d_clm);
-	if (shtns->d_qlm_ish) cudaFree(shtns->d_qlm_ish);
 	#endif
 	if (shtns->d_mx_stdt) cudaFree(shtns->d_mx_stdt);
 	if (shtns->d_mx_van) cudaFree(shtns->d_mx_van);
 	if (shtns->gpu_mem) cudaFree(shtns->gpu_mem);
-	if (shtns->xfft) cudaFree(shtns->xfft);
+	if (shtns->gpu_buf_in) cudaFree(shtns->gpu_buf_in);
+	if (shtns->gpu_buf_out) cudaFree(shtns->gpu_buf_out);
 	if (shtns->xfft_cpu) shtns_free(shtns->xfft_cpu);
 	shtns->d_alm = 0;		// disable gpu.
 	shtns->cu_flags = 0;
@@ -203,9 +203,16 @@ static int init_cuda_buffer_fft(shtns_cfg shtns)
 	const size_t nlm_stride = ((2*nlm2+WARPSZE-1)/WARPSZE) * WARPSZE;
 	const size_t spat_stride = ((shtns->nlat*shtns->nphi+WARPSZE-1)/WARPSZE) * WARPSZE;
 	const size_t dual_stride = (spat_stride < nlm_stride) ? nlm_stride : spat_stride;		// we need two spatial buffers to also hold spectral data.
+
+	size_t sze = 2*nlm_stride;		// 2 spectral buffers
 	if (shtns->cu_fft_mode == CUSHT_FFT_TRANSPOSE) {
-		cudaMalloc( (void **)&shtns->xfft, spat_stride * sizeof(double));
+		if (spat_stride > sze) sze = spat_stride;		// one spatial buffer for FFT -OR- 2 spectral buffers should fit in.
 	}
+	err = cudaMalloc( (void **)&shtns->gpu_buf_in,  sze*sizeof(double) );
+	if (err != cudaSuccess)	err_count++;
+	err = cudaMalloc( (void **)&shtns->gpu_buf_out, 2*dual_stride*sizeof(double) );		// 2 spatial -OR- 2 spectral
+	if (err != cudaSuccess)	err_count++;
+
 	err = cudaMalloc( (void **)&gpu_mem, (2*nlm_stride + 2*dual_stride + spat_stride)*sizeof(double) );		// maximum GPU memory required for SHT
 	if (err != cudaSuccess)	err_count++;
 	
@@ -213,10 +220,6 @@ static int init_cuda_buffer_fft(shtns_cfg shtns)
 		// we also need a buffer on the CPU when the FFT is out-of-place:
 		shtns->xfft_cpu = (double*) shtns_malloc(spat_stride * sizeof(double));
 	}
-	#ifdef SHTNS_ISHIOKA
-		// memory for sh2ishioka kernels.
-		cudaMalloc( (void **)&shtns->d_qlm_ish, nlm_stride * sizeof(double));
-	#endif
 
 	shtns->nlm_stride = nlm_stride;
 	shtns->spat_stride = dual_stride;
@@ -388,7 +391,7 @@ void fourier_to_spat_gpu(shtns_cfg shtns, double* q, const int mmax)
 	if (nphi > 1) {
 		cufftDoubleComplex* x = (cufftDoubleComplex*) q;
 		if (shtns->cu_fft_mode == CUSHT_FFT_TRANSPOSE) {
-			double* xfft = shtns->xfft;
+			double* xfft = shtns->gpu_buf_in;
 			transpose_cplx_zero(shtns->comp_stream, (double*) x, xfft, shtns->nlat_2, nphi, mmax);		// zero out m>mmax during transpose
 			res = cufftExecZ2Z(shtns->cufft_plan, (cufftDoubleComplex*) xfft, x, CUFFT_INVERSE);
 		} else {	// THETA_CONTIGUOUS:
@@ -409,7 +412,7 @@ void spat_to_fourier_gpu(shtns_cfg shtns, double* q, const int mmax)
 	if (nphi > 1) {
 		cufftDoubleComplex *x = (cufftDoubleComplex*) q;
 		if (shtns->cu_fft_mode == CUSHT_FFT_TRANSPOSE) {
-			double* xfft = shtns->xfft;
+			double* xfft = shtns->gpu_buf_in;
 			res = cufftExecZ2Z(shtns->cufft_plan, x, (cufftDoubleComplex*) xfft, CUFFT_INVERSE);
 			transpose_cplx_skip(shtns->comp_stream, xfft, (double*) x, nphi, shtns->nlat_2, mmax);		// ignore m > mmax during transpose
 		} else {	// THETA_CONTIGUOUS:
@@ -453,15 +456,16 @@ void cuda_SH_to_spat(shtns_cfg shtns, cplx* d_Qlm, double *d_Vr, const long int 
 {
 	if (spat_dist == 0) spat_dist = shtns->spat_stride;
 
-	cplx* d_Qlm_ish = d_Qlm;
 	#ifdef SHTNS_ISHIOKA
-		d_Qlm_ish = (cplx*) shtns->d_qlm_ish;
+		cplx* d_qlm = (cplx*) shtns->gpu_buf_in;
 		for (int f=0; f<NFIELDS; f++)
-			sh2ishioka_gpu(shtns, d_Qlm + f * shtns->nlm_stride, d_Qlm_ish + f * shtns->nlm_stride, llim, mmax);
+			sh2ishioka_gpu(shtns, d_Qlm + f * shtns->nlm_stride, d_qlm + f * shtns->nlm_stride, llim, mmax);
+	#else
+		cplx* d_qlm = d_Qlm;
+		if (d_Vr == (double*) d_Qlm) { printf("ERROR: cuda_SH_to_spat must have distinct in and out fields");	exit(1); }
 	#endif
-
-	legendre<S,NFIELDS>(shtns, (double*) d_Qlm_ish, d_Vr, llim, mmax, spat_dist);
-	for (int f=0; f<NFIELDS; f++)  fourier_to_spat_gpu(shtns, d_Vr + f*spat_dist, mmax);
+	legendre<S,NFIELDS>(shtns, (double*) d_qlm, d_Vr, llim, mmax, spat_dist);
+	for (int f=0; f<NFIELDS; f++)  fourier_to_spat_gpu(shtns, d_Vr + f*spat_dist, mmax);	// in-place
 }
 
 /// Perform SH transform on data that is already on the GPU. d_Qlm and d_Vr are pointers to GPU memory (obtained by cudaMalloc() for instance)
@@ -472,14 +476,16 @@ void cuda_spat_to_SH(shtns_cfg shtns, double *d_Vr, cplx* d_Qlm, const long int 
 	const int mres = shtns->mres;
 	if (spat_dist == 0) spat_dist = shtns->spat_stride;
 	if (llim < mmax*mres)	mmax = llim / mres;		// truncate mmax too !
+
 	for (int f=0; f<NFIELDS; f++) spat_to_fourier_gpu(shtns, d_Vr + f*spat_dist, mmax);
 
 	#ifdef SHTNS_ISHIOKA
-		cplx* d_Qlm_ish = (cplx*) shtns->d_qlm_ish;
+		cplx* d_Qlm_ish = (cplx*) shtns->gpu_buf_in;
 		ilegendre<S, NFIELDS>(shtns, d_Vr, (double*) d_Qlm_ish, llim, spat_dist);
 		for (int f=0; f<NFIELDS; f++)
 			ishioka2sh_gpu(shtns, d_Qlm_ish + f * shtns->nlm_stride, d_Qlm + f * shtns->nlm_stride, llim, mmax);
 	#else
+		if (d_Vr == (double*) d_Qlm) { printf("ERROR: cuda_spat_to_SH must have distinct in and out fields");	exit(1); }
 		ilegendre<S, NFIELDS>(shtns, d_Vr, (double*) d_Qlm, llim, spat_dist);
 	#endif
 }
@@ -570,43 +576,30 @@ void SH_to_spat_gpu(shtns_cfg shtns, cplx *Qlm, double *Vr, const long int llim)
 	long nlm = shtns->nlm;
 	int mmax = shtns->mmax;
 
-	double *d_qlm;
-	double *d_q;
-	// get pointers to gpu buffers.
-	d_qlm = shtns->gpu_mem;
-	d_q = d_qlm + shtns->nlm_stride;
+	double *d_q   = shtns->gpu_buf_out;		// outer buffer for transfer (safe)
+	#ifdef SHTNS_ISHIOKA
+	double *d_qlm = d_q;		// "in-place" operation possible with ishioka
+	#else
+	double *d_qlm = shtns->gpu_buf_in;		// "inner" buffer also used by FFT can be used here (no "in-place" allowed)
+	#endif
 
 	if (llim < mmax*mres) {
 		mmax = llim / mres;	// truncate mmax too !
 		nlm = nlm_calc( shtns->lmax, mmax, mres);		// transfer less data
 	}
 
-	cplx* Qlm_ish = Qlm;
-	#ifdef SHTNS_ISHIOKAxx
-	Qlm_ish = (cplx*) malloc(sizeof(cplx) * (nlm+2));
-	for (int im=0; im<=mmax; im++) {
-		int m = im*mres;
-		long l = (im*(2*(LMAX+1)-(m+mres)))>>1;		//l = LiM(shtns, 0,im);
-		SH_to_ishioka(shtns->xlm + 3*im*(2*(LMAX+4) -m+mres)/4, Qlm + l+m, llim-m, Qlm_ish + l+m);
-	}
-	#endif
-
 	// copy spectral data to GPU
-	err = cudaMemcpy(d_qlm, Qlm_ish, 2*nlm*sizeof(double), cudaMemcpyHostToDevice);
+	err = cudaMemcpy(d_qlm, Qlm, 2*nlm*sizeof(double), cudaMemcpyHostToDevice);
 	if (err != cudaSuccess) { printf("SH_to_spat_gpu failed copy qlm\n");	return; }
 
 	// SHT on the GPU
-	cuda_SH_to_spat<0,1>(shtns, (cplx*) d_qlm, d_q, llim, mmax);
+	cuda_SH_to_spat<0,1>(shtns, (cplx*) d_qlm, d_q, llim, mmax);	// start with Legendre, d_qlm may be available for Fourier.
 	err = cudaGetLastError();
 	if (err != cudaSuccess) { printf("SH_to_spat_gpu CUDA error : %s!\n", cudaGetErrorString(err));	return; }
 
 	// copy back spatial data
 	err = cudaMemcpy(Vr, d_q, nlat*nphi*sizeof(double), cudaMemcpyDeviceToHost);
 	if (err != cudaSuccess) { printf("SH_to_spat_gpu failed copy back: %s\n", cudaGetErrorString(err));	return; }
-
-	#ifdef SHTNS_ISHIOKAxx
-	free(Qlm_ish);
-	#endif
 }
 
 extern "C"
@@ -1274,12 +1267,12 @@ void spat_to_SH_gpu(shtns_cfg shtns, double *Vr, cplx *Qlm, const long int llim)
 	const int nlat = shtns->nlat;
 	const int nphi = shtns->nphi;
 
-	double *d_qlm;
-	double *d_q;
-
-	// Allocate the device work vectors qlm and q
-    d_qlm = shtns->gpu_mem;
-    d_q = d_qlm + shtns->nlm_stride;
+	double *d_q   = shtns->gpu_buf_out;
+	#ifdef SHTNS_ISHIOKA
+	double *d_qlm = d_q;		// "in-place" operation possible
+	#else
+	double *d_qlm = shtns->gpu_buf_in;		// "in-place" operation not possible. gpu_buf_in may be also used as internal buffer by fft
+	#endif
 
 	// copy spatial data to GPU
 	err = cudaMemcpy(d_q, Vr, nlat*nphi*sizeof(double), cudaMemcpyHostToDevice);
@@ -1293,16 +1286,6 @@ void spat_to_SH_gpu(shtns_cfg shtns, double *Vr, cplx *Qlm, const long int llim)
 	// copy back spectral data
 	err = cudaMemcpy(Qlm, d_qlm, 2*nlm*sizeof(double), cudaMemcpyDeviceToHost);
 	if (err != cudaSuccess) { printf("spat_to_SH_gpu failed copy back\n");	return; }
-	
-	#ifdef SHTNS_ISHIOKAxx
-	const int mmax = shtns->mmax;
-	const int mres = shtns->mres;
-	for (int im=0; im<=mmax; im++) {
-		int m = im*mres;
-		long l = (im*(2*(LMAX+1)-(m+mres)))>>1;		//l = LiM(shtns, 0,im);
-		ishioka_to_SH(shtns->xlm + 3*im*(2*(LMAX+4) -m+mres)/4, Qlm + l+m, llim-m, Qlm + l+m);
-	}
-	#endif
 }
 
 

@@ -168,10 +168,8 @@ struct shtns_info {		// MUST start with "int nlm;"
 	double* d_mx_stdt;
 	double* d_mx_van;
 	double* gpu_mem;
-	#ifdef SHTNS_ISHIOKA
-		double* d_qlm_ish;
-	#endif
-	double* xfft;
+	double* gpu_buf_out;	// outer buffer: can hold either spectral or spatial fields; used for transfers.
+	double* gpu_buf_in;		// inner buffer: can each hold either spectral or spatial fields.
 	double* xfft_cpu;
 	size_t nlm_stride, spat_stride;
 	cudaStream_t xfer_stream, comp_stream;		// the cuda streams
