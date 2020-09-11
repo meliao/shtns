@@ -600,7 +600,7 @@ static void ileg_m0(shtns_cfg shtns, const double* q, double *ql, const int llim
 
 
 __global__ void
-sh2ishioka_kernel(const double* __restrict__ xlm, const double* __restrict__ ql, double* ql_ish, const int llim, const int lmax, const int mres)
+sh2ishioka_kernel(const double* __restrict__ xlm, const double* __restrict__ ql, double* ql_ish, const int llim, const int lmax, const int mres, const int S)
 {
 	const int j = threadIdx.x;
 	const int im = blockIdx.y;
@@ -608,7 +608,7 @@ sh2ishioka_kernel(const double* __restrict__ xlm, const double* __restrict__ ql,
 
 	const int l  = l0 + (j >> 1);
 	const int m = im*mres;
-	const int q_ofs = im*(((lmax+1)*2) -m+mres) + 2*l0;
+	const int q_ofs = im*(((lmax+1+S)*2) -m+mres) + 2*l0;
 	const int x_ofs = 3*im*(2*(lmax+4) -m+mres)/4 + 3*(l0 >> 1);
 	const int llim_m = llim-m;
 
@@ -639,7 +639,7 @@ sh2ishioka_kernel(const double* __restrict__ xlm, const double* __restrict__ ql,
 
 /// performs: Ql[2*l] = qq[2*l]*xlm[3*l] + qq[2*l-2]*xlm[3*l+1];   Ql[2*l+1] = qq[2*l+1] * xlm[3*l+2];
 __global__ void
-ishioka2sh_kernel(const double* __restrict__ xlm, const double* __restrict__ ql_ish, double* ql, const int llim, const int lmax, const int mres)
+ishioka2sh_kernel(const double* __restrict__ xlm, const double* __restrict__ ql_ish, double* ql, const int llim, const int lmax, const int mres, const int S)
 {
 	const int j = threadIdx.x;
 	const int im = blockIdx.y;
@@ -647,7 +647,7 @@ ishioka2sh_kernel(const double* __restrict__ xlm, const double* __restrict__ ql_
 
 	const int l  = l0 + (j >> 1);
 	const int m = im*mres;
-	const int q_ofs = im*(((lmax+1)*2) -m+mres) + 2*l0;
+	const int q_ofs = im*(((lmax+1+S)*2) -m+mres) + 2*l0;
 	const int x_ofs = 3*im*(2*(lmax+4) -m+mres)/4 + 3*(l0 >> 1);
 	const int llim_m = llim-m;
 
@@ -675,7 +675,7 @@ ishioka2sh_kernel(const double* __restrict__ xlm, const double* __restrict__ ql_
 				q += ql_[j] * xl_[ix-2];			// contribution of l-2
 			}
 		}
-		if (l<=lmax-m)
+		if (l<=lmax+S-m)
 			ql[q_ofs +j] = q;	// coalesced store (including zero-out for llim<l<=lmax)
 	}
 }
@@ -782,30 +782,30 @@ scal2sphtor_kernel(const double* __restrict__ mx, const double* __restrict__ vlm
 	}
 }
 
-void sh2ishioka_gpu(shtns_cfg shtns, cplx* d_Qlm, cplx* d_Qlm_ish, int llim, int mmax)
+void sh2ishioka_gpu(shtns_cfg shtns, cplx* d_Qlm, cplx* d_Qlm_ish, int llim, int mmax, int S=0)
 {
 	int blksze = (((llim+2)*2+WARPSZE-1)/WARPSZE) * WARPSZE;
 	if (blksze > MAX_THREADS_PER_BLOCK) blksze = MAX_THREADS_PER_BLOCK;
 	dim3 blocks((2*(llim+3)+blksze-5)/(blksze-4), mmax+1);
 	dim3 threads(blksze, 1);
 	sh2ishioka_kernel <<< blocks, threads,(blksze/4*7-3)*sizeof(double), shtns->comp_stream >>>
-		(shtns->d_xlm, (double*) d_Qlm, (double*) d_Qlm_ish, llim, shtns->lmax, shtns->mres);
+		(shtns->d_xlm, (double*) d_Qlm, (double*) d_Qlm_ish, llim, shtns->lmax, shtns->mres, S);
 	cudaError_t err = cudaGetLastError();
 	if (err != cudaSuccess) { printf("sh2ishioka_gpu error : %s!\n", cudaGetErrorString(err));	return; }
 }
 
-void ishioka2sh_gpu(shtns_cfg shtns, cplx* d_Qlm_ish, cplx* d_Qlm, int llim, int mmax)
+void ishioka2sh_gpu(shtns_cfg shtns, cplx* d_Qlm_ish, cplx* d_Qlm, int llim, int mmax, int S=0)
 {
 	int blksze = (((shtns->lmax+2)*2+WARPSZE-1)/WARPSZE) * WARPSZE;
 	if (blksze > MAX_THREADS_PER_BLOCK) blksze = MAX_THREADS_PER_BLOCK;
 	dim3 blocks((2*(shtns->lmax+3)+blksze-5)/(blksze-4), mmax+1);
 	dim3 threads(blksze, 1);
 	ishioka2sh_kernel <<< blocks, threads, (blksze/4*7+3)*sizeof(double), shtns->comp_stream >>>
-		(shtns->d_xlm, (double*) d_Qlm_ish, (double*) d_Qlm, llim, shtns->lmax, shtns->mres);
+		(shtns->d_xlm, (double*) d_Qlm_ish, (double*) d_Qlm, llim, shtns->lmax, shtns->mres, S);
 	cudaError_t err = cudaGetLastError();
 	if (err != cudaSuccess) { printf("ishioka2sh_gpu error : %s!\n", cudaGetErrorString(err));	return; }
 	if (mmax < shtns->mmax) {		// set to zero m>mmax
-		long nlm = nlm_calc(shtns->lmax, mmax, shtns->mres);
+		long nlm = nlm_calc(shtns->lmax+S, mmax, shtns->mres);
 		cudaMemsetAsync(d_Qlm+nlm, 0, sizeof(double) * (shtns->nlm - nlm), shtns->comp_stream);
 	}
 }
