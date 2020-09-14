@@ -481,14 +481,18 @@ void cuda_spat_to_SH(shtns_cfg shtns, double *d_Vr, cplx* d_Qlm, const long int 
 	for (int f=0; f<NFIELDS; f++) spat_to_fourier_gpu(shtns, d_Vr + f*spat_dist, mmax);
 
 	#ifdef SHTNS_ISHIOKA
-		cplx* d_Qlm_ish = (cplx*) shtns->gpu_buf_in;
-		ilegendre<S, NFIELDS>(shtns, d_Vr, (double*) d_Qlm_ish, llim, spat_dist);
-		for (int f=0; f<NFIELDS; f++)
-			ishioka2sh_gpu(shtns, d_Qlm_ish + f * shtns->nlm_stride, d_Qlm + f * shtns->nlm_stride, llim, mmax, S);
-	#else
+		if (S==0) {
+			cplx* d_Qlm_ish = (cplx*) shtns->gpu_buf_in;
+			ilegendre<S, NFIELDS>(shtns, d_Vr, (double*) d_Qlm_ish, llim, spat_dist);
+			for (int f=0; f<NFIELDS; f++)
+				ishioka2sh_gpu(shtns, d_Qlm_ish + f * shtns->nlm_stride, d_Qlm + f * shtns->nlm_stride, llim, mmax, S);
+			return;
+		 } else
+	#endif
+	{
 		if (d_Vr == (double*) d_Qlm) { printf("ERROR: cuda_spat_to_SH must have distinct in and out fields");	exit(1); }
 		ilegendre<S, NFIELDS>(shtns, d_Vr, (double*) d_Qlm, llim, spat_dist);
-	#endif
+	}
 }
 
 

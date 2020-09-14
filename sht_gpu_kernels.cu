@@ -771,7 +771,7 @@ template<int BLOCKSIZE> __global__ void
 scal2sphtor_kernel(const double* __restrict__ mx, const double* __restrict__ vlm, const double* __restrict__ wlm, double *slm, double *tlm, const int llim, const int lmax, const int mres)
 {
 	// indices for overlapping blocks:
-	const int ll = (blockDim.x-4) * blockIdx.x + threadIdx.x - 2;		// = 2*l + ((imag) ? 1 : 0)
+	int ll = (blockDim.x-4) * blockIdx.x + threadIdx.x - 2;		// = 2*l + ((imag) ? 1 : 0)
 	const int j = threadIdx.x;
 	const int im = blockIdx.y;
 
@@ -781,12 +781,14 @@ scal2sphtor_kernel(const double* __restrict__ mx, const double* __restrict__ vlm
 
 	const int m = im * mres;
 	int ofs = im*(2*(lmax+1) -m + mres)  + ll;
+	const int llim_m_p1 = llim+1-m;
+	ll >>= 1;
 
-	if ( (ll >= 0) && (ll < 2*(llim+1-m)) ) {
+	if ( (ll >= 0) && (ll < llim_m_p1) ) {
 		M[j] = mx[ofs];
 	} else M[j] = 0.0;
 
-	if ( (ll >= 0) && (ll < 2*(llim+2-m)) ) {
+	if ( (ll >= 0) && (ll <= llim_m_p1) ) {
 		vl[j] = vlm[ofs+2*im];
 		wl[j] = wlm[ofs+2*im];
 	} else {
@@ -794,26 +796,109 @@ scal2sphtor_kernel(const double* __restrict__ mx, const double* __restrict__ vlm
 		wl[j] = 0.0;
 	}
 
-	int ell = (ll>>1) + m + 1;		// +1 because we shift below
+	ll += m + 1;		// +1 because we shift below
 
 	__syncthreads();
 
 	if (j<BLOCKSIZE-4) {
-		if ((ell <= llim) && (ell>0)) {
+		if ((ll <= llim) && (ll>0)) {
 			const double mimag = m * ((j^1) -j);
-			double ll_1 = 1.0 / (ell*(ell+1));
+			double ll_1 = 1.0 / (ll*(ll+1));
 			double ml = M[2*(j>>1)+1];
 			double mu = M[2*(j>>1)+2];
 			double s = mimag*wl[(j+2)^1]  -  (ml*vl[j] + mu*vl[j+4]);
 			double t = mimag*vl[(j+2)^1]  +  (ml*wl[j] + mu*wl[j+4]);
 			slm[ofs+2] = s * ll_1;
 			tlm[ofs+2] = t * ll_1;
-		} else if (ell <= lmax) {	// fill with zeros up to lmax (and l=0 too).
+		} else if (ll <= lmax) {	// fill with zeros up to lmax (and l=0 too).
 			slm[ofs+2] = 0.0;
 			tlm[ofs+2] = 0.0;
 		}
 	}
 }
+
+__global__ void
+ish2sphtor_kernel(const double* __restrict__ mx, const double* __restrict__ xlm, const double* __restrict__ vlm, const double* __restrict__ wlm, double *slm, double *tlm, const int llim, const int lmax, const int mres)
+{
+	const int j = threadIdx.x;
+	const int im = blockIdx.y;
+	const int l0 = (blockDim.x-8) * blockIdx.x;		// some overlap needed
+
+	int l  = (l0 + j) >> 1;
+	const int m = im*mres;
+	const int q_ofs = im*(((lmax+1)*2) -m+mres) + l0;
+	const int x_ofs = 3*im*(2*(lmax+4) -m+mres)/4 + 3*(l0 >> 2);
+	const int llim_m_p1 = llim+1-m;
+
+	__shared__ double vl[512];
+	__shared__ double wl[512];
+	__shared__ double M[512];
+
+	double v = 0.0;		double w = 0.0;
+	if (l-2 <= llim_m_p1) {
+		if ((j<(blockDim.x>>2)*3+3) && (x_ofs+j-3 >= 0)) M[j] = xlm[x_ofs +j-3];
+		if (l-2 >= 0) {
+			v = vlm[q_ofs +2*im +j-4];		// vl[4] = vlm[0]
+			w = wlm[q_ofs +2*im +j-4];		// vl[4] = vlm[0]
+		}
+	}
+	vl[j] = v;
+	wl[j] = w;
+
+	__syncthreads();
+
+	if (j<blockDim.x-4) {
+		v = 0.0;
+		w = 0.0;
+		if (l<=llim_m_p1) {
+			int ix = 3*(j>>2)+3;		// 3*l/2.
+			v = vl[j+4] * M[ix + (j&2)];	// ix for l-m even, ix+2 for l-m odd
+			w = wl[j+4] * M[ix + (j&2)];	// ix for l-m even, ix+2 for l-m odd
+			if ((j&2)==0) {		// for l-m even
+				v += vl[j] * M[ix-2];			// contribution of l-2
+				w += wl[j] * M[ix-2];			// contribution of l-2
+			}
+		}
+	}
+
+	__syncthreads();
+	
+	if (j<blockDim.x-4) {
+		if (l<=lmax+1-m) {
+			vl[j+4] = v;	// vlm[q_ofs + 2*im +j]
+			wl[j+4] = w;
+		} else {
+			vl[j+4] = 0.0;		wl[j+4] = 0.0;
+		}
+	}
+
+	if ( (l > 0) && (l <= llim_m_p1) ) {
+		M[j] = mx[q_ofs+j-2];
+	} else M[j] = 0.0;
+
+	l += m;
+
+	__syncthreads();
+
+	if ((j<blockDim.x-6) &&  (j >= ((blockIdx.x == 0) ? 0 : 2))) {
+		v = 0.0;	w = 0.0;
+		if ((l <= llim) && (l>0)) {
+			const double mimag = m * ((j^1) -j);
+			double ll_1 = 1.0 / (l*(l+1));
+			double ml = M[2*(j>>1)+1];
+			double mu = M[2*(j>>1)+2];
+			v = mimag*wl[(j+4)^1]  -  (ml*vl[j+2] + mu*vl[j+6]);
+			w = mimag*vl[(j+4)^1]  +  (ml*wl[j+2] + mu*wl[j+6]);
+			v *= ll_1;
+			w *= ll_1;
+		}
+		if (l <= lmax) {	// fill with zeros up to lmax (and l=0 too).
+			slm[q_ofs+j] = v;
+			tlm[q_ofs+j] = w;
+		}
+	}
+}
+
 
 void sh2ishioka_gpu(shtns_cfg shtns, cplx* d_Qlm, cplx* d_Qlm_ish, int llim, int mmax, int S=0)
 {
@@ -864,10 +949,17 @@ void sphtor2scal_gpu(shtns_cfg shtns, cplx* d_Slm, cplx* d_Tlm, cplx* d_Vlm, cpl
 
 void scal2sphtor_gpu(shtns_cfg shtns, cplx* d_Vlm, cplx* d_Wlm, cplx* d_Slm, cplx* d_Tlm, int llim)
 {
+  #ifdef SHTNS_ISHIOKA
+	dim3 blocks((2*(shtns->lmax+3)+MAX_THREADS_PER_BLOCK-9)/(MAX_THREADS_PER_BLOCK-8), shtns->mmax+1);
+	dim3 threads(MAX_THREADS_PER_BLOCK, 1);
+	ish2sphtor_kernel <<<blocks, threads, 0, shtns->comp_stream>>>
+		(shtns->d_mx_van, shtns->d_xlm, (double*) d_Vlm, (double*) d_Wlm, (double*)d_Slm, (double*)d_Tlm, llim, shtns->lmax, shtns->mres);	
+  #else
 	dim3 blocks((2*(shtns->lmax+2)+MAX_THREADS_PER_BLOCK-5)/(MAX_THREADS_PER_BLOCK-4), shtns->mmax+1);
 	dim3 threads(MAX_THREADS_PER_BLOCK, 1);
 	scal2sphtor_kernel<MAX_THREADS_PER_BLOCK> <<<blocks, threads, 0, shtns->comp_stream>>>
 		(shtns->d_mx_van, (double*) d_Vlm, (double*) d_Wlm, (double*)d_Slm, (double*)d_Tlm, llim, shtns->lmax, shtns->mres);
+  #endif
 	cudaError_t err = cudaGetLastError();
 	if (err != cudaSuccess) { printf("scal2sphtor_gpu error : %s!\n", cudaGetErrorString(err));	return; }
 }
