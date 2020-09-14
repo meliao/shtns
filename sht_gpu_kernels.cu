@@ -359,7 +359,6 @@ template<int S, int NFIELDS>
 static void leg_m0(shtns_cfg shtns, const double *ql, double *q, const int llim, int spat_dist = 0)
 {
 	const int nlat_2 = shtns->nlat_2;
-	double *d_alm = shtns->d_alm;
 	double *d_ct = shtns->d_ct;
 	cudaStream_t stream = shtns->comp_stream;
 
@@ -372,7 +371,7 @@ static void leg_m0(shtns_cfg shtns, const double *ql, double *q, const int llim,
 	if (spat_dist == 0) spat_dist = shtns->spat_stride;
 	for (int f=0; f<NFIELDS; f++) {
 		#ifndef SHTNS_ISHIOKA
-		leg_m0_kernel<S,1> <<<blocksPerGrid, threadsPerBlock, 3*threadsPerBlock/2*sizeof(double), stream>>>(d_alm, d_ct, ql + f*shtns->nlm_stride, q + f*spat_dist, llim, nlat_2);
+		leg_m0_kernel<S,1> <<<blocksPerGrid, threadsPerBlock, 3*threadsPerBlock/2*sizeof(double), stream>>>(shtns->d_alm, d_ct, ql + f*shtns->nlm_stride, q + f*spat_dist, llim, nlat_2);
 		#else
 		leg_m0_kernel<S,1> <<<blocksPerGrid, threadsPerBlock, 2*threadsPerBlock*sizeof(double), stream>>>(shtns->d_clm, d_ct, ql + f*shtns->nlm_stride, q + f*spat_dist, llim, nlat_2);
 		#endif
@@ -517,7 +516,8 @@ ileg_m0_kernel(const double* __restrict__ al, const double* __restrict__ ct, con
 			for (int f=0; f<NFIELDS; f++)	qll[f] += my_reo[f][k] * yl[itl+i];
 		}
 
-		if (BLOCKSIZE/LSPAN <= WARPSZE) {	// reduce_add within same l is in same warp too:
+		static_assert(BLOCKSIZE/LSPAN <= WARPSZE, "Block size must not exceed LSPAN*32");
+			// reduce_add within same l is in same warp too:
 			if (WARPSZE % (BLOCKSIZE/LSPAN)) printf("ERROR\n");
 			#pragma unroll
 			for (int ofs = BLOCKSIZE/(LSPAN*2); ofs > 0; ofs>>=1) {
@@ -533,36 +533,6 @@ ileg_m0_kernel(const double* __restrict__ al, const double* __restrict__ ct, con
 					for (int f=0; f<NFIELDS; f++)	atomicAdd(ql+2*(l+ll) + f*ql_dist, qll[f]);		// VERY slow atomic add on Kepler.
 				}
 			}
-		} else {	// only partial reduction possible, finish with atomicAdd():
-			if ((BLOCKSIZE/LSPAN) % WARPSZE) printf("ERROR\n");
-			#pragma unroll
-			for (int ofs = WARPSZE/2; ofs > 0; ofs>>=1) {
-				#pragma unroll
-				for (int f=0; f<NFIELDS; f++)	qll[f] += shfl_down(qll[f], ofs, WARPSZE);
-			}
-			__syncthreads();
-			const int nsum = (BLOCKSIZE/(LSPAN*WARPSZE));
-			if ((j % WARPSZE) == 0) {
-				for (int f=0; f<NFIELDS; f++)  yl[ll*nsum + ((j/WARPSZE) % nsum) + f*LSPAN*nsum] = qll[f];
-			}
-			__syncthreads();
-			if ( ((j % (BLOCKSIZE/LSPAN)) == 0) && ((l+ll)<=llim) ) {	// write result
-				for (int i=1; i<nsum; i++) {
-					for (int f=0; f<NFIELDS; f++)	qll[f] += yl[ll*nsum + i + f*LSPAN*nsum];
-				}
-				if (nlat_2 <= BLOCKSIZE) {		// do we need atomic add or not ?
-					#pragma unroll
-					for (int f=0; f<NFIELDS; f++)	ql[2*(l+ll) + f*ql_dist] = qll[f];
-				} else {
-					#pragma unroll
-					for (int f=0; f<NFIELDS; f++)	atomicAdd(ql+2*(l+ll) + f*ql_dist, qll[f]);		// VERY slow atomic add on Kepler.
-				}
-			}
-		/*	if ( ((j % WARPSZE) == 0) && ((l+ll)<=llim) ) {	// write result
-				#pragma unroll
-				for (int f=0; f<NFIELDS; f++)	atomicAdd(ql+2*(l+ll) + f*ql_dist, qll[f]);		// VERY slow atomic add on Kepler.
-			}*/
-		}
 
 		#ifndef SHTNS_ISHIOKA
 		if (j<2*LSPAN) ak[j+2] = al[j];
@@ -1956,7 +1926,8 @@ ileg_m_kernel(const double* __restrict__ al, const double* __restrict__ ct, cons
 				for (int f=0; f<NFIELDS; f++)	qll[f] += my_reo[f][k] * yl[itl+i];
 			}
 
-			if (BLOCKSIZE/LSPAN <= WARPSZE) {	// reduce_add within same l is in same warp too:
+			static_assert(BLOCKSIZE/LSPAN <= WARPSZE, "Block size must not exceed LSPAN*32");
+			// reduce_add within same l is in same warp too:
 				#pragma unroll
 				for (int ofs = BLOCKSIZE/(LSPAN*2); ofs > 0; ofs>>=1) {
 					#pragma unroll
@@ -1971,35 +1942,6 @@ ileg_m_kernel(const double* __restrict__ al, const double* __restrict__ ct, cons
 						for (int f=0; f<NFIELDS; f++)	atomicAdd(ql+2*(l+ll) + f*ql_dist, qll[f]);		// VERY slow atomic add on Kepler.
 					}
 				}
-			} else {	// only partial reduction possible, finish with atomicAdd():
-				#pragma unroll
-				for (int ofs = WARPSZE/2; ofs > 0; ofs>>=1) {
-					#pragma unroll
-					for (int f=0; f<NFIELDS; f++)	qll[f] += shfl_down(qll[f], ofs, WARPSZE);
-				}
-				__syncthreads();
-				const int nsum = (BLOCKSIZE/(LSPAN*WARPSZE));
-				if ((j % WARPSZE) == 0) {
-					for (int f=0; f<NFIELDS; f++)  yl[ll*nsum + ((j/WARPSZE) % nsum) + f*LSPAN*nsum] = qll[f];
-				}
-				__syncthreads();
-				if ( ((j % (BLOCKSIZE/LSPAN)) == 0) && ((l+ll)<=llim) ) {	// write result
-					for (int i=1; i<nsum; i++) {
-						for (int f=0; f<NFIELDS; f++)	qll[f] += yl[ll*nsum + i + f*LSPAN*nsum];
-					}
-					if (nlat_2 <= BLOCKSIZE) {		// do we need atomic add or not ?
-						#pragma unroll
-						for (int f=0; f<NFIELDS; f++)	ql[2*(l+ll) + f*ql_dist] = qll[f];
-					} else {
-						#pragma unroll
-						for (int f=0; f<NFIELDS; f++)	atomicAdd(ql+2*(l+ll) + f*ql_dist, qll[f]);		// VERY slow atomic add on Kepler.
-					}
-				}
-			/*	if ( ((j % WARPSZE) == 0) && ((l+ll)<=llim) ) {	// write result
-					#pragma unroll
-					for (int f=0; f<NFIELDS; f++)	atomicAdd(ql+2*(l+ll) + f*ql_dist, qll[f]);		// VERY slow atomic add on Kepler.
-				}*/
-			}
 
 			#ifndef SHTNS_ISHIOKA
 			if (j<2*LSPAN) ak[j+2] = al[j];
@@ -2175,8 +2117,8 @@ ileg_m_kernel(const double* __restrict__ al, const double* __restrict__ ct, cons
 					for (int f=0; f<NFIELDS; f++)	qlri[f] += qlri[f+a*NFIELDS];
 				}
 
-				if (BLOCKSIZE/(2*LSPAN) <= WARPSZE) {		// reduce_add within same l is in same warp too:
-					//if (WARPSZE % (BLOCKSIZE/(2*LSPAN))) printf("ERROR\n");
+				static_assert(BLOCKSIZE/(2*LSPAN) <= WARPSZE, "Blocksize must not exceed 2*LSPAN*WARPSZE");
+					// reduce_add within same l is in same warp too:
 					#pragma unroll
 					for (int ofs = BLOCKSIZE/(LSPAN*4); ofs > 0; ofs>>=1) {
 						#pragma unroll
@@ -2191,18 +2133,6 @@ ileg_m_kernel(const double* __restrict__ al, const double* __restrict__ ct, cons
 							for (int f=0; f<NFIELDS; f++)	atomicAdd(ql+2*l+ll + f*ql_dist, qlri[f]);		// VERY slow atomic add on Kepler.
 						}
 					}
-				} else {	// only partial reduction possible, finish with atomicAdd():
-					//if ((BLOCKSIZE/(2*LSPAN)) % WARPSZE) printf("ERROR\n");
-					#pragma unroll
-					for (int ofs = WARPSZE; ofs > 0; ofs>>=1) {
-						#pragma unroll
-						for (int f=0; f<NFIELDS; f++)	qlri[f] += shfl_down(qlri[f], ofs, WARPSZE);
-					}
-					if ( ((j % WARPSZE) == 0) && ((l+(ll>>1))<=llim) ) {	// write result
-						#pragma unroll
-						for (int f=0; f<NFIELDS; f++)	atomicAdd(ql+2*l+ll + f*ql_dist, qlri[f]);		// VERY slow atomic add on Kepler.
-					}
-				}
 			}
 
 			#ifndef SHTNS_ISHIOKA
