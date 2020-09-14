@@ -458,8 +458,13 @@ void cuda_SH_to_spat(shtns_cfg shtns, cplx* d_Qlm, double *d_Vr, const long int 
 
 	#ifdef SHTNS_ISHIOKA
 		cplx* d_qlm = (cplx*) shtns->gpu_buf_in;
+		if (S==0) {
 		for (int f=0; f<NFIELDS; f++)
 			sh2ishioka_gpu(shtns, d_Qlm + f * shtns->nlm_stride, d_qlm + f * shtns->nlm_stride, llim, mmax, S);
+		} else {
+			d_qlm = d_Qlm;
+			if (d_Vr == (double*) d_Qlm) { printf("ERROR: cuda_SH_to_spat must have distinct in and out fields");	exit(1); }
+		}
 	#else
 		cplx* d_qlm = d_Qlm;
 		if (d_Vr == (double*) d_Qlm) { printf("ERROR: cuda_SH_to_spat must have distinct in and out fields");	exit(1); }
@@ -751,6 +756,8 @@ void SHsphtor_to_spat_gpu(shtns_cfg shtns, cplx *Slm, cplx *Tlm, double *Vt, dou
 
 	double* d_vwlm = shtns->gpu_mem;
 	double* d_vtp = d_vwlm + 2*nlm_stride;
+	//double* d_vtp = shtns->gpu_buf_out;
+	//double* d_vwlm = shtns->gpu_buf_in;
 
 	if (llim < mmax*mres) {
 		mmax = llim / mres;	// truncate mmax too !
@@ -762,7 +769,8 @@ void SHsphtor_to_spat_gpu(shtns_cfg shtns, cplx *Slm, cplx *Tlm, double *Vt, dou
 	err = cudaMemcpy(d_vtp + nlm_stride, Tlm, 2*nlm*sizeof(double), cudaMemcpyHostToDevice);
 	if (err != cudaSuccess) { printf("memcpy 2 error : %s!\n", cudaGetErrorString(err));	return; }
 
-	sphtor2scal_gpu(shtns, (cplx*) d_vtp, (cplx*) (d_vtp+nlm_stride), (cplx*) d_vwlm, (cplx*) (d_vwlm+nlm_stride), llim, mmax);
+	//sphtor2scal_gpu(shtns, (cplx*) d_vtp, (cplx*) (d_vtp+nlm_stride), (cplx*) d_vwlm, (cplx*) (d_vwlm+nlm_stride), llim, mmax);
+	sphtor2ish_gpu(shtns, (cplx*) d_vtp, (cplx*) (d_vtp+nlm_stride), (cplx*) d_vwlm, (cplx*) (d_vwlm+nlm_stride), llim, mmax);
 
 	// SHT on the GPU
 	cuda_SH_to_spat<1,1>(shtns, (cplx*) d_vwlm, d_vtp, llim+1, mmax);
