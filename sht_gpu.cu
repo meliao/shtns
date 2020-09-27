@@ -512,7 +512,7 @@ void cu_SHsphtor_to_spat(shtns_cfg shtns, cplx* d_Slm, cplx* d_Tlm, double* d_Vt
 	int mmax = shtns->mmax;
 	const int mres = shtns->mres;
 	const long nlm_stride = shtns->nlm_stride;
-	double* d_vwlm = shtns->gpu_mem;
+	double* d_vwlm = shtns->gpu_buf_in;
 
 	if (llim < mmax*mres)	mmax = llim / mres;	// truncate mmax too !
 
@@ -547,7 +547,7 @@ void cu_spat_to_SHsphtor(shtns_cfg shtns, double *Vt, double *Vp, cplx *Slm, cpl
 {
 	cudaError_t err = cudaSuccess;
 	const long nlm_stride = shtns->nlm_stride;
-	double* d_vwlm = shtns->gpu_mem;
+	double* d_vwlm = shtns->gpu_buf_in;
 
 	// SHT on the GPU
 //	cuda_spat_to_SH<1,1>(shtns, Vt, (cplx*) d_vwlm, llim+1);
@@ -711,8 +711,6 @@ void SHsphtor_to_spat_gpu(shtns_cfg shtns, cplx *Slm, cplx *Tlm, double *Vt, dou
 
 	double* d_vwlm = shtns->gpu_mem;
 	double* d_vtp = d_vwlm + 2*nlm_stride;
-	//double* d_vtp = shtns->gpu_buf_out;
-	//double* d_vwlm = shtns->gpu_buf_in;
 
 	if (llim < mmax*mres) {
 		mmax = llim / mres;	// truncate mmax too !
