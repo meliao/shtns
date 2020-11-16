@@ -383,6 +383,7 @@ static void planFFT(shtns_cfg shtns, int layout)
 	nreal = phi_embed;
 	if ((theta_inc != 1)||(phi_inc != NLAT))  in_place = 0;		// we need to do the fft out-of-place.
 
+	#ifndef HAVE_LIBCUFFT
 	if ((layout & SHT_ALLOW_PADDING) && (phi_inc % 64 == 0) && (NPHI * phi_inc > 512))
 	{
 		phi_inc += 8;		// we add some padding, to avoid cache bank conflicts.
@@ -390,6 +391,7 @@ static void planFFT(shtns_cfg shtns, int layout)
 		shtns->m_stride_a = phi_inc;		// stride between phi in spectral domain
 		shtns->nlat_padded = phi_inc;		// stride between phi in spatial domain
 	}
+	#endif
 
 	#if SHT_VERBOSE > 0
 	if (verbose) {
