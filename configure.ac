@@ -57,7 +57,7 @@ if test "$SED" = :; then
 	AC_MSG_ERROR([sed program required.])
 fi
 
-# define macrao AX_CHECK_COMPILE_FLAG, and add it to CFLAGS
+# define macro AX_CHECK_COMPILE_FLAG, and add it to CFLAGS
 AC_DEFUN([AX_CHECK_COMPILE_FLAG],[
   AC_MSG_CHECKING([whether $CC accepts $1])
   ax_check_save_flags=$[]_AC_LANG_PREFIX[]FLAGS
@@ -71,7 +71,7 @@ AC_DEFUN([AX_CHECK_COMPILE_FLAG],[
      m4_default([$3], :)])
 ])dnl AX_CHECK_COMPILE_FLAGS
 
-# define macrao AX_CHECK_COMPILE_FLAG, and add it to CFLAGS
+# define macro AX_CHECK_CUDA_ARCH
 AC_DEFUN([AX_CHECK_CUDA_ARCH],[
   AC_MSG_CHECKING([whether nvcc supports gpu with compute capability $1])
   AS_IF([nvcc sht_gpu.cu -c -arch=sm_$1 --dryrun > /dev/null 2>&1], [
@@ -194,6 +194,7 @@ AS_IF([test "x$enable_cuda" != "xno"], [
 	AC_CHECK_LIB([cufft],[cufftPlanMany],,AC_MSG_ERROR([cufft library not found.]))
 	objs="$objs sht_gpu.o"
 	target="libshtns_cuda.a"
+	AS_IF([test "x$enable_openmp" = "xyes"], [target="libshtns_cuda_omp.a"])
 
 	nvcc_gencode_flags=""
 	# find cuda arch:
@@ -206,7 +207,7 @@ AS_IF([test "x$enable_cuda" != "xno"], [
 	    AS_CASE([$enable_cuda], "kepler", [cuda_cc=30], "pascal", [cuda_cc=60], "volta", [cuda_cc=70], 'ampere', [cuda_cc=80], [cuda_cc=$enable_cuda])
 	    AX_CHECK_CUDA_ARCH([$cuda_cc])
 	])
-	AS_IF([test "x$nvcc_gencode_flags" == "x"],
+	AS_IF([test "x$nvcc_gencode_flags" == "x"],[
 	    AC_MSG_ERROR([nvcc does not support any compatible gpu. Is nvcc available ?])
 	])
 	nvcc_flags="$nvcc_flags $nvcc_gencode_flags"

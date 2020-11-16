@@ -3374,9 +3374,9 @@ if test "$SED" = :; then
 	as_fn_error $? "sed program required." "$LINENO" 5
 fi
 
-# define macrao AX_CHECK_COMPILE_FLAG, and add it to CFLAGS
+# define macro AX_CHECK_COMPILE_FLAG, and add it to CFLAGS
 
-# define macrao AX_CHECK_COMPILE_FLAG, and add it to CFLAGS
+# define macro AX_CHECK_CUDA_ARCH
 
 ############################################
 ### we can use two compilers. CC and CC2 ###
@@ -4663,6 +4663,9 @@ fi
 
 	objs="$objs sht_gpu.o"
 	target="libshtns_cuda.a"
+	if test "x$enable_openmp" = "xyes"; then :
+  target="libshtns_cuda_omp.a"
+fi
 
 	nvcc_gencode_flags=""
 	# find cuda arch:
@@ -4766,12 +4769,13 @@ fi
 
 fi
 	if test "x$nvcc_gencode_flags" == "x"; then :
-  as_fn_error $? "nvcc does not support any compatible gpu. Is nvcc available ?" "$LINENO" 5
+
+	    as_fn_error $? "nvcc does not support any compatible gpu. Is nvcc available ?" "$LINENO" 5
 
 fi
 	nvcc_flags="$nvcc_flags $nvcc_gencode_flags"
 	LIBS="$LIBS -lstdc++"	# cuda uses the c++ standard library. This is needed to link with gcc
-]
+
 fi
 libname=$target		# set the libname befor checking for python.
 
