@@ -58,6 +58,9 @@
 /* Define to 1 if you have the `read_real_time' function. */
 #undef HAVE_READ_REAL_TIME
 
+/* Define to 1 if you have the <stdatomic.h> header file. */
+#undef HAVE_STDATOMIC_H
+
 /* Define to 1 if you have the <stdint.h> header file. */
 #undef HAVE_STDINT_H
 

@@ -3601,7 +3601,37 @@ else
   CFLAGS=$ax_check_save_flags
      { $as_echo "$as_me:${as_lineno-$LINENO}: result: no" >&5
 $as_echo "no" >&6; }
+
+
+  { $as_echo "$as_me:${as_lineno-$LINENO}: checking whether $CC accepts -std=c99" >&5
+$as_echo_n "checking whether $CC accepts -std=c99... " >&6; }
+  ax_check_save_flags=$CFLAGS
+  CFLAGS="$CFLAGS -std=c99"
+  cat confdefs.h - <<_ACEOF >conftest.$ac_ext
+/* end confdefs.h.  */
+
+int
+main ()
+{
+
+  ;
+  return 0;
+}
+_ACEOF
+if ac_fn_c_try_compile "$LINENO"; then :
+  CFLAGS=$ax_check_save_flags
+     { $as_echo "$as_me:${as_lineno-$LINENO}: result: yes" >&5
+$as_echo "yes" >&6; }
+     CFLAGS="$CFLAGS -std=c99"
+else
+  CFLAGS=$ax_check_save_flags
+     { $as_echo "$as_me:${as_lineno-$LINENO}: result: no" >&5
+$as_echo "no" >&6; }
      :
+fi
+rm -f core conftest.err conftest.$ac_objext conftest.$ac_ext
+
+
 fi
 rm -f core conftest.err conftest.$ac_objext conftest.$ac_ext
 
@@ -3966,6 +3996,32 @@ fi
 rm -f core conftest.err conftest.$ac_objext conftest.$ac_ext
 
 
+  { $as_echo "$as_me:${as_lineno-$LINENO}: checking whether $CC accepts -std=gnu11" >&5
+$as_echo_n "checking whether $CC accepts -std=gnu11... " >&6; }
+  ax_check_save_flags=$CFLAGS
+  CFLAGS="$CFLAGS -std=gnu11"
+  cat confdefs.h - <<_ACEOF >conftest.$ac_ext
+/* end confdefs.h.  */
+
+int
+main ()
+{
+
+  ;
+  return 0;
+}
+_ACEOF
+if ac_fn_c_try_compile "$LINENO"; then :
+  CFLAGS=$ax_check_save_flags
+     { $as_echo "$as_me:${as_lineno-$LINENO}: result: yes" >&5
+$as_echo "yes" >&6; }
+     CFLAGS="$CFLAGS -std=gnu11"
+else
+  CFLAGS=$ax_check_save_flags
+     { $as_echo "$as_me:${as_lineno-$LINENO}: result: no" >&5
+$as_echo "no" >&6; }
+
+
   { $as_echo "$as_me:${as_lineno-$LINENO}: checking whether $CC accepts -std=gnu99" >&5
 $as_echo_n "checking whether $CC accepts -std=gnu99... " >&6; }
   ax_check_save_flags=$CFLAGS
@@ -3990,7 +4046,41 @@ else
   CFLAGS=$ax_check_save_flags
      { $as_echo "$as_me:${as_lineno-$LINENO}: result: no" >&5
 $as_echo "no" >&6; }
+
+
+  { $as_echo "$as_me:${as_lineno-$LINENO}: checking whether $CC accepts -std=c99" >&5
+$as_echo_n "checking whether $CC accepts -std=c99... " >&6; }
+  ax_check_save_flags=$CFLAGS
+  CFLAGS="$CFLAGS -std=c99"
+  cat confdefs.h - <<_ACEOF >conftest.$ac_ext
+/* end confdefs.h.  */
+
+int
+main ()
+{
+
+  ;
+  return 0;
+}
+_ACEOF
+if ac_fn_c_try_compile "$LINENO"; then :
+  CFLAGS=$ax_check_save_flags
+     { $as_echo "$as_me:${as_lineno-$LINENO}: result: yes" >&5
+$as_echo "yes" >&6; }
+     CFLAGS="$CFLAGS -std=c99"
+else
+  CFLAGS=$ax_check_save_flags
+     { $as_echo "$as_me:${as_lineno-$LINENO}: result: no" >&5
+$as_echo "no" >&6; }
      :
+fi
+rm -f core conftest.err conftest.$ac_objext conftest.$ac_ext
+
+
+fi
+rm -f core conftest.err conftest.$ac_objext conftest.$ac_ext
+
+
 fi
 rm -f core conftest.err conftest.$ac_objext conftest.$ac_ext
 
@@ -4393,7 +4483,7 @@ fi
 done
 
 
-for ac_header in stdlib.h stdio.h string.h math.h complex.h
+for ac_header in stdlib.h stdio.h string.h math.h complex.h stdatomic.h
 do :
   as_ac_Header=`$as_echo "ac_cv_header_$ac_header" | $as_tr_sh`
 ac_fn_c_check_header_mongrel "$LINENO" "$ac_header" "$as_ac_Header" "$ac_includes_default"

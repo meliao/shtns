@@ -34,7 +34,12 @@
 #include "fftw3/cycle.h"
 
 // chained list of sht_setup : start with NULL
+#ifdef HAVE_STDATOMIC_H
+#include <stdatomic.h>
+_Atomic
+#endif
 shtns_cfg sht_data = NULL;
+
 #ifdef _OPENMP
   int omp_threads = 1;	// multi-thread disabled by default.
   #if HAVE_LIBFFTW3_OMP
@@ -908,6 +913,9 @@ void fprint_ftable(FILE* fp, void* ftable[SHT_NVAR][SHT_NTYP])
 void shtns_print_cfg(shtns_cfg shtns)
 {
 	printf("Lmax=%d, Mmax*Mres=%d, Mres=%d, Nlm=%d  [%d threads, ",LMAX, MMAX*MRES, MRES, NLM, shtns->nthreads);
+	#ifdef HAVE_LIBCUFFT
+		if (shtns->d_alm) printf("gpu ready, ");
+	#endif
 	if (shtns->norm & SHT_REAL_NORM) printf("'real' norm, ");
 	if (shtns->norm & SHT_NO_CS_PHASE) printf("no Condon-Shortley phase, ");
 	if (shtns->robert_form) printf("Robert form, ");
@@ -1158,8 +1166,12 @@ shtns_cfg shtns_create(int lmax, int mmax, int mres, enum shtns_norm norm)
 	if ((lmax == mmax) && (mres == 1))	SH_rotK90_init(shtns);
 
 // save a pointer to this setup and return.
+#ifdef HAVE_STDATOMIC_H
+	shtns->next = atomic_exchange(&sht_data, shtns);
+#else
 	shtns->next = sht_data;		// reference of previous setup (may be NULL).
 	sht_data = shtns;			// keep track of new setup.
+#endif
 	return(shtns);
 }
 
@@ -1191,8 +1203,12 @@ shtns_cfg shtns_create_with_grid(shtns_cfg base, int mmax, int nofft)
 	}
 
 // save a pointer to this setup and return.
+#ifdef HAVE_STDATOMIC_H
+	shtns->next = atomic_exchange(&sht_data, shtns);
+#else
 	shtns->next = sht_data;		// reference of previous setup (may be NULL).
 	sht_data = shtns;			// keep track of new setup.
+#endif
 	return(shtns);
 }
 
@@ -1206,7 +1222,7 @@ void shtns_unset_grid(shtns_cfg shtns)
 	shtns->nphi = 0;	shtns->nspat = 0;
 }
 
-/// release all resources allocated by a given shtns_cfg.
+/// release all resources allocated by a given shtns_cfg. NOT thead-safe.
 void shtns_destroy(shtns_cfg shtns)
 {
 	#ifdef HAVE_LIBCUFFT
@@ -1242,7 +1258,7 @@ void shtns_destroy(shtns_cfg shtns)
 	VFREE(shtns);
 }
 
-/// clear all allocated memory (hopefully) and go back to 0 state.
+/// clear all allocated memory (hopefully) and go back to 0 state. NOT thread-safe.
 void shtns_reset()
 {
 	while (sht_data != NULL) {

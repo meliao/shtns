@@ -107,7 +107,9 @@ AS_IF([test "x$enable_knl" != "xyes"], [
 ])
 CFLAGS="$CFLAGS -O3"
 AX_CHECK_COMPILE_FLAG([-ffast-math])
-AX_CHECK_COMPILE_FLAG([-std=gnu99])
+AX_CHECK_COMPILE_FLAG([-std=gnu99],, [
+    AX_CHECK_COMPILE_FLAG([-std=c99])
+])
 AX_CHECK_COMPILE_FLAG([-fopenmp-simd])
 AX_CHECK_COMPILE_FLAG([-qopenmp-simd])
 # the following prevents gcc from inserting memset in tight loops for zeroing stuff. Must appear after -O3
@@ -150,10 +152,14 @@ AS_IF([test "x$enable_knl" != "xyes"], [
 	AS_IF([test "x$enable_openmp" = "xdefault"], [enable_openmp=yes])
 ])
 AX_CHECK_COMPILE_FLAG([-ffast-math])
-AX_CHECK_COMPILE_FLAG([-std=gnu99])
+AX_CHECK_COMPILE_FLAG([-std=gnu11],, [
+    AX_CHECK_COMPILE_FLAG([-std=gnu99],, [
+	AX_CHECK_COMPILE_FLAG([-std=c99])
+    ])
+])
 
 # Checks for header files.
-AC_CHECK_HEADERS([stdlib.h stdio.h string.h math.h complex.h])
+AC_CHECK_HEADERS([stdlib.h stdio.h string.h math.h complex.h stdatomic.h])
 
 # Checks for libraries.
 AC_CHECK_LIB([m],[cos],,AC_MSG_ERROR([math library not found.]))
