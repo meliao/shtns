@@ -31,7 +31,7 @@ FEATURES:
 - special spectral operator functions that do not require a transform
   (multiply by cos(theta)...).
 - transforms and rotations for complex-valued spatial fields.
-- SHT at fixed m (without fft, aka Legendre transform - beta).
+- SHT at fixed m (without fft, aka Legendre transform).
 
 
 INSTALL:
@@ -77,6 +77,15 @@ DOCUMENTATION:
 
 CHANGE LOG:
 -----------
+
+* v3.4.5  (13 Nov 2020)
+	- Fix compilation of python module with older versions of gcc.
+
+* v3.4.4  (12 Oct 2020)
+	- Fix accuracy loss with cuda-transforms on GPU at large sizes (Lmax around 8000)
+	- Fix wrong sign for rotation around Z-axis in `shtns_rotation_set_angle*()`
+	- Fix compilations issues arising with some compilers and systems.
+	- Rotations: allow beta<0 in `shtns_rotation_set_angles_Z?Z()`
 
 * v3.4.3  (8 Sep 2020)
 	- Fix critical bug sometimes causing intermittent accuracy errors with avx512 and large 

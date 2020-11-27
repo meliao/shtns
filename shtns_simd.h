@@ -61,9 +61,19 @@
 		const vector unsigned char perm = { 8,9,10,11,12,13,14,15, 0,1,2,3,4,5,6,7 };
 		return vec_perm(a,a,perm);
 	}
+	//#define vreverse(a) vec_reve(a)
 	#define vxchg(a) vreverse(a)
+	#define vdup_even(v) vec_mergeh(v,v)
+	#define vdup_odd(v)  vec_mergel(v,v)
+	#define vxchg_even_odd(a) vreverse(a)
 	#define vread(mem, idx) vec_ld((int)(idx)*16, ((const vector double*)(mem)))
 	#define vstor(mem, idx, v) vec_st((v2d)v, (int)(idx)*16, ((vector double*)(mem)))
+	#define vread2 vread
+	#define vstor2 vstor
+	static const unsigned long long _neg0[2] __attribute__((aligned (16))) = {0x8000000000000000ULL, 0} ;		// a constant needed to change the sign of vectors
+	#define vneg_even_xor_cte (*(const v2d*)_neg0)
+	#define vxor(v,x) vec_xor(v,x)
+	#define vxor2 vxor
 	inline static double reduce_add(rnd a) {
 		rnd b = a + vec_mergel(a, a);
 		return( vec_extract(b,0) );
@@ -71,6 +81,10 @@
 	inline static v2d v2d_reduce(rnd a, rnd b) {
 		v2d c = vec_mergel(a, b);		b = vec_mergeh(a, b);
 		return b + c;
+	}
+	inline static s2d vneg_even_precalc(s2d a) {
+		const s2d ne = {-1.0, 1.0};
+		return ne * a;
 	}
 	#define vinterleave(a,b) { rnd x = vec_mergeh(a,b);		b = vec_mergel(a,b);	a = x; }
 	#define vinterleave_reverse(a,b)	{ rnd x = vec_mergeh(a,b);		a = vec_mergel(a,b);	b = x; }
@@ -88,7 +102,15 @@
 	#define vhi(a) vec_extract(a, 1)
 	#define vcplx_real(a) vec_extract(a, 0)
 	#define vcplx_imag(a) vec_extract(a, 1)
+	#define vlo_to_dbl(a) vec_extract(a, 0)
+	#define vhi_to_dbl(a) vec_extract(a, 1)
 	#define vreverse_pairs(v) (v)
+	#define v2d_lo(a) (a)
+	// vset(lo, hi) takes two doubles and pack them in a vector
+	//#define vset(lo, hi) _mm_set_pd(hi, lo)
+	//#define vlo_to_cplx(a) vec_insert(0.0, a, 1)
+	//#define vhi_to_cplx(a) vec_mergel(a, vdup(0.0))
+
 	inline static s2d vblend_even_odd(s2d a, s2d b) {	// same as _mm_shuffle_pd(a,b,2)
 		const vector unsigned char perm = {0,1,2,3,4,5,6,7, 24,25,26,27,28,29,30,31};
 		return vec_perm(a,b,perm);
@@ -277,7 +299,7 @@
 		inline static rnd vneg_even_precalc(rnd v) {		// don't use in an intesive loop.
 			return _mm256_addsub_pd(vall(0.0), v);
 		}
-		#define vneg_even_xor_cte ((rnd)_mm256_broadcast_pd((const v2d*)_neg0))
+		#define vneg_even_xor_cte ((rnd)_mm256_broadcast_pd((const __m128d*)_neg0))
 		//#define vneg_even_xor_cte ((rnd)_mm256_castsi256_pd( _mm256_setr_epi32(0,0x80000000, 0,0, 0,0x80000000, 0,0)))	// BUGGY ON GCC! DON'T USE!
 		#define vxor(v,x) ((rnd)_mm256_xor_pd(v, x))
 		inline static double reduce_add(rnd a) {	// Latency=12c Skylake
@@ -372,14 +394,14 @@
 			((s2d*)mem)[idx*4+3] = _mm_unpackhi_pd(sr, si);	// dd = south_ri[1]
 		}
 	#endif
-	#ifdef __SSE3__
-		#define addi(a,b) _mm_addsub_pd(a, _mm_shuffle_pd((b),(b),1))		// a + I*b
+/*	#ifdef __SSE3__
+		//#define addi(a,b) _mm_addsub_pd(a, _mm_shuffle_pd((b),(b),1))		// a + I*b
 		//#define subadd(a,b) _mm_addsub_pd(a, b)		// [al-bl, ah+bh]
 		//#define CMUL(a,b) _mm_addsub_pd(_mm_shuffle_pd(a,a,0)*b, _mm_shuffle_pd(a,a,3)*_mm_shuffle_pd(b,b,1))
 	#else
-		#define addi(a,b) ( (a) + (_mm_shuffle_pd((b),(b),1) * _mm_set_pd(1.0, -1.0)) )		// a + I*b		[note: _mm_set_pd(imag, real)) ]
+		//#define addi(a,b) ( (a) + (_mm_shuffle_pd((b),(b),1) * _mm_set_pd(1.0, -1.0)) )		// a + I*b		[note: _mm_set_pd(imag, real)) ]
 		//#define subadd(a,b) ( (a) + (b) * _mm_set_pd(1.0, -1.0) )		// [al-bl, ah+bh]
-	#endif
+	#endif	*/
 	inline static v2d IxKxZ(double k, v2d z) {		// I*k*z,  allowing to use FMA.
 		return (v2d) _mm_setr_pd(-k,k) * vxchg(z);
 	}

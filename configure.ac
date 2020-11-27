@@ -2,7 +2,7 @@
 # Process this file with autoconf to produce a configure script.
 
 AC_PREREQ([2.62])
-AC_INIT([SHTns],[3.4.3],[],[shtns],[https://bitbucket.org/nschaeff/shtns])
+AC_INIT([SHTns],[3.4.5],[],[shtns],[https://bitbucket.org/nschaeff/shtns])
 AC_LANG([C])
 AC_CONFIG_SRCDIR([sht_init.c])
 AC_CONFIG_HEADERS([sht_config.h])
@@ -295,6 +295,7 @@ AS_IF([test "x$enable_python" != "xno"], [
 	AC_SUBST([numpy_inc])
 	AC_SUBST([python_inc])
 	CFLAGS="$CFLAGS -fpic"	# required compile flag for python extensions.
+	CFLAGS2="$CFLAGS2 -fpic"	# required compile flag for python extensions.
 	target="_shtns.so"	# build python extension instead of C library.
 	install="install-py"	# install python extension instead of C library.
 ])

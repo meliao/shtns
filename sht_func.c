@@ -1363,12 +1363,15 @@ static cplx special_eiphi(const double phi)
 /// Set the rotation angle, and compute associated Legendre functions.
 void shtns_rotation_set_angles_ZYZ(shtns_rot r, double alpha, double beta, double gamma)
 {
-	if ((beta < 0) || (beta > M_PI)) {
-		printf("ERROR: angle must be between 0 and pi\n");
+	if (fabs(beta) > M_PI) {
+		printf("ERROR: angle must be between -pi and pi\n");
 		exit(1);
 	}
-	
-	if (beta == 0.0) {
+	if (beta < 0.0) {	// translate to beta>0 as beta<0 is not supported.
+		alpha = (alpha>0) ? alpha-M_PI : alpha+M_PI;		// rotate by 180°
+		beta = fabs(beta);
+		gamma = (gamma>0) ? gamma-M_PI : gamma+M_PI;		// rotate by 180°
+	} else if (beta == 0.0) {
 		alpha += gamma;
 		gamma = 0.0;
 	}
@@ -1377,8 +1380,8 @@ void shtns_rotation_set_angles_ZYZ(shtns_rot r, double alpha, double beta, doubl
 	const double cos_beta = cos(beta);   //((beta == M_PI_2)||(beta == M_PI/2)) ? 0.0 : cos(beta);
 	r->cos_beta = cos_beta;
 	r->sin_beta = sqrt((1.-cos_beta)*(1.+cos_beta));
-	r->eia = special_eiphi(alpha);
-	r->eig = special_eiphi(gamma);
+	r->eia = special_eiphi(-alpha);
+	r->eig = special_eiphi(-gamma);
 	r->alpha = alpha;
 	r->beta = beta;
 	r->gamma = gamma;
@@ -1394,7 +1397,6 @@ void shtns_rotation_set_angles_ZYZ(shtns_rot r, double alpha, double beta, doubl
 			}
 		}
 	}
-
 }
 
 void shtns_rotation_set_angles_ZXZ(shtns_rot r, double alpha, double beta, double gamma)
@@ -1603,7 +1605,7 @@ void shtns_rotation_apply_real(shtns_rot r, cplx* Qlm, cplx* Rlm)
 	if (r->beta == 0.0) {	// only rotation along Z-axis.
 		if (Rlm != Qlm)		for (int l=0; l<lmax; l++) 	Rlm[l] = Qlm[l];		// copy m=0
 		long lm = lmax;
-		cplx ei_alpha = r->eia;
+		const cplx ei_alpha = r->eia;
 		cplx eim_alpha = ei_alpha;
 		for (int m=1; m<=mmax; m++) {
 			for (int l=m; l<lmax; l++) {
@@ -1884,7 +1886,7 @@ void shtns_rotation_apply_cplx(shtns_rot r, cplx* Zlm, cplx* Rlm)
 
 	if (r->beta == 0.0) {	// only rotation along Z-axis.
 		long lm = 0;
-		cplx eia = r->eia;
+		const cplx eia = r->eia;
 		for (int l=0; l<lmax; l++) {
 			long ll = (l<=mmax) ? l*(l+1) : mmax*(2*l-mmax) + l;
 			cplx eim_alpha = eia;

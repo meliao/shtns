@@ -43,6 +43,11 @@ int NPHI = 0;
 // number of SH iterations
 int SHT_ITER = 50;		// do 50 iterations by default
 
+int error = 0;
+#define COLOR_OK  "\033[92m"
+#define COLOR_WRN "\033[93m"
+#define COLOR_ERR "\033[91m"
+#define COLOR_END "\033[0m"
 
 #include <sys/time.h>
 
@@ -123,6 +128,19 @@ int isNotNormal(double x) {
 	return 0;
 }
 
+void print_error(double err_rms, double err_max, int l_max, int lm_max, char* name)
+{
+	printf("  %s => max error = %g (l=%d,lm=%ld)   rms error = %g   ",	name, err_max, l_max, lm_max, err_rms);
+
+	if ((err_max > 1e-4) || (err_rms > 1e-6) || isNotFinite(err_rms)) {
+		printf(COLOR_ERR " **** ERROR **** " COLOR_END "\n");
+		error++;
+	} else if ((err_max > 1e-7) || (err_rms > 1e-9)) {
+		printf(COLOR_WRN "SUSPECT" COLOR_END "\n");
+	} else
+		printf(COLOR_OK "OK" COLOR_END "\n");
+}
+
 double scal_error(complex double *Slm, complex double *Slm0, int ltr)
 {
 	long int jj,i, nlm_cplx;
@@ -145,9 +163,8 @@ double scal_error(complex double *Slm, complex double *Slm0, int ltr)
 //		if (isNotFinite(t)) printf("NaN or Inf @ lm=%ld (l=%d)  Slm=%g,%g  Slm0=%g,%g\n",i,shtns->li[i], creal(Slm[i]), cimag(Slm[i]), creal(Slm0[i]), cimag(Slm0[i]));
 		if (t>tmax) { tmax = t; jj = i; }
 	}
-	if (isNotFinite(sqrt(n2/NLM))) printf("!!! ERROR: nan or inf !!!\n");
-	printf("   => max error = %g (l=%d,lm=%ld)   rms error = %g",tmax,shtns->li[jj],jj,sqrt(n2/NLM));
-	if ((NLM < 15) && ((tmax > 1e-10) || isNotFinite(n2))) {
+	print_error(sqrt(n2/NLM), tmax, shtns->li[jj],jj, "");
+	if ((tmax > 1e-7) && (NLM < 15)) {
 		printf("\n orig:");
 		for (i=0; i<NLM;i++)
 			if ((i <= LMAX)||(i >= nlm_cplx)) {		// m=0, and 2*m=nphi is real
@@ -162,8 +179,7 @@ double scal_error(complex double *Slm, complex double *Slm0, int ltr)
 			} else {
 				printf("  %g,%g",creal(Slm[i]),cimag(Slm[i]));
 			}
-	} else printf("\n");
-	if ((tmax > 1e-6) || isNotFinite(n2)) printf("    **** ERROR: BAD ACCURACY ****\n");
+	}
 	return(tmax);
 }
 
@@ -185,27 +201,23 @@ double vect_error(complex double *Slm, complex double *Tlm, complex double *Slm0
 		n2 += t*t;
 		if (t>tmax) { tmax = t; jj = i; }
 	}
-	printf("   Spheroidal => max error = %g (l=%d,lm=%ld)    rms error = %g",tmax,shtns->li[jj],jj,sqrt(n2/NLM));
-	if (tmax > 1e-3) {
-		if (NLM < 15) {
-			printf("\n orig:");
-			for (i=0; i<NLM;i++)
-				if ((i <= LMAX)||(i >= NLM)) {		// m=0, and 2*m=nphi is real
-					printf("  %g",creal(Slm0[i]));
-				} else {
-					printf("  %g,%g",creal(Slm0[i]),cimag(Slm0[i]));
-				}
-			printf("\n diff:");
-			for (i=0; i<NLM;i++)
-				if ((i <= LMAX)||(i >= NLM)) {		// m=0, and 2*m=nphi is real
-					printf("  %g",creal(Slm[i]));
-				} else {
-					printf("  %g,%g",creal(Slm[i]),cimag(Slm[i]));
-				}
-		}
-		printf("    **** ERROR ****\n");
+	print_error(sqrt(n2/NLM), tmax, shtns->li[jj],jj, "Spheroidal");
+	if ((tmax > 1e-4) && (NLM < 15)) {
+		printf("\n orig:");
+		for (i=0; i<NLM;i++)
+			if ((i <= LMAX)||(i >= NLM)) {		// m=0, and 2*m=nphi is real
+				printf("  %g",creal(Slm0[i]));
+			} else {
+				printf("  %g,%g",creal(Slm0[i]),cimag(Slm0[i]));
+			}
+		printf("\n diff:");
+		for (i=0; i<NLM;i++)
+			if ((i <= LMAX)||(i >= NLM)) {		// m=0, and 2*m=nphi is real
+				printf("  %g",creal(Slm[i]));
+			} else {
+				printf("  %g,%g",creal(Slm[i]),cimag(Slm[i]));
+			}
 	}
-		else printf("\n");
 //	write_vect("Slm",Slm,NLM*2);
 	tmax0 = tmax;
 
@@ -222,27 +234,23 @@ double vect_error(complex double *Slm, complex double *Tlm, complex double *Slm0
 		n2 += t*t;
 		if (t>tmax) { tmax = t; jj = i; }
 	}
-	printf("   Toroidal => max error = %g (l=%d,lm=%ld)    rms error = %g",tmax,shtns->li[jj],jj,sqrt(n2/NLM));
-	if (tmax > 1e-3) {
-		if (NLM < 15) {
-			printf("\n orig:");
-			for (i=0; i<NLM;i++)
-				if ((i <= LMAX)||(i >= NLM)) {		// m=0, and 2*m=nphi is real
-					printf("  %g",creal(Tlm0[i]));
-				} else {
-					printf("  %g,%g",creal(Tlm0[i]),cimag(Tlm0[i]));
-				}
-			printf("\n diff:");
-			for (i=0; i<NLM;i++)
-				if ((i <= LMAX)||(i >= NLM)) {		// m=0, and 2*m=nphi is real
-					printf("  %g",creal(Tlm[i]));
-				} else {
-					printf("  %g,%g",creal(Tlm[i]),cimag(Tlm[i]));
-				}
-		}
-		printf("    **** ERROR ****\n");
+	print_error(sqrt(n2/NLM), tmax, shtns->li[jj],jj, "Toroidal");
+	if ((tmax > 1e-4) && (NLM < 15)) {
+		printf("\n orig:");
+		for (i=0; i<NLM;i++)
+			if ((i <= LMAX)||(i >= NLM)) {		// m=0, and 2*m=nphi is real
+				printf("  %g",creal(Tlm0[i]));
+			} else {
+				printf("  %g,%g",creal(Tlm0[i]),cimag(Tlm0[i]));
+			}
+		printf("\n diff:");
+		for (i=0; i<NLM;i++)
+			if ((i <= LMAX)||(i >= NLM)) {		// m=0, and 2*m=nphi is real
+				printf("  %g",creal(Tlm[i]));
+			} else {
+				printf("  %g,%g",creal(Tlm[i]),cimag(Tlm[i]));
+			}
 	}
-		else printf("\n");
 //	write_vect("Tlm",Tlm,NLM*2);
 	return(tmax > tmax0 ? tmax : tmax0);
 }
@@ -315,6 +323,17 @@ void test_SHT()
 	printf("   SHT time (lmax=%d): \t synthesis = %f ms [%f Gflops] \t analysis = %f ms [%f Gflops] \n", LMAX, ts2, gflop/ts2, ta2, gflop/ta2);
   #endif
 	scal_error(Slm, Slm0, LMAX);
+	return;
+}
+
+void test_SHT_accuracy()
+{
+	for (int i=0;i<NLM;i++) Slm[i] = Slm0[i];	// restore test case...
+	for (int jj=0; jj< SHT_ITER; jj++) {
+		SH_to_spat(shtns, Slm,Sh);
+		spat_to_SH(shtns, Sh, Tlm);
+		scal_error(Tlm, Slm0, LMAX);
+	}
 	return;
 }
 
@@ -692,6 +711,7 @@ int main(int argc, char *argv[])
 	int point = 0;
 	int vector = 0;
 	int robert_form = -1;
+	int accuracy_test = 0;
 	char name[20];
 	FILE* fw;
 
@@ -732,6 +752,7 @@ int main(int argc, char *argv[])
 		if (strcmp(name,"robert") == 0) robert_form = t;
 		if (strcmp(name,"nopadding") == 0) layout_opts &= ~SHT_ALLOW_PADDING;		// Disable padding.
 		if (strcmp(name,"nogpu") == 0) layout_opts &= ~SHT_ALLOW_GPU;		// Disable gpu.
+		if (strcmp(name,"accuracy") == 0) accuracy_test = 1;			// Parform an accuracy test instead of a speed test.
 	}
 
 	if (vector == 0) layout_opts |= SHT_SCALAR_ONLY;
@@ -863,6 +884,10 @@ int main(int argc, char *argv[])
 //	printf("** performing %d scalar SHT with NL evaluation\n", SHT_ITER);
 	printf("** performing %d scalar SHT\n", SHT_ITER);
 	printf(":: STD\n");
+	if (accuracy_test) {
+		test_SHT_accuracy();
+		exit(error);
+	}
 	test_SHT();
 	printf(":: LTR\n");
 	test_SHT_l(LMAX/2);
@@ -891,16 +916,50 @@ int main(int argc, char *argv[])
 		}
 	}
 
-	if (MMAX > 0) {
-		memset(Slm+LMAX+1, 0, sizeof(cplx)*(LMAX-MRES+1));
-		SH_to_spat_ml(shtns, 1, Slm0+LMAX+1, (cplx*) Sh, LMAX);
-		spat_to_SH_ml(shtns, 1, (cplx*) Sh, Slm+LMAX+1, LMAX);
-		double err = 0.0;
-		for (int i=0; i<=LMAX-MRES; i++) {
-			double t = cabs(Slm[i+LMAX+1]-Slm0[i+LMAX+1]);
-			err += t*t;
+	{	// test Legendre only:
+		const int im = (MMAX > 0) ? 1 : 0;
+		if (im == 0) {
+			shtns_free(ShF);
+			ShF = shtns_malloc(sizeof(cplx) * shtns->nlat);  Sh = (double*) ShF;
+			for (int i=0; i<=LMAX; i++) Slm0[i] = creal(Slm0[i]);
+			if (vector) {
+				shtns_free(ThF);
+				ThF = (complex double *) shtns_malloc( sizeof(cplx) * shtns->nspat);  Th = (double *) ThF;
+				for (int i=0; i<=LMAX; i++) Tlm0[i] = creal(Tlm0[i]);
+			}
 		}
-		printf("Test Legendre only (m=%d) :: err = %g\n",MRES,sqrt(err));
+		memset(Slm+im*(LMAX+1), 0, sizeof(cplx)*(LMAX-im*MRES+1));
+		if (vector) {
+			memset(Tlm+im*(LMAX+1), 0, sizeof(cplx)*(LMAX-im*MRES+1));
+			SHsphtor_to_spat_ml(shtns, im, Slm0+im*(LMAX+1), Tlm0+im*(LMAX+1), (cplx*) Sh, (cplx*) Th, LMAX);
+			spat_to_SHsphtor_ml(shtns, im, (cplx*) Sh, (cplx*) Th, Slm+im*(LMAX+1), Tlm+im*(LMAX+1), LMAX);
+		} else {
+			SH_to_spat_ml(shtns, im, Slm0+im*(LMAX+1), (cplx*) Sh, LMAX);
+			spat_to_SH_ml(shtns, im, (cplx*) Sh, Slm+im*(LMAX+1), LMAX);
+		}
+		double err = 0.0;
+		double err_v = 0.0;
+		for (int i=0; i<=LMAX-im*MRES; i++) {
+			double t = cabs(Slm[i+im*(LMAX+1)]-Slm0[i+im*(LMAX+1)]);
+			err += t*t;
+			if (vector) {
+				double t = cabs(Tlm[i+im*(LMAX+1)]-Tlm0[i+im*(LMAX+1)]);
+				err_v += t*t;
+			}
+			if (t > 1e-6) {
+				printf("l=%d, Slm=%g,%g   Slm0=%g,%g\n", i, creal(Slm[i+im*(LMAX+1)]), cimag(Slm[i+im*(LMAX+1)]), creal(Slm0[i+im*(LMAX+1)]), cimag(Slm0[i+im*(LMAX+1)]));
+				if (vector)
+				printf("l=%d, Tlm=%g,%g   Tlm0=%g,%g\n", i, creal(Tlm[i+im*(LMAX+1)]), cimag(Tlm[i+im*(LMAX+1)]), creal(Tlm0[i+im*(LMAX+1)]), cimag(Tlm0[i+im*(LMAX+1)]));
+			}
+		}
+		printf("** Test Legendre only (m=%d) :: err = %g   ",im*MRES,sqrt(err));
+		if (sqrt(err) > 1e-4) {		printf(COLOR_ERR "**** ERROR ****" COLOR_END "\n");	error++;	}
+		else printf(COLOR_OK "OK" COLOR_END "\n");
+		if (vector) {
+			printf("** Test Legendre only Vector (m=%d) :: err = %g   ",im*MRES,sqrt(err_v));
+			if (sqrt(err_v) > 1e-4) {		printf(COLOR_ERR "**** ERROR ****" COLOR_END "\n");	error++;	}
+			else printf(COLOR_OK "OK" COLOR_END "\n");
+		}
 	}
 
 	shtns_create(LMAX, MMAX, MRES, shtnorm);		// test memory allocation and management.
@@ -916,5 +975,5 @@ int main(int argc, char *argv[])
 
 	shtns_reset();
 	fftw_cleanup();
+	return error;
 }
-
