@@ -180,21 +180,17 @@ In that case, shtns_info#nlat_padded > shtns_info#nlat and shtns_info#nspat > sh
 
 \section native Native layout
 
-The native way of storing spatial field data (which will help you achieve the best performance with SHTns)
-is the same as the \ref theta_fast layout, except that it requires you to allocate slightly more
-memory for a field than the NLAT*NPHI double values.
-Namely NLAT*(NPHI/2+1)*2 doubles are required (instead of NLAT*NPHI) to be able tu use the in-place FFT of FFTW.
-
-In Fortran this means you will allocate data as if the phi direction had (NPHI/2+1)*2 points instead of NPHI.
-The additional space, is located at the end of the useful data, and you don't need to worry about it.
+The "native" way of storing spatial field data will help you achieve the best performance with SHTns.
+On CPU, it is the same as the \ref theta_fast layout.
+However, on nvidia GPU, this layout is neither phi-contiguous nor theta-contiguous, but has the following access pattern:
+\f$ A(\theta,\phi) \f$ = A[ip*2 + (it%2) + (it/2)*(NPHI*2)] in C.
 
 To instruct \ref shtns_init that your spatial data has been set up using this layout, use \ref SHT_NATIVE_LAYOUT.
 
-\note One must be careful when allocating spatial data, as the Fourier transform requires some additional space.\n Precisely, the number
-of required \c double is \ref NSPAT_ALLOC = NLAT*(NPHI/2+1)*2. The first NLAT*NPHI values are the spatial data.
-
-\note In addition, spatial data must be allocated using the \c fftw_malloc function, for example using :
-\code A = fftw_malloc( NSPAT_ALLOC * sizeof(double) );\endcode
+\note The safe way to allocate spatial data for all layouts is to use:
+\code A = shtns_malloc( sh->nspat * sizeof(double) );\endcode
+\note which will allocate the right amount of data and with optimal alignement.
+\note In addition, it will allocate "pinned" memory when GPU support is enabled, for maximum transfer rate between GPU and CPU.
 
 \note <b>It is not recommended to use the native layout with Fortran or Python.</b>
 
@@ -646,7 +642,7 @@ See the \c shtns_jni folder.
 
 /** \page gpu Using SHTns with GPU (CUDA)
 
-SHTns supports nvidia Kepler and Pascal GPUs, using optimized cuda transforms.
+SHTns supports nvidia Kepler, Pascal and Volta GPUs, using optimized cuda transforms.
 There are two ways to use GPUs with SHTns: automatic off-loading where the GPU is used transparently (not much to change in your code)
 and SHTns handles all the data transfers between GPU and CPU memory.
 In addition, routines for performing transforms of data residing already on the GPU are provided.
@@ -656,6 +652,8 @@ In all cases, you must first configure SHTns to use cuda:
 \code ./configure --enable-cuda
 make
 make install \endcode
+
+Optionally, you can specify which GPU you are targetting with \code ./configure --enable-cuda=pascal \endcode for instance.
 
 \section offload Automatic off-loading
 
