@@ -247,10 +247,10 @@ double vect_error(complex double *Slm, complex double *Tlm, complex double *Slm0
 	return(tmax > tmax0 ? tmax : tmax0);
 }
 
-void test_SH_point()
+void test_SH_point(int vector)
 {
 	long int jj,i;
-	double ts2, ta2;
+	double ts2, ta2=0;
 	struct timeval t1, t2;
 
 	for (i=0;i<NLM;i++) Slm[i] = Slm0[i];	// restore test case...
@@ -262,6 +262,7 @@ void test_SH_point()
 	gettimeofday(&t2, NULL);
 	ts2 = tdiff(&t1, &t2);
 	
+  if (vector) {
 	gettimeofday(&t1, NULL);
 	for (jj=1; jj< SHT_ITER; jj++) {
 		double vr, vt, vp;
@@ -269,8 +270,11 @@ void test_SH_point()
 	}
 	gettimeofday(&t2, NULL);
 	ta2 = tdiff(&t1, &t2);
+  }
 
-	printf("   SHT_to_point time = %f ms [scalar], %f ms [3D vector]\n", ts2, ta2);
+	printf("   SHT_to_point time = %f ms [scalar]", ts2);
+	if (vector) printf(", %f ms [3D vector]", ta2);
+	printf("\n");
 	return;
 }
 
@@ -662,6 +666,9 @@ void usage()
 	printf(" -schmidt : use schmidt semi-normalization.\n");
 	printf(" -4pi : use 4pi normalization.\n");
 	printf(" -robert : use Robert form, ie spatial vector fields are multiplied by sin(colatitude).\n");
+	printf(" -loadsave : load and save config for faster startup.\n");
+	printf(" -nogpu : disable GPU offload.\n");
+	printf(" -nopadding : disable padding.\n");
   #ifdef _OPENMP
 	printf(" -nth=<n> : use n threads.\n");
   #endif
@@ -680,10 +687,10 @@ int main(int argc, char *argv[])
 	enum shtns_type shtmode = sht_auto;		// default to "auto" (fastest) mode.
 	enum shtns_norm shtnorm = sht_orthonormal;		// default to "orthonormal" SH.
 	int layout = SHT_NATIVE_LAYOUT;
+	int layout_opts = SHT_ALLOW_PADDING | SHT_ALLOW_GPU;
 	int nlorder = 0;
 	int point = 0;
 	int vector = 0;
-	int loadsave = 0;
 	int robert_form = -1;
 	char name[20];
 	FILE* fw;
@@ -721,21 +728,20 @@ int main(int argc, char *argv[])
 		if (strcmp(name,"nlorder") == 0) nlorder = t;
 		if (strcmp(name,"vector") == 0) vector = 1;
 		if (strcmp(name,"point") == 0) point = 1;
-		if (strcmp(name,"loadsave") == 0) loadsave = 1;
+		if (strcmp(name,"loadsave") == 0) layout_opts |= SHT_LOAD_SAVE_CFG;
 		if (strcmp(name,"robert") == 0) robert_form = t;
-		if (strcmp(name,"padding") == 0) layout |= SHT_ALLOW_PADDING;		// Allow padding if it may improve performance.
+		if (strcmp(name,"nopadding") == 0) layout_opts &= ~SHT_ALLOW_PADDING;		// Disable padding.
+		if (strcmp(name,"nogpu") == 0) layout_opts &= ~SHT_ALLOW_GPU;		// Disable gpu.
 	}
 
-	if (vector == 0) layout |= SHT_SCALAR_ONLY;
-	printf("loadsave = %d\n", loadsave);
-	if (loadsave) layout |= SHT_LOAD_SAVE_CFG;
-	layout |= SHT_ALLOW_GPU;			// Allow GPU transforms if possible.
+	if (vector == 0) layout_opts |= SHT_SCALAR_ONLY;
+	printf("loadsave = %d\n", !!(layout_opts & SHT_LOAD_SAVE_CFG));
 	if (MMAX == -1) MMAX=LMAX/MRES;
 	shtns_use_threads(nthreads);		// 0 : means automatically chooses the number of threads.
 	shtns = shtns_create(LMAX, MMAX, MRES, shtnorm);
 	if (robert_form >= 0) shtns_robert_form(shtns, robert_form);		// keep the default robert_form, unless specified on command line (usefull when built4magic)
 	NLM = shtns->nlm;
-	shtns_set_grid_auto(shtns, shtmode | layout, polaropt, nlorder, &NLAT, &NPHI);
+	shtns_set_grid_auto(shtns, shtmode | layout | layout_opts, polaropt, nlorder, &NLAT, &NPHI);
 
 	shtns_print_cfg(shtns);
 
@@ -849,7 +855,7 @@ int main(int argc, char *argv[])
 	}
 
 	if (point) {
-		test_SH_point();
+		test_SH_point(vector);
 		exit(0);
 	}
 
