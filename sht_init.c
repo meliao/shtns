@@ -349,8 +349,8 @@ static void planFFT(shtns_cfg shtns, int layout)
 	double cost_fft_ip, cost_fft_oop, cost_ifft_ip, cost_ifft_oop;
 	cplx *ShF;
 	double *Sh;
-	int nfft, nreal;
-	int theta_inc, phi_inc, phi_embed;
+	int nfft;
+	int theta_inc, phi_inc;
   #ifdef HAVE_FFTW_COST
 	int in_place = 1;		// try to use in-place real fft.
   #else
@@ -381,11 +381,10 @@ static void planFFT(shtns_cfg shtns, int layout)
 
 	shtns->layout = layout;		// store the data-layout for future reference (by CUDA init).
 	/* NPHI > 1 */
-	theta_inc=1;  phi_inc=NLAT;  phi_embed=2*(NPHI/2+1);	// SHT_NATIVE_LAYOUT is the default.
-	if (layout & SHT_THETA_CONTIGUOUS) {	theta_inc=1;  phi_inc=NLAT;  phi_embed=NPHI;	}
-	if (layout & SHT_PHI_CONTIGUOUS)   {	phi_inc=1;  theta_inc=NPHI;  phi_embed=NPHI;	}
+	theta_inc=1;  phi_inc=NLAT;		// SHT_NATIVE_LAYOUT is the default.
+	if (layout & SHT_THETA_CONTIGUOUS) {	theta_inc=1;  phi_inc=NLAT;	}
+	if (layout & SHT_PHI_CONTIGUOUS)   {	phi_inc=1;  theta_inc=NPHI;	}
 	nfft = NPHI;
-	nreal = phi_embed;
 	if ((theta_inc != 1)||(phi_inc != NLAT))  in_place = 0;		// we need to do the fft out-of-place.
 
 	#ifndef HAVE_LIBCUFFT
@@ -399,11 +398,7 @@ static void planFFT(shtns_cfg shtns, int layout)
 	#endif
 
 	#if SHT_VERBOSE > 0
-	if (verbose) {
-		printf("        => using FFTW : Mmax=%d, Nphi=%d, Nlat=%d  (data layout : phi_inc=%d, theta_inc=%d, phi_embed=%d)\n",MMAX,NPHI,NLAT,phi_inc,theta_inc,phi_embed);
-		if (NPHI <= (SHT_NL_ORDER+1)*MMAX)	printf("     !! Warning : anti-aliasing condition Nphi > %d*Mmax is not met !\n", SHT_NL_ORDER+1);
-		if (NPHI != fft_int(NPHI,7))		printf("     !! Warning : Nphi is not optimal for FFTW !\n");
-	}
+	if (verbose) printf("        => using FFTW : Mmax=%d, Nphi=%d, Nlat=%d  ",MMAX,NPHI,NLAT);
 	#endif
 
 // Allocate dummy Spatial Fields.
@@ -412,6 +407,9 @@ static void planFFT(shtns_cfg shtns, int layout)
 
 // complex fft for fly transform is a bit different.
 	if (layout & SHT_PHI_CONTIGUOUS) {		// out-of-place split dft
+		#if SHT_VERBOSE > 0
+		if (verbose) printf("(phi-contiguous layout: phi_inc=%d, theta_inc=%d)\n",phi_inc,theta_inc);
+		#endif
 		fftw_iodim dim, many;
 		shtns->fftc_mode = 1;
 		//default internal
@@ -451,26 +449,21 @@ static void planFFT(shtns_cfg shtns, int layout)
 		// for complex transform it is much simpler (out-of-place):
 		shtns->ifft_cplx = fftw_plan_many_dft(1, &nfft, NLAT, ShF, &nfft, NLAT, 1, (cplx*)Sh, &nfft, 1, NPHI, FFTW_BACKWARD, shtns->fftw_plan_mode);
 		shtns->fft_cplx =  fftw_plan_many_dft(1, &nfft, NLAT, ShF, &nfft, 1, NPHI, (cplx*)Sh, &nfft, NLAT, 1, FFTW_BACKWARD, shtns->fftw_plan_mode);
-
-		#if SHT_VERBOSE > 1
-		if (verbose>1) {
-			printf("          [phi-contiguous] fftw cost ifftc=%lg,  fftc=%lg  ",fftw_cost(shtns->ifftc), fftw_cost(shtns->fftc));	fflush(stdout);
-		}
-		#endif
 	#ifdef HAVE_LIBCUFFT
 	} else if (!(layout & SHT_THETA_CONTIGUOUS)) {		// use the fastest layout compatible with cuFFT
+		#if SHT_VERBOSE > 0
+		if (verbose) printf("(native cuFFT layout: phi_inc=2, theta_inc=NA)\n");
+		#endif
 		shtns->fftc_mode = 2;	// out-of-place
 		// Fourier -> spatial
 		shtns->ifftc = fftw_plan_many_dft(1, &nfft, NLAT/2, ShF, &nfft, NLAT/2, 1, (cplx*) Sh, &nfft, 1, nfft, FFTW_BACKWARD, shtns->fftw_plan_mode);		
 		// spatial -> Fourier
 		shtns->fftc = fftw_plan_many_dft(1, &nfft, NLAT/2, (cplx*) Sh, &nfft, 1, nfft, ShF, &nfft, NLAT/2, 1, FFTW_BACKWARD, shtns->fftw_plan_mode);
-		#if SHT_VERBOSE > 1
-		if (verbose>1) {
-			printf("          [native cuFFT] fftw cost ifftc=%lg,  fftc=%lg  ",fftw_cost(shtns->ifftc), fftw_cost(shtns->fftc));	fflush(stdout);
-		}
-		#endif
 	#endif
 	} else {	//if (layout & SHT_THETA_CONTIGUOUS) {		// use only in-place here, supposed to be faster.
+		#if SHT_VERBOSE > 0
+		if (verbose) printf("(theta-contiguous layout: phi_inc=%d, theta_inc=%d)\n",phi_inc,theta_inc);
+		#endif
 		shtns->fftc_mode = 0;
 		shtns->ifftc = fftw_plan_many_dft(1, &nfft, NLAT/2, ShF, &nfft, phi_inc/2, 1, ShF, &nfft, phi_inc/2, 1, FFTW_BACKWARD, shtns->fftw_plan_mode);
 		shtns->fftc = shtns->ifftc;		// same thing, with m>0 and m<0 exchanged.
@@ -491,14 +484,18 @@ static void planFFT(shtns_cfg shtns, int layout)
 		// complex-values spatial fields (in-place):
 		shtns->ifft_cplx = fftw_plan_many_dft(1, &nfft, NLAT, ShF, &nfft, phi_inc, 1, ShF, &nfft, phi_inc, 1, FFTW_BACKWARD, shtns->fftw_plan_mode);
 		shtns->fft_cplx = shtns->ifft_cplx;		// same thing, with m>0 and m<0 exchanged.
-		#if SHT_VERBOSE > 1
-		if (verbose>1) {
-			printf("          [theta-contiguous] fftw cost ifftc=%lg  ",fftw_cost(shtns->ifftc));	fflush(stdout);
-		}
-		#endif
 	}
 	VFREE(Sh);		VFREE(ShF);
 
+	#if SHT_VERBOSE > 0
+	if (verbose) {
+		if (NPHI <= (SHT_NL_ORDER+1)*MMAX)	printf("     !! Warning : anti-aliasing condition Nphi > %d*Mmax is not met !\n", SHT_NL_ORDER+1);
+		if (NPHI != fft_int(NPHI,7))		printf("     !! Warning : Nphi is not optimal for FFTW !\n");
+	}
+	#endif
+	#if SHT_VERBOSE > 1
+	if (verbose>1) printf("          fftw cost ifftc=%lg,  fftc=%lg\n",fftw_cost(shtns->ifftc), fftw_cost(shtns->fftc));
+	#endif
 	#if SHT_VERBOSE > 2
 	if (verbose>2) {
 		printf("\n *** fftc plan : \n");
@@ -1377,7 +1374,7 @@ int shtns_set_grid_auto(shtns_cfg shtns, enum shtns_type flags, double eps, int 
 		} else *nlat = n_gauss;
 		#ifndef HAVE_LIBCUFFT
 		// don't do this with GPU, as nlat must be a multiple of 64 there
-		if (((layout & SHT_ALLOW_PADDING) == 0) && (shtns->nthreads == 1)) {
+		if (((layout & (SHT_ALLOW_PADDING|SHT_PHI_CONTIGUOUS)) == 0) && (shtns->nthreads == 1)) {
 			if ((*nlat % 64 == 0) && (*nlat * *nphi > 512)) {		// heuristics to avoid cache bank conflicts.
 			#ifndef SHTNS4MAGIC
 				*nlat += 8;			// cache line assumed to be 64 bytes == 8 doubles.
