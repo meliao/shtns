@@ -4564,11 +4564,11 @@ $as_echo "#define SHTNS4MAGIC 1" >>confdefs.h
 
 fi
 
-nvcc_flags=""
+nvcc_flags="-std=c++11"   # for nvcc, the underlying gcc is not always c++11 by default, so we need to explicitely ask for it.
 # Disable precomputed matrix support with openmp: to avoid bugs arising with icc + openmp.
 if test "x$enable_openmp" = "xyes"; then :
 
-	nvcc_flags="-Xcompiler -fopenmp"
+	nvcc_flags="$nvcc_flags -Xcompiler -fopenmp"
 
   OPENMP_CFLAGS=
   # Check whether --enable-openmp was given.

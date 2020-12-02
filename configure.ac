@@ -174,10 +174,10 @@ AS_IF([test "x$enable_magic_layout" != "xno"], [
 	AC_DEFINE([SHTNS4MAGIC],[1],[I need the transforms compatible with the MagIC code, to speed it up!])
 ])
 
-nvcc_flags=""
+nvcc_flags="-std=c++11"   # for nvcc, the underlying gcc is not always c++11 by default, so we need to explicitely ask for it.
 # Disable precomputed matrix support with openmp: to avoid bugs arising with icc + openmp.
 AS_IF([test "x$enable_openmp" = "xyes"], [
-	nvcc_flags="-Xcompiler -fopenmp"
+	nvcc_flags="$nvcc_flags -Xcompiler -fopenmp"
 	AC_OPENMP
 	CFLAGS="$CFLAGS $OPENMP_CFLAGS"
 	dnl AC_CHECK_HEADERS([omp.h])
