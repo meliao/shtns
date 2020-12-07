@@ -115,7 +115,7 @@ struct shtns_info {		// MUST start with "int nlm;"
 	unsigned int nlm_cplx;		///< number of complex coefficients to represent a complex-valued spatial field.
 /* END OF PUBLIC PART */
 
-	short fftc_mode;			///< how to perform the complex fft : -1 = no fft; 0 = interleaved/native; 1 = split/transpose.
+	short fftc_mode;			///< how to perform the complex fft : -1 = no fft; 0 = interleaved/native; 1 = split/transpose; 2 = transpose for cuda.
 	unsigned short nthreads;	///< number of threads (openmp).
 	unsigned short *tm;			///< start theta value for SH (polar optimization : near the poles the legendre polynomials go to zero for high m's)
 	short robert_form;			///< flag for Robert formulation: if true, the vector synthesis are multiplied by sin(theta) and the analysis are divided by sin(theta).

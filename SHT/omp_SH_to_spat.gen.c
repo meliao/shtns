@@ -118,6 +118,8 @@ V			fftw_execute_dft(shtns->ifftc, ((cplx *) BpF), ((cplx *) Vp));
 Q			fftw_execute_split_dft(shtns->ifftc,((double*)BrF)+1, ((double*)BrF), Vr+NPHI, Vr);
 V			fftw_execute_split_dft(shtns->ifftc,((double*)BtF)+1, ((double*)BtF), Vt+NPHI, Vt);
 V			fftw_execute_split_dft(shtns->ifftc,((double*)BpF)+1, ((double*)BpF), Vp+NPHI, Vp);
+		}
+		if (shtns->fftc_mode > 0) {
 Q			VFREE(BrF);
 VX			VFREE(BtF);		// this frees also BpF.
 		}
