@@ -717,12 +717,20 @@ void SHsphtor_to_spat_gpu(shtns_cfg shtns, cplx *Slm, cplx *Tlm, double *Vt, dou
 		nlm = nlm_calc( shtns->lmax, mmax, mres);		// transfer less data
 	}
 	// transfer and convert on gpu
-	err = cudaMemcpy(d_vtp, Slm, 2*nlm*sizeof(double), cudaMemcpyHostToDevice);
-	if (err != cudaSuccess) { printf("memcpy 1 error : %s!\n", cudaGetErrorString(err));	return; }
-	err = cudaMemcpy(d_vtp + nlm_stride, Tlm, 2*nlm*sizeof(double), cudaMemcpyHostToDevice);
-	if (err != cudaSuccess) { printf("memcpy 2 error : %s!\n", cudaGetErrorString(err));	return; }
+	double* d_Slm = 0;
+	double* d_Tlm = 0;
+	if (Slm) {
+		d_Slm = d_vtp;
+		err = cudaMemcpy(d_Slm, Slm, 2*nlm*sizeof(double), cudaMemcpyHostToDevice);
+		if (err != cudaSuccess) { printf("memcpy 1 error : %s!\n", cudaGetErrorString(err));	return; }
+	}
+	if (Tlm) {
+		d_Tlm = d_vtp + nlm_stride;
+		err = cudaMemcpy(d_Tlm, Tlm, 2*nlm*sizeof(double), cudaMemcpyHostToDevice);
+		if (err != cudaSuccess) { printf("memcpy 2 error : %s!\n", cudaGetErrorString(err));	return; }
+	}
 
-	sphtor2scal_gpu(shtns, (cplx*) d_vtp, (cplx*) (d_vtp+nlm_stride), (cplx*) d_vwlm, (cplx*) (d_vwlm+nlm_stride), llim, mmax);
+	sphtor2scal_gpu(shtns, (cplx*) d_Slm, (cplx*) d_Tlm, (cplx*) d_vwlm, (cplx*) (d_vwlm+nlm_stride), llim, mmax);
 
 	// SHT on the GPU
 	cuda_SH_to_spat<1,1>(shtns, (cplx*) d_vwlm, d_vtp, llim+1, mmax);
@@ -739,6 +747,18 @@ void SHsphtor_to_spat_gpu(shtns_cfg shtns, cplx *Slm, cplx *Tlm, double *Vt, dou
 
 	// copy back spatial data (phi)
 	err = cudaMemcpy(Vp, d_vtp + spat_stride, nlat*nphi*sizeof(double), cudaMemcpyDeviceToHost);
+}
+
+extern "C"
+void SHsph_to_spat_gpu(shtns_cfg shtns, cplx *Slm, double *Vt, double *Vp, const long int llim)
+{
+	SHsphtor_to_spat_gpu(shtns, Slm, 0, Vt,Vp, llim);
+}
+
+extern "C"
+void SHtor_to_spat_gpu(shtns_cfg shtns, cplx *Tlm, double *Vt, double *Vp, const long int llim)
+{
+	SHsphtor_to_spat_gpu(shtns, 0, Tlm, Vt,Vp, llim);
 }
 
 extern "C"
@@ -1459,7 +1479,7 @@ void spat_to_SHqst_gpu2(shtns_cfg shtns, double *Vr, double *Vt, double *Vp, cpl
 }
 
 void* fgpu[4][SHT_NTYP] = {
-	{ (void*) SH_to_spat_gpu, (void*) spat_to_SH_gpu, (void*) SHsphtor_to_spat_gpu, (void*) spat_to_SHsphtor_gpu, 0, 0, (void*) SHqst_to_spat_gpu, (void*) spat_to_SHqst_gpu },
+	{ (void*) SH_to_spat_gpu, (void*) spat_to_SH_gpu, (void*) SHsphtor_to_spat_gpu, (void*) spat_to_SHsphtor_gpu, (void*) SHsph_to_spat_gpu, (void*) SHtor_to_spat_gpu, (void*) SHqst_to_spat_gpu, (void*) spat_to_SHqst_gpu },
 	{ 0, 0, (void*) SHsphtor_to_spat_gpu2, (void*) spat_to_SHsphtor_gpu2, 0, 0, (void*) SHqst_to_spat_gpu2, (void*) spat_to_SHqst_gpu2 },
 	{ (void*) SH_to_spat_gpu_hostfft, (void*) spat_to_SH_gpu_hostfft, (void*) SHsphtor_to_spat_gpu_hostfft, 0, 0, 0, (void*) SHqst_to_spat_gpu2_hostfft, 0 },
 	{ 0, 0, (void*) SHsphtor_to_spat_gpu2_hostfft, 0, 0, 0, (void*) SHqst_to_spat_gpu2_hostfft, 0}

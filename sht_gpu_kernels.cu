@@ -648,7 +648,7 @@ ishioka2sh_kernel(const double* __restrict__ xlm, const double* __restrict__ ql_
 }
 
 
-/** \internal convert from vector SH to scalar SH
+/** \internal convert from vector SH to scalar SH. slm or tlm can be null pointers.
 	Vlm =  st*d(Slm)/dtheta + I*m*Tlm
 	Wlm = -st*d(Tlm)/dtheta + I*m*Slm
 */
@@ -669,8 +669,8 @@ sphtor2scal_kernel(const double* __restrict__ mx, const double* __restrict__ slm
 
 	if ( (ll >= 0) && (ll < 2*(llim+1-m)) ) {
 		M[j] = mx[ofs];
-		sl[j] = slm[ofs];
-		tl[j] = tlm[ofs];
+		sl[j] = (slm) ? slm[ofs] : 0.0;
+		tl[j] = (tlm) ? tlm[ofs] : 0.0;
 	} else {
 		M[j] = 0.0;
 		sl[j] = 0.0;
@@ -712,8 +712,8 @@ sphtor2ish_kernel(const double* __restrict__ mx, const double* __restrict__ xlm,
 
 	if ( (ll >= 0) && (ll < llim_m_p1) ) {
 		M[j] = mx[ofs];
-		sl[j] = slm[ofs];
-		tl[j] = tlm[ofs];
+		sl[j] = (slm) ? slm[ofs] : 0.0;
+		tl[j] = (tlm) ? tlm[ofs] : 0.0;
 	} else {
 		M[j] = 0.0;
 		sl[j] = 0.0;
