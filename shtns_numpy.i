@@ -260,7 +260,7 @@ inline static PyObject* SpatArray_New(int size) {
 	%apply int *OUTPUT { int *dim1 };
 	void __spat_shape(int *dim0, int *dim1) {
 		*dim0 = $self->nphi;	*dim1 = $self->nlat;
-		if ($self->fftc_mode == 1) {	// phi-contiguous
+		if ($self->fft_mode == FFT_PHI_CONTIG_SPLIT) {	// phi-contiguous
 			*dim0 = $self->nlat;		*dim1 = $self->nphi;
 		}
 	}

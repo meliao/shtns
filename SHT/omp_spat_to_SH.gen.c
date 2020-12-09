@@ -49,8 +49,8 @@ V	BtF = Vt;	BpF = Vp;
 		if (imlim*MRES > (unsigned) llim) imlim = ((unsigned) llim)/MRES;		// 32bit mul and div should be faster
 	#endif
 
-	if (shtns->fftc_mode >= 0) {
-		if (shtns->fftc_mode > 0) {		// alloc memory for out-of-place FFT
+	if (shtns->fft_mode != FFT_NONE) {
+		if (shtns->fft_mode & FFT_OOP) {		// alloc memory for out-of-place FFT
 			unsigned long nv = shtns->nspat;
 QX			BrF = (double*) VMALLOC( nv * sizeof(double) );
 VX			BtF = (double*) VMALLOC( 2*nv * sizeof(double) );
@@ -58,7 +58,7 @@ VX			BpF = BtF + nv;
 3			BrF = (double*) VMALLOC( 3*nv * sizeof(double) );
 3			BtF = BrF + nv;		BpF = BtF + nv;
 		}
-		if (shtns->fftc_mode != 1) {
+		if ((shtns->fft_mode & FFT_PHI_CONTIG_SPLIT) ==0) {
 Q			fftw_execute_dft(shtns->fftc, ((cplx *) Vr), ((cplx *) BrF));
 V			fftw_execute_dft(shtns->fftc, ((cplx *) Vt), ((cplx *) BtF));
 V			fftw_execute_dft(shtns->fftc, ((cplx *) Vp), ((cplx *) BpF));
@@ -101,7 +101,7 @@ V				memset(Tlm+l, 0, (shtns->nlm - l)*sizeof(cplx));
 	}
 
   #ifndef SHT_AXISYM
-  	if (shtns->fftc_mode > 0) {		// free memory
+  	if (shtns->fft_mode & FFT_OOP) {		// free memory
 Q	    VFREE(BrF);
 VX	    VFREE(BtF);	// this frees also BpF.
 	}
@@ -126,7 +126,7 @@ V	BtF = Vt;	BpF = Vp;
 		if (imlim*MRES > (unsigned) llim) imlim = ((unsigned) llim)/MRES;		// 32bit mul and div should be faster
 	#endif
 
-	if (shtns->fftc_mode > 0) {		// alloc memory for out-of-place FFT
+	if (shtns->fft_mode & FFT_OOP) {		// alloc memory for out-of-place FFT
 		unsigned long nv = shtns->nspat;
 QX		BrF = (double*) VMALLOC( nv * sizeof(double) );
 VX		BtF = (double*) VMALLOC( 2*nv * sizeof(double) );
@@ -138,7 +138,7 @@ VX		BpF = BtF + nv;
 	#pragma omp parallel num_threads(shtns->nthreads)
 	{
 		const int nblk = (NLAT/2) / shtns->nthreads;
-		if (shtns->fftc_mode != 1) {
+		if ((shtns->fft_mode & FFT_PHI_CONTIG_SPLIT) == 0) {
 Q			#pragma omp for schedule(dynamic) nowait
 Q			for (int k=0; k<shtns->nthreads; k++)
 Q				fftw_execute_dft(shtns->fftc_block, ((cplx *) Vr) + k*nblk, ((cplx *) BrF) + k*nblk);
@@ -203,7 +203,7 @@ V				memset(Tlm+l, 0, (shtns->nlm - l)*sizeof(cplx));
 	}
 
   #ifndef SHT_AXISYM
-  	if (shtns->fftc_mode > 0) {		// free memory
+  	if (shtns->fft_mode & FFT_OOP) {		// free memory
 Q	    VFREE(BrF);
 VX	    VFREE(BtF);	// this frees also BpF.
 	}

@@ -3118,7 +3118,7 @@ SWIGINTERN PyObject *shtns_info_st_dt_matrix(struct shtns_info *self){
 	}
 SWIGINTERN void shtns_info___spat_shape(struct shtns_info *self,int *dim0,int *dim1){
 		*dim0 = self->nphi;	*dim1 = self->nlat;
-		if (self->fftc_mode == 1) {	// phi-contiguous
+		if (self->fft_mode == FFT_PHI_CONTIG_SPLIT) {	// phi-contiguous
 			*dim0 = self->nlat;		*dim1 = self->nphi;
 		}
 	}

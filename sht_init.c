@@ -372,14 +372,13 @@ static void planFFT(shtns_cfg shtns, int layout)
 
 	if (NPHI==1) 	// no FFT needed.
 	{
-		shtns->fftc_mode = -1;		// no FFT
+		shtns->fft_mode = FFT_NONE;		// no FFT
 		#if SHT_VERBOSE > 0
 			if (verbose) printf("        => no fft : Mmax=0, Nphi=1, Nlat=%d\n",NLAT);
 		#endif
 		return;
 	}
 
-	shtns->layout = layout;		// store the data-layout for future reference (by CUDA init).
 	/* NPHI > 1 */
 	theta_inc=1;  phi_inc=NLAT;		// SHT_NATIVE_LAYOUT is the default.
 	if (layout & SHT_THETA_CONTIGUOUS) {	theta_inc=1;  phi_inc=NLAT;	}
@@ -411,7 +410,7 @@ static void planFFT(shtns_cfg shtns, int layout)
 		if (verbose) printf("(phi-contiguous layout: phi_inc=%d, theta_inc=%d)\n",phi_inc,theta_inc);
 		#endif
 		fftw_iodim dim, many;
-		shtns->fftc_mode = 1;
+		shtns->fft_mode = FFT_PHI_CONTIG_SPLIT | FFT_OOP;
 		//default internal
 		dim.n = NPHI;    	dim.os = 1;			dim.is = NLAT;		// complex transpose
 		many.n = NLAT/2;	many.os = 2*NPHI;	many.is = 2;
@@ -450,11 +449,11 @@ static void planFFT(shtns_cfg shtns, int layout)
 		shtns->ifft_cplx = fftw_plan_many_dft(1, &nfft, NLAT, ShF, &nfft, NLAT, 1, (cplx*)Sh, &nfft, 1, NPHI, FFTW_BACKWARD, shtns->fftw_plan_mode);
 		shtns->fft_cplx =  fftw_plan_many_dft(1, &nfft, NLAT, ShF, &nfft, 1, NPHI, (cplx*)Sh, &nfft, NLAT, 1, FFTW_BACKWARD, shtns->fftw_plan_mode);
 	#ifdef HAVE_LIBCUFFT
-	} else if (!(layout & SHT_THETA_CONTIGUOUS)) {		// use the fastest layout compatible with cuFFT
+	} else if ((!(layout & SHT_THETA_CONTIGUOUS)) && (nfft % 16 == 0) && (shtns->nlat_2 % 16 == 0)) {		// use the fastest layout compatible with cuFFT
 		#if SHT_VERBOSE > 0
 		if (verbose) printf("(native cuFFT layout: phi_inc=2, theta_inc=NA)\n");
 		#endif
-		shtns->fftc_mode = 2;	// out-of-place
+		shtns->fft_mode = FFT_PHI_CONTIG_CPLX | FFT_OOP;	// out-of-place
 		// Fourier -> spatial
 		shtns->ifftc = fftw_plan_many_dft(1, &nfft, NLAT/2, ShF, &nfft, NLAT/2, 1, (cplx*) Sh, &nfft, 1, nfft, FFTW_BACKWARD, shtns->fftw_plan_mode);		
 		// spatial -> Fourier
@@ -464,7 +463,7 @@ static void planFFT(shtns_cfg shtns, int layout)
 		#if SHT_VERBOSE > 0
 		if (verbose) printf("(theta-contiguous layout: phi_inc=%d, theta_inc=%d)\n",phi_inc,theta_inc);
 		#endif
-		shtns->fftc_mode = 0;
+		shtns->fft_mode = FFT_THETA_CONTIG;
 		shtns->ifftc = fftw_plan_many_dft(1, &nfft, NLAT/2, ShF, &nfft, phi_inc/2, 1, ShF, &nfft, phi_inc/2, 1, FFTW_BACKWARD, shtns->fftw_plan_mode);
 		shtns->fftc = shtns->ifftc;		// same thing, with m>0 and m<0 exchanged.
 
@@ -1196,7 +1195,7 @@ shtns_cfg shtns_create_with_grid(shtns_cfg base, int mmax, int nofft)
 		}
 	}
 	if (nofft != 0) {
-		shtns->fftc_mode = -1;		// fft disabled.
+		shtns->fft_mode = FFT_NONE;		// fft disabled.
 	}
 
 // save a pointer to this setup and return.

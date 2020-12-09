@@ -881,7 +881,7 @@ void spat_cplx_to_SH(shtns_cfg shtns, cplx *z, cplx *alm)
 
 	Q = z;
 	if (NPHI>1) {
-		if (shtns->fftc_mode != 0) Q = mem;			// out-of-place transform
+		if (shtns->fft_mode & FFT_OOP) Q = mem;			// out-of-place transform
 		fftw_execute_dft(shtns->fft_cplx, z, Q);
 	}
 
@@ -935,7 +935,7 @@ void SH_to_spat_cplx(shtns_cfg shtns, cplx *alm, cplx *z)
 	ilm = rlm + NLM;
 	
 	Q = z;
-	if ((NPHI>1) && (shtns->fftc_mode != 0)) Q = mem;			// out-of-place transform
+	if ((NPHI>1) && (shtns->fft_mode & FFT_OOP)) Q = mem;			// out-of-place transform
 
 	#pragma omp parallel for schedule(static,1) num_threads(shtns->nthreads)
 	for (int m=0; m<=MMAX; m++) {
@@ -995,7 +995,7 @@ void SHsphtor_to_spat_cplx(shtns_cfg shtns, cplx *slm, cplx *tlm, cplx *zt, cplx
 	stlm = mem + 2*nspat;
 
 	zzt = zt;		zzp = zp;
-	if ((NPHI>1) && (shtns->fftc_mode != 0)) {	zzt = mem;	zzp = mem + nspat;  }			// out-of-place transform
+	if ((NPHI>1) && (shtns->fft_mode & FFT_OOP)) {	zzt = mem;	zzp = mem + nspat;  }			// out-of-place transform
 
 	#pragma omp parallel for schedule(static,1) num_threads(shtns->nthreads)
 	for (int m=0; m<=MMAX; m++) {
@@ -1071,7 +1071,7 @@ void spat_cplx_to_SHsphtor(shtns_cfg shtns, cplx *zt, cplx *zp, cplx *slm, cplx 
 
 	zzt = zt;		zzp = zp;
 	if (NPHI>1) {
-		if (shtns->fftc_mode != 0) {
+		if (shtns->fft_mode & FFT_OOP) {
 			zzt = mem;		zzp = mem + nspat;	// out-of-place transform
 		}
 		fftw_execute_dft(shtns->fft_cplx, zt, zzt);

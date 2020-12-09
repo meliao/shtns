@@ -60,7 +60,6 @@
 #include "sht_gpu_kernels.cu"
 
 enum cushtns_flags { CUSHT_OFF=0, CUSHT_ON=1, CUSHT_OWN_COMP_STREAM=2, CUSHT_OWN_XFER_STREAM=4};
-enum cushtns_fft_mode { CUSHT_NOFFT, CUSHT_FFT_THETA_CONTIGUOUS, CUSHT_FFT_TRANSPOSE };
 
 /* TOOL FUNCTIONS */
 
@@ -160,7 +159,6 @@ static int init_cuda_buffer_fft(shtns_cfg shtns)
 {
 	cudaError_t err = cudaSuccess;
 	int err_count = 0;
-	const unsigned layout = shtns->layout & (256*7);	// isolate layout
 
 	shtns->comp_stream = 0;		// use default stream for computations.
 	shtns->cu_flags &= ~((int)CUSHT_OWN_COMP_STREAM);		// mark the compute stream (=default stream) as NOT managed by shtns.
@@ -171,22 +169,20 @@ static int init_cuda_buffer_fft(shtns_cfg shtns)
 	/* cuFFT init */
 	int nfft = shtns->nphi;
 	//int nreal = 2*(nfft/2+1);
-	shtns->cu_fft_mode = CUSHT_NOFFT;
 	if (nfft > 1) {
 		// cufftPlanMany(cufftHandle *plan, int rank, int *n,   int *inembed, int istride, int idist,   int *onembed, int ostride, int odist,   cufftType type, int batch);
 		cufftResult res;
-		if (layout == SHT_PHI_CONTIGUOUS) {
-			printf("WARNING: phi-contiguous transform not available on GPU.\n");
-			err_count ++;
-			return 1;
-		} else if ((layout == SHT_NATIVE_LAYOUT) && (nfft % 16 == 0) && (shtns->nlat_2 % 16 == 0)) {	// use the fastest data-layout.
+		if ((shtns->fft_mode & FFT_PHI_CONTIG_CPLX) && (nfft % 16 == 0) && (shtns->nlat_2 % 16 == 0)) {	// use the fastest data-layout.
 			printf("!!! Use phi-contiguous FFT +transpose: WARNING, the spatial data is neither phi-contiguous nor theta-contiguous !!!\n");
 			res = cufftPlanMany(&shtns->cufft_plan, 1, &nfft, &nfft, 1, shtns->nphi, &nfft, 1, shtns->nphi, CUFFT_Z2Z, shtns->nlat_2);
-			shtns->cu_fft_mode = CUSHT_FFT_TRANSPOSE;
 			//cufftPlanMany(&shtns->cufft_plan, 1, &nfft, &nfft, 1, shtns->nphi, &nreal, 1, shtns->nphi, CUFFT_D2Z, shtns->nlat);
-		} else {		// if (layout & SHT_THETA_CONTIGUOUS) 
+		} else if (shtns->fft_mode & FFT_THETA_CONTIG) {
+			printf("!!! Use theta-contiguous FFT on GPU !!!\n");
 			res = cufftPlanMany(&shtns->cufft_plan, 1, &nfft, &nfft, shtns->nlat_2, 1, &nfft, shtns->nlat_2, 1, CUFFT_Z2Z, shtns->nlat_2);
-			shtns->cu_fft_mode = CUSHT_FFT_THETA_CONTIGUOUS;
+		} else {
+			printf("WARNING: layout not available on GPU.\n");
+			err_count ++;
+			return 1;
 		}
 		if (res != CUFFT_SUCCESS) {
 			printf("cufft init FAILED!\n");
@@ -194,7 +190,7 @@ static int init_cuda_buffer_fft(shtns_cfg shtns)
 		}
 		size_t worksize;
 		cufftGetSize(shtns->cufft_plan, &worksize);
-		printf("work-area size: %ld \t nlat*nphi = %ld\n", worksize/8, shtns->spat_stride);
+		printf("work-area size: %ld \t nlat*nphi = %ld\n", worksize/8, shtns->nlat * shtns->nphi);
 	}
 
 	// Allocate working arrays for SHT on GPU:
@@ -205,7 +201,7 @@ static int init_cuda_buffer_fft(shtns_cfg shtns)
 	const size_t dual_stride = (spat_stride < nlm_stride) ? nlm_stride : spat_stride;		// we need two spatial buffers to also hold spectral data.
 
 	size_t sze = 2*nlm_stride;		// 2 spectral buffers
-	if (shtns->cu_fft_mode == CUSHT_FFT_TRANSPOSE) {
+	if (shtns->fft_mode & FFT_PHI_CONTIG_CPLX) {
 		if (spat_stride > sze) sze = spat_stride;		// one spatial buffer for FFT -OR- 2 spectral buffers should fit in.
 	}
 	err = cudaMalloc( (void **)&shtns->gpu_buf_in,  sze*sizeof(double) );
@@ -216,7 +212,7 @@ static int init_cuda_buffer_fft(shtns_cfg shtns)
 	err = cudaMalloc( (void **)&gpu_mem, (2*nlm_stride + 2*dual_stride + spat_stride)*sizeof(double) );		// maximum GPU memory required for SHT
 	if (err != cudaSuccess)	err_count++;
 	
-	if (shtns->fftc_mode > 0) {
+	if (shtns->fft_mode & FFT_OOP) {
 		// we also need a buffer on the CPU when the FFT is out-of-place:
 		shtns->xfft_cpu = (double*) shtns_malloc(spat_stride * sizeof(double));
 	}
@@ -390,7 +386,7 @@ void fourier_to_spat_gpu(shtns_cfg shtns, double* q, const int mmax)
 	cufftResult res;
 	if (nphi > 1) {
 		cufftDoubleComplex* x = (cufftDoubleComplex*) q;
-		if (shtns->cu_fft_mode == CUSHT_FFT_TRANSPOSE) {
+		if (shtns->fft_mode & FFT_PHI_CONTIG_CPLX) {
 			double* xfft = shtns->gpu_buf_in;
 			transpose_cplx_zero(shtns->comp_stream, (double*) x, xfft, shtns->nlat_2, nphi, mmax);		// zero out m>mmax during transpose
 			res = cufftExecZ2Z(shtns->cufft_plan, (cufftDoubleComplex*) xfft, x, CUFFT_INVERSE);
@@ -411,7 +407,7 @@ void spat_to_fourier_gpu(shtns_cfg shtns, double* q, const int mmax)
 	cufftResult res;
 	if (nphi > 1) {
 		cufftDoubleComplex *x = (cufftDoubleComplex*) q;
-		if (shtns->cu_fft_mode == CUSHT_FFT_TRANSPOSE) {
+		if (shtns->fft_mode & FFT_PHI_CONTIG_CPLX) {
 			double* xfft = shtns->gpu_buf_in;
 			res = cufftExecZ2Z(shtns->cufft_plan, x, (cufftDoubleComplex*) xfft, CUFFT_INVERSE);
 			transpose_cplx_skip(shtns->comp_stream, xfft, (double*) x, nphi, shtns->nlat_2, mmax);		// ignore m > mmax during transpose
@@ -425,8 +421,8 @@ void spat_to_fourier_gpu(shtns_cfg shtns, double* q, const int mmax)
 void spat_to_fourier_host(shtns_cfg shtns, double* q, double* qf)
 {
 	// FFT on host
-	if (shtns->fftc_mode >= 0) {
-		if (shtns->fftc_mode != 1) {
+	if (shtns->fft_mode != 0) {
+		if ((shtns->fft_mode & FFT_PHI_CONTIG_SPLIT) == 0) {
 			fftw_execute_dft(shtns->fftc, (fftw_complex *) q, (fftw_complex *) qf);
 		} else {		// split dft
 			printf("ERROR fft not supported\n");
@@ -436,8 +432,8 @@ void spat_to_fourier_host(shtns_cfg shtns, double* q, double* qf)
 
 void fourier_to_spat_host(shtns_cfg shtns, double* qf, double* q)
 {
-	if (shtns->fftc_mode >= 0) {
-		if (shtns->fftc_mode != 1) {
+	if (shtns->fft_mode != 0) {
+		if ((shtns->fft_mode & FFT_PHI_CONTIG_SPLIT) == 0) {
 			fftw_execute_dft(shtns->ifftc, (fftw_complex *) qf, (fftw_complex *) q);
 		} else {		// split dft
 			printf("ERROR fft not supported\n");
@@ -623,7 +619,7 @@ void SH_to_spat_gpu_hostfft(shtns_cfg shtns, cplx *Qlm, double *Vr, const long i
 	d_q = d_qlm + shtns->nlm_stride;
 	
 	double* VrF = Vr;
-	if (shtns->fftc_mode > 0)	VrF = shtns->xfft_cpu;
+	if (shtns->fft_mode & FFT_OOP)	VrF = shtns->xfft_cpu;
 
 	int mmax = shtns->mmax;
 	const int mres = shtns->mres;
@@ -668,7 +664,7 @@ void spat_to_SH_gpu_hostfft(shtns_cfg shtns, double *Vr, cplx *Qlm, const long i
 	double* d_q = d_qlm + shtns->nlm_stride;
 
 	double *VrF = Vr;
-	if (shtns->fftc_mode > 0)	VrF = shtns->xfft_cpu;
+	if (shtns->fft_mode & FFT_OOP)	VrF = shtns->xfft_cpu;
 	spat_to_fourier_host(shtns, Vr, VrF);
 
 	if (llim < mmax*mres) {
@@ -779,7 +775,7 @@ void SHsphtor_to_spat_gpu_hostfft(shtns_cfg shtns, cplx *Slm, cplx *Tlm, double 
 	double* d_vtp = d_vwlm + 2*nlm_stride;
 	double* VtF = Vt;
 	double* VpF = Vp;
-	if (shtns->fftc_mode > 0) {
+	if (shtns->fft_mode & FFT_OOP) {
 		VtF = Vp;
 		VpF = shtns->xfft_cpu;
 	}
@@ -847,7 +843,7 @@ void SHsphtor_to_spat_gpu2_hostfft(shtns_cfg shtns, cplx *Slm, cplx *Tlm, double
 	double* d_vtp = d_vwlm + 2*nlm_stride;
 	double* VtF = Vt;
 	double* VpF = Vp;
-	if (shtns->fftc_mode > 0) {
+	if (shtns->fft_mode & FFT_OOP) {
 		VtF = Vp;
 		VpF = shtns->xfft_cpu;
 	}
@@ -1017,7 +1013,7 @@ void SHqst_to_spat_gpu_hostfft(shtns_cfg shtns, cplx *Qlm, cplx *Slm, cplx *Tlm,
 	double* VrF = Vr;
 	double* VtF = Vt;
 	double* VpF = Vp;
-	if (shtns->fftc_mode > 0) {
+	if (shtns->fft_mode & FFT_OOP) {
 		VrF = Vt;
 		VtF = Vp;
 		VpF = shtns->xfft_cpu;
@@ -1109,7 +1105,7 @@ void SHqst_to_spat_gpu2_hostfft(shtns_cfg shtns, cplx *Qlm, cplx *Slm, cplx *Tlm
 	double* VrF = Vr;
 	double* VtF = Vt;
 	double* VpF = Vp;
-	if (shtns->fftc_mode > 0) {
+	if (shtns->fft_mode & FFT_OOP) {
 		VrF = Vt;
 		VtF = Vp;
 		VpF = shtns->xfft_cpu;

@@ -77,7 +77,7 @@ V	v2d* BtF = (v2d*) Vt;	v2d* BpF = (v2d*) Vp;
 	#ifdef SHT_VAR_LTR
 		if (imlim*MRES > (unsigned) llim) imlim = ((unsigned) llim)/MRES;		// 32bit mul and div should be faster
 	#endif
-	if (shtns->fftc_mode > 0) {		// alloc memory for the FFT
+	if (shtns->fft_mode & FFT_OOP) {		// alloc memory for the FFT
 		unsigned long nv = shtns->nspat;
 QX		BrF = (v2d*) VMALLOC( nv * sizeof(double) );
 VX		BtF = (v2d*) VMALLOC( 2*nv * sizeof(double) );
@@ -128,8 +128,8 @@ V		memset(BpF + m_inc*(imlim+1), 0, sizeof(cplx)* m_inc * (NPHI-1-2*imlim));
 	}
 
     // NPHI > 1 as SHT_AXISYM is not defined.
-  	if (shtns->fftc_mode >= 0) {
-		if (shtns->fftc_mode != 1) {
+  	if (shtns->fft_mode != FFT_NONE) {
+		if ((shtns->fft_mode & FFT_PHI_CONTIG_SPLIT) == 0) {
 Q			fftw_execute_dft(shtns->ifftc, (cplx *) BrF, (cplx *) Vr);
 V			fftw_execute_dft(shtns->ifftc, (cplx *) BtF, (cplx *) Vt);
 V			fftw_execute_dft(shtns->ifftc, (cplx *) BpF, (cplx *) Vp);
@@ -138,7 +138,7 @@ Q			fftw_execute_split_dft(shtns->ifftc,((double*)BrF)+1, ((double*)BrF), Vr+NPH
 V			fftw_execute_split_dft(shtns->ifftc,((double*)BtF)+1, ((double*)BtF), Vt+NPHI, Vt);
 V			fftw_execute_split_dft(shtns->ifftc,((double*)BpF)+1, ((double*)BpF), Vp+NPHI, Vp);
 		}
-		if (shtns->fftc_mode > 0) {
+		if (shtns->fft_mode & FFT_OOP) {
 Q			VFREE(BrF);
 VX			VFREE(BtF);		// this frees also BpF.
 		}

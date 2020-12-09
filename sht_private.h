@@ -87,6 +87,9 @@ enum sht_types { SHT_TYP_SSY, SHT_TYP_SAN, SHT_TYP_VSY, SHT_TYP_VAN,
 // sht grids
 enum sht_grids { GRID_NONE, GRID_GAUSS, GRID_REGULAR, GRID_POLES };
 
+// fft modes
+enum sht_fft { FFT_NONE=0, FFT_THETA_CONTIG=1, FFT_PHI_CONTIG_SPLIT=2, FFT_PHI_CONTIG_CPLX=4, FFT_OOP=8, FFT_REAL=16, FFT_FP32=32 };
+
 // pointer to various function types
 typedef void (*pf2l)(shtns_cfg, void*, void*, long int);
 typedef void (*pf3l)(shtns_cfg, void*, void*, void*, long int);
@@ -115,10 +118,10 @@ struct shtns_info {		// MUST start with "int nlm;"
 	unsigned int nlm_cplx;		///< number of complex coefficients to represent a complex-valued spatial field.
 /* END OF PUBLIC PART */
 
-	short fftc_mode;			///< how to perform the complex fft : -1 = no fft; 0 = interleaved/native; 1 = split/transpose; 2 = transpose for cuda.
-	unsigned short nthreads;	///< number of threads (openmp).
+	unsigned short fft_mode;	///< how to perform the fft : 0 = no fft; 1 = theta-contiguous; 2 = split/transpose; 3 = transpose for cuda.
+	unsigned short robert_form;	///< flag for Robert formulation: if true, the vector synthesis are multiplied by sin(theta) and the analysis are divided by sin(theta).
+	unsigned int nthreads;		///< number of threads (openmp).
 	unsigned short *tm;			///< start theta value for SH (polar optimization : near the poles the legendre polynomials go to zero for high m's)
-	short robert_form;			///< flag for Robert formulation: if true, the vector synthesis are multiplied by sin(theta) and the analysis are divided by sin(theta).
 	int k_stride_a;				///< stride in theta direction
 	int m_stride_a;				///< stride in phi direction in intermediate spectral space (m)
 	double *wg;					///< Gauss weights for Gauss-Legendre quadrature.
@@ -160,7 +163,6 @@ struct shtns_info {		// MUST start with "int nlm;"
 	#ifdef HAVE_LIBCUFFT
 	/* cuda stuff */
 	short cu_flags;
-	short cu_fft_mode;
 	double* d_clm;
 	double* d_xlm;
 	double* d_alm;
@@ -181,7 +183,6 @@ struct shtns_info {		// MUST start with "int nlm;"
 	unsigned char grid;		// store grid type.
 	short norm;				// store the normalization of the Spherical Harmonics (enum \ref shtns_norm + \ref SHT_NO_CS_PHASE flag)
 	unsigned fftw_plan_mode;
-	unsigned layout;		// requested data layout
 	double Y00_1, Y10_ct, Y11_st;
 	shtns_cfg next;		// pointer to next sht_setup or NULL (records a chained list of SHT setup).
 	// the end should be aligned on the size of int, to allow the storage of small arrays.
