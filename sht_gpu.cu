@@ -65,10 +65,11 @@ enum cushtns_flags { CUSHT_OFF=0, CUSHT_ON=1, CUSHT_OWN_COMP_STREAM=2, CUSHT_OWN
 
 extern "C"
 void* shtns_malloc(size_t size) {
-	void* ptr = NULL;
-	cudaError_t err = cudaSuccess;
-	err = cudaMallocHost(&ptr, size);		// try to allocate pinned memory (for faster transfers !)
+	void* ptr = 0;
+	cudaError_t err = cudaMallocHost(&ptr, size);		// try to allocate pinned memory (for faster transfers !)
 	if (err != cudaSuccess) {
+		cudaGetLastError();		// clears the error status.
+		printf("!WARNING! [shtns_malloc] failed to alloc pinned memory. using regular memory instead.\n");
 		ptr = VMALLOC(size);		// return regular memory instead...
 	}
 	return ptr;
@@ -76,7 +77,13 @@ void* shtns_malloc(size_t size) {
 
 extern "C"
 void shtns_free(void* p) {
-	cudaFreeHost(p);
+	cudaError_t err = cudaSuccess;
+	if (p) err = cudaFreeHost(p);
+	if (err != cudaSuccess) {
+		cudaGetLastError();		// clears the error status.
+		printf("!WARNING! [sntns_free] not page locked memory. trying regular free...\n");
+		VFREE(p);
+	}
 }
 
 void memzero_omp(double* mem, const size_t sze)
@@ -541,7 +548,6 @@ void cu_spat_to_SH(shtns_cfg shtns, double *d_Vr, cplx* d_Qlm, int llim)
 extern "C"
 void cu_spat_to_SHsphtor(shtns_cfg shtns, double *Vt, double *Vp, cplx *Slm, cplx *Tlm, int llim)
 {
-	cudaError_t err = cudaSuccess;
 	const long nlm_stride = shtns->nlm_stride;
 	double* d_vwlm = shtns->gpu_buf_in;
 
@@ -549,10 +555,9 @@ void cu_spat_to_SHsphtor(shtns_cfg shtns, double *Vt, double *Vp, cplx *Slm, cpl
 //	cuda_spat_to_SH<1,1>(shtns, Vt, (cplx*) d_vwlm, llim+1);
 //	cuda_spat_to_SH<1,1>(shtns, Vp, (cplx*) (d_vwlm + nlm_stride), llim+1);
 	cuda_spat_to_SH<1,2>(shtns, Vt, (cplx*) d_vwlm, llim+1, Vp-Vt);
-	err = cudaGetLastError();
-	if (err != cudaSuccess) { printf("spat_to_SHsphtor CUDA error : %s!\n", cudaGetErrorString(err));	return; }
-
+	if (CUDA_ERROR_CHECK) return;
 	scal2sphtor_gpu(shtns, (cplx*) d_vwlm, (cplx*) (d_vwlm+nlm_stride), Slm, Tlm, llim);
+	CUDA_ERROR_CHECK;
 }
 
 
@@ -592,16 +597,15 @@ void SH_to_spat_gpu(shtns_cfg shtns, cplx *Qlm, double *Vr, const long int llim)
 
 	// copy spectral data to GPU
 	err = cudaMemcpy(d_qlm, Qlm, 2*nlm*sizeof(double), cudaMemcpyHostToDevice);
-	if (err != cudaSuccess) { printf("SH_to_spat_gpu failed copy qlm\n");	return; }
+	if (err != cudaSuccess) { CUDA_ERROR_CHECK;	return; }
 
 	// SHT on the GPU
 	cuda_SH_to_spat<0,1>(shtns, (cplx*) d_qlm, d_q, llim, mmax);	// start with Legendre, d_qlm may be available for Fourier.
-	err = cudaGetLastError();
-	if (err != cudaSuccess) { printf("SH_to_spat_gpu CUDA error : %s!\n", cudaGetErrorString(err));	return; }
+	if (CUDA_ERROR_CHECK) return;
 
 	// copy back spatial data
 	err = cudaMemcpy(Vr, d_q, nlat*nphi*sizeof(double), cudaMemcpyDeviceToHost);
-	if (err != cudaSuccess) { printf("SH_to_spat_gpu failed copy back: %s\n", cudaGetErrorString(err));	return; }
+	if (err != cudaSuccess) { CUDA_ERROR_CHECK;	return; }
 }
 
 extern "C"
@@ -630,7 +634,7 @@ void SH_to_spat_gpu_hostfft(shtns_cfg shtns, cplx *Qlm, double *Vr, const long i
 
 	// copy spectral data to GPU
 	err = cudaMemcpy(d_qlm, Qlm, 2*nlm*sizeof(double), cudaMemcpyHostToDevice);
-	if (err != cudaSuccess) { printf("SH_to_spat_gpu_hostfft failed copy H2D; %s\n", cudaGetErrorString(err));	return; }
+	if (err != cudaSuccess) { CUDA_ERROR_CHECK;	return; }
 
 	// Legendre transform on gpu
 	legendre<0,1>(shtns, d_qlm, d_q, llim, mmax);
@@ -644,7 +648,7 @@ void SH_to_spat_gpu_hostfft(shtns_cfg shtns, cplx *Qlm, double *Vr, const long i
 	} else {
 		err = cudaMemcpy(VrF, d_q, nlat*nphi*sizeof(double), cudaMemcpyDeviceToHost);
 	}
-	if (err != cudaSuccess) { printf("SH_to_spat_gpu_hostfft failed copy D2H: %s\n", cudaGetErrorString(err));	return; }
+	if (CUDA_ERROR_CHECK) return;
 
 	fourier_to_spat_host(shtns, VrF, Vr);
 }
@@ -679,7 +683,7 @@ void spat_to_SH_gpu_hostfft(shtns_cfg shtns, double *Vr, cplx *Qlm, const long i
 	} else {
 		err = cudaMemcpy(d_q, VrF, nlat*nphi*sizeof(double), cudaMemcpyHostToDevice);
 	}
-	if (err != cudaSuccess) { printf("spat_to_SH_gpu_hostfft failed copy H2D: %s\n", cudaGetErrorString(err));	return; }
+	if (err != cudaSuccess) { CUDA_ERROR_CHECK;	return; }
 
 	// Legendre transform on gpu
 	ilegendre<0,1>(shtns, d_q, d_qlm, llim);
@@ -687,7 +691,7 @@ void spat_to_SH_gpu_hostfft(shtns_cfg shtns, double *Vr, cplx *Qlm, const long i
 	if (nlm < shtns->nlm)	memset(Qlm + nlm, 0, (shtns->nlm - nlm)*2*sizeof(double));
 	// copy back spectral data from GPU
 	err = cudaMemcpy(Qlm, d_qlm, 2*nlm*sizeof(double), cudaMemcpyDeviceToHost);
-	if (err != cudaSuccess) { printf("spat_to_SH_gpu_hostfft failed copy D2H: %s\n", cudaGetErrorString(err));	return; }
+	if (err != cudaSuccess) { CUDA_ERROR_CHECK;	return; }
 }
 
 
@@ -718,12 +722,12 @@ void SHsphtor_to_spat_gpu(shtns_cfg shtns, cplx *Slm, cplx *Tlm, double *Vt, dou
 	if (Slm) {
 		d_Slm = d_vtp;
 		err = cudaMemcpy(d_Slm, Slm, 2*nlm*sizeof(double), cudaMemcpyHostToDevice);
-		if (err != cudaSuccess) { printf("memcpy 1 error : %s!\n", cudaGetErrorString(err));	return; }
+		if (err != cudaSuccess) { CUDA_ERROR_CHECK;	return; }
 	}
 	if (Tlm) {
 		d_Tlm = d_vtp + nlm_stride;
 		err = cudaMemcpy(d_Tlm, Tlm, 2*nlm*sizeof(double), cudaMemcpyHostToDevice);
-		if (err != cudaSuccess) { printf("memcpy 2 error : %s!\n", cudaGetErrorString(err));	return; }
+		if (err != cudaSuccess) { CUDA_ERROR_CHECK;	return; }
 	}
 
 	sphtor2scal_gpu(shtns, (cplx*) d_Slm, (cplx*) d_Tlm, (cplx*) d_vwlm, (cplx*) (d_vwlm+nlm_stride), llim, mmax);
@@ -734,8 +738,7 @@ void SHsphtor_to_spat_gpu(shtns_cfg shtns, cplx *Slm, cplx *Tlm, double *Vt, dou
 	cudaEventRecord(ev_sht, shtns->comp_stream);					// record the end of scalar SH (theta).
 
 	cuda_SH_to_spat<1,1>(shtns, (cplx*) (d_vwlm + nlm_stride), d_vtp + spat_stride, llim+1, mmax);
-	err = cudaGetLastError();
-	if (err != cudaSuccess) { printf("SH_to_spat CUDA error : %s!\n", cudaGetErrorString(err));	return; }
+	if (CUDA_ERROR_CHECK) return;
 
 	cudaStreamWaitEvent(xfer_stream, ev_sht, 0);					// xfer stream waits for end of scalar SH (theta).
 	cudaMemcpyAsync(Vt, d_vtp, nlat*nphi*sizeof(double), cudaMemcpyDeviceToHost, shtns->xfer_stream);
@@ -743,6 +746,7 @@ void SHsphtor_to_spat_gpu(shtns_cfg shtns, cplx *Slm, cplx *Tlm, double *Vt, dou
 
 	// copy back spatial data (phi)
 	err = cudaMemcpy(Vp, d_vtp + spat_stride, nlat*nphi*sizeof(double), cudaMemcpyDeviceToHost);
+	CUDA_ERROR_CHECK;
 }
 
 extern "C"
@@ -760,7 +764,6 @@ void SHtor_to_spat_gpu(shtns_cfg shtns, cplx *Tlm, double *Vt, double *Vp, const
 extern "C"
 void SHsphtor_to_spat_gpu_hostfft(shtns_cfg shtns, cplx *Slm, cplx *Tlm, double *Vt, double *Vp, const long int llim)
 {
-	cudaError_t err = cudaSuccess;
 	cudaEvent_t ev_sht, ev_sht2;
 	int nlm = shtns->nlm;
 	int mmax = shtns->mmax;
@@ -785,10 +788,10 @@ void SHsphtor_to_spat_gpu_hostfft(shtns_cfg shtns, cplx *Slm, cplx *Tlm, double 
 		nlm = nlm_calc( shtns->lmax, mmax, mres);		// transfer less data
 	}
 	// transfer and convert on gpu
-	err = cudaMemcpy(d_vtp, Slm, 2*nlm*sizeof(double), cudaMemcpyHostToDevice);
-	if (err != cudaSuccess) { printf("memcpy 1 error : %s!\n", cudaGetErrorString(err));	return; }
-	err = cudaMemcpy(d_vtp + nlm_stride, Tlm, 2*nlm*sizeof(double), cudaMemcpyHostToDevice);
-	if (err != cudaSuccess) { printf("memcpy 2 error : %s!\n", cudaGetErrorString(err));	return; }
+	cudaMemcpy(d_vtp, Slm, 2*nlm*sizeof(double), cudaMemcpyHostToDevice);
+	if (CUDA_ERROR_CHECK) return;
+	cudaMemcpy(d_vtp + nlm_stride, Tlm, 2*nlm*sizeof(double), cudaMemcpyHostToDevice);
+	if (CUDA_ERROR_CHECK) return;
 
 	sphtor2scal_gpu(shtns, (cplx*) d_vtp, (cplx*) (d_vtp+nlm_stride), (cplx*) d_vwlm, (cplx*) (d_vwlm+nlm_stride), llim, mmax);
 
@@ -801,8 +804,7 @@ void SHsphtor_to_spat_gpu_hostfft(shtns_cfg shtns, cplx *Slm, cplx *Tlm, double 
 	cudaEventCreateWithFlags(&ev_sht2, cudaEventDisableTiming );
 	cudaEventRecord(ev_sht2, shtns->comp_stream);					// record the end of scalar SH (phi).
 
-	err = cudaGetLastError();
-	if (err != cudaSuccess) { printf("SH_to_spat CUDA error : %s!\n", cudaGetErrorString(err));	return; }
+	if (CUDA_ERROR_CHECK) return;
 
 	cudaStreamWaitEvent(xfer_stream, ev_sht, 0);					// xfer stream waits for end of scalar SH (theta).
 	cudaMemcpyAsync(VtF, d_vtp, nlat*(mmax+1)*sizeof(double), cudaMemcpyDeviceToHost, shtns->xfer_stream);
@@ -854,9 +856,9 @@ void SHsphtor_to_spat_gpu2_hostfft(shtns_cfg shtns, cplx *Slm, cplx *Tlm, double
 	}
 	// transfer and convert on gpu
 	err = cudaMemcpy(d_vtp, Slm, 2*nlm*sizeof(double), cudaMemcpyHostToDevice);
-	if (err != cudaSuccess) { printf("memcpy 1 error : %s!\n", cudaGetErrorString(err));	return; }
+	if (err != cudaSuccess) { CUDA_ERROR_CHECK;	return; }
 	err = cudaMemcpy(d_vtp + nlm_stride, Tlm, 2*nlm*sizeof(double), cudaMemcpyHostToDevice);
-	if (err != cudaSuccess) { printf("memcpy 2 error : %s!\n", cudaGetErrorString(err));	return; }
+	if (err != cudaSuccess) { CUDA_ERROR_CHECK;	return; }
 
 	sphtor2scal_gpu(shtns, (cplx*) d_vtp, (cplx*) (d_vtp+nlm_stride), (cplx*) d_vwlm, (cplx*) (d_vwlm+nlm_stride), llim, mmax);
 
@@ -865,8 +867,7 @@ void SHsphtor_to_spat_gpu2_hostfft(shtns_cfg shtns, cplx *Slm, cplx *Tlm, double
 	cudaEventCreateWithFlags(&ev_sht, cudaEventDisableTiming );
 	cudaEventRecord(ev_sht, shtns->comp_stream);					// record the end of scalar SH (theta+phi).
 
-	err = cudaGetLastError();
-	if (err != cudaSuccess) { printf("SH_to_spat CUDA error : %s!\n", cudaGetErrorString(err));	return; }
+	CUDA_ERROR_CHECK;
 
 	cudaStreamWaitEvent(xfer_stream, ev_sht, 0);					// xfer stream waits for end of scalar SH (theta).
 	cudaMemcpyAsync(VtF, d_vtp, nlat*(mmax+1)*sizeof(double), cudaMemcpyDeviceToHost, shtns->xfer_stream);
@@ -887,6 +888,7 @@ void SHsphtor_to_spat_gpu2_hostfft(shtns_cfg shtns, cplx *Slm, cplx *Tlm, double
 
 	cudaEventDestroy(ev_sht2);
 	cudaEventDestroy(ev_sht);
+	CUDA_ERROR_CHECK;
 }
 
 extern "C"
@@ -913,16 +915,18 @@ void SHsphtor_to_spat_gpu2(shtns_cfg shtns, cplx *Slm, cplx *Tlm, double *Vt, do
 	}
 	// transfer and convert on gpu
 	err = cudaMemcpy(d_vtp, Slm, 2*nlm*sizeof(double), cudaMemcpyHostToDevice);
-	if (err != cudaSuccess) { printf("memcpy 1 error : %s!\n", cudaGetErrorString(err));	return; }
+	if (err != cudaSuccess) { CUDA_ERROR_CHECK;	return; }
 	err = cudaMemcpy(d_vtp + nlm_stride, Tlm, 2*nlm*sizeof(double), cudaMemcpyHostToDevice);
-	if (err != cudaSuccess) { printf("memcpy 2 error : %s!\n", cudaGetErrorString(err));	return; }
+	if (err != cudaSuccess) { CUDA_ERROR_CHECK;	return; }
 
 	sphtor2scal_gpu(shtns, (cplx*) d_vtp, (cplx*) (d_vtp+nlm_stride), (cplx*) d_vwlm, (cplx*) (d_vwlm+nlm_stride), llim, mmax);
 
 	// SHT on the GPU
 	cuda_SH_to_spat<1,2>(shtns, (cplx*) d_vwlm, d_vtp, llim+1, mmax);		// Vt and Vp together  (merge with sphtor2scal_gpu)
+	CUDA_ERROR_CHECK;
 	cudaMemcpy(Vt, d_vtp, nlat*nphi*sizeof(double), cudaMemcpyDeviceToHost);
 	cudaMemcpy(Vp, d_vtp + spat_stride, nlat*nphi*sizeof(double), cudaMemcpyDeviceToHost);
+	CUDA_ERROR_CHECK;
 }
 
 
@@ -950,15 +954,15 @@ void SHqst_to_spat_gpu(shtns_cfg shtns, cplx *Qlm, cplx *Slm, cplx *Tlm, double 
 	}
 	/// 1) start scalar SH for radial component.
 	err = cudaMemcpy(d_qvwlm, Qlm, 2*nlm*sizeof(double), cudaMemcpyHostToDevice);
-	if (err != cudaSuccess) { printf("memcpy 0 error : %s!\n", cudaGetErrorString(err));	return; }
+	if (err != cudaSuccess) { CUDA_ERROR_CHECK;	return; }
 	// SHT on the GPU
 	cuda_SH_to_spat<0,1>(shtns, (cplx*) d_qvwlm, d_vrtp + 2*spat_stride, llim, mmax);
 
 	// OR transfer and convert on gpu
 	err = cudaMemcpyAsync(d_vrtp, Slm, 2*nlm*sizeof(double), cudaMemcpyHostToDevice, xfer_stream);
-	if (err != cudaSuccess) { printf("memcpy 1 error : %s!\n", cudaGetErrorString(err));	return; }
+	if (err != cudaSuccess) { CUDA_ERROR_CHECK;	return; }
 	err = cudaMemcpyAsync(d_vrtp + nlm_stride, Tlm, 2*nlm*sizeof(double), cudaMemcpyHostToDevice, xfer_stream);
-	if (err != cudaSuccess) { printf("memcpy 2 error : %s!\n", cudaGetErrorString(err));	return; }
+	if (err != cudaSuccess) { CUDA_ERROR_CHECK;	return; }
 
 	cudaEventCreateWithFlags(&ev_sht0, cudaEventDisableTiming );
 	cudaEventRecord(ev_sht0, comp_stream);					// record the end of scalar SH (radial).
@@ -975,8 +979,7 @@ void SHqst_to_spat_gpu(shtns_cfg shtns, cplx *Qlm, cplx *Slm, cplx *Tlm, double 
 
 	cuda_SH_to_spat<1,1>(shtns, (cplx*) (d_qvwlm + nlm_stride), d_vrtp + spat_stride, llim+1, mmax);
 
-	err = cudaGetLastError();
-	if (err != cudaSuccess) { printf("SH_to_spat CUDA error : %s!\n", cudaGetErrorString(err));	return; }
+	CUDA_ERROR_CHECK;
 
 	cudaStreamWaitEvent(xfer_stream, ev_sht0, 0);					// xfer stream waits for end of scalar SH (radial).
 	cudaMemcpyAsync(Vr, d_vrtp + 2*spat_stride, nlat*nphi*sizeof(double), cudaMemcpyDeviceToHost, xfer_stream);
@@ -1025,15 +1028,15 @@ void SHqst_to_spat_gpu_hostfft(shtns_cfg shtns, cplx *Qlm, cplx *Slm, cplx *Tlm,
 	}
 	/// 1) start scalar SH for radial component.
 	err = cudaMemcpy(d_qvwlm, Qlm, 2*nlm*sizeof(double), cudaMemcpyHostToDevice);
-	if (err != cudaSuccess) { printf("memcpy 0 error : %s!\n", cudaGetErrorString(err));	return; }
+	if (err != cudaSuccess) { CUDA_ERROR_CHECK;	return; }
 	// SHT on the GPU
 	legendre<0,1>(shtns, d_qvwlm, d_vrtp + 2*spat_stride, llim, mmax);
 
 	// OR transfer and convert on gpu
 	err = cudaMemcpyAsync(d_vrtp, Slm, 2*nlm*sizeof(double), cudaMemcpyHostToDevice, xfer_stream);
-	if (err != cudaSuccess) { printf("memcpy 1 error : %s!\n", cudaGetErrorString(err));	return; }
+	if (err != cudaSuccess) { CUDA_ERROR_CHECK;	return; }
 	err = cudaMemcpyAsync(d_vrtp + nlm_stride, Tlm, 2*nlm*sizeof(double), cudaMemcpyHostToDevice, xfer_stream);
-	if (err != cudaSuccess) { printf("memcpy 2 error : %s!\n", cudaGetErrorString(err));	return; }
+	if (err != cudaSuccess) { CUDA_ERROR_CHECK;	return; }
 
 	cudaEventCreateWithFlags(&ev_sht0, cudaEventDisableTiming );
 	cudaEventRecord(ev_sht0, comp_stream);					// record the end of scalar SH (radial).
@@ -1052,8 +1055,7 @@ void SHqst_to_spat_gpu_hostfft(shtns_cfg shtns, cplx *Qlm, cplx *Slm, cplx *Tlm,
 	cudaEventCreateWithFlags(&ev_sht2, cudaEventDisableTiming );
 	cudaEventRecord(ev_sht2, comp_stream);					// record the end of scalar SH (phi).
 
-	err = cudaGetLastError();
-	if (err != cudaSuccess) { printf("SH_to_spat CUDA error : %s!\n", cudaGetErrorString(err));	return; }
+	CUDA_ERROR_CHECK;
 
 	cudaStreamWaitEvent(xfer_stream, ev_sht0, 0);					// xfer stream waits for end of scalar SH (radial).
 	cudaMemcpyAsync(VrF, d_vrtp + 2*spat_stride, nlat*(mmax+1)*sizeof(double), cudaMemcpyDeviceToHost, xfer_stream);
@@ -1117,15 +1119,15 @@ void SHqst_to_spat_gpu2_hostfft(shtns_cfg shtns, cplx *Qlm, cplx *Slm, cplx *Tlm
 	}
 	/// 1) start scalar SH for radial component.
 	err = cudaMemcpy(d_qvwlm, Qlm, 2*nlm*sizeof(double), cudaMemcpyHostToDevice);
-	if (err != cudaSuccess) { printf("memcpy 0 error : %s!\n", cudaGetErrorString(err));	return; }
+	if (err != cudaSuccess) { CUDA_ERROR_CHECK;	return; }
 	// SHT on the GPU
 	legendre<0,1>(shtns, d_qvwlm, d_vrtp + 2*spat_stride, llim, mmax);
 
 	// OR transfer and convert on gpu
 	err = cudaMemcpyAsync(d_vrtp, Slm, 2*nlm*sizeof(double), cudaMemcpyHostToDevice, xfer_stream);
-	if (err != cudaSuccess) { printf("memcpy 1 error : %s!\n", cudaGetErrorString(err));	return; }
+	if (err != cudaSuccess) { CUDA_ERROR_CHECK;	return; }
 	err = cudaMemcpyAsync(d_vrtp + nlm_stride, Tlm, 2*nlm*sizeof(double), cudaMemcpyHostToDevice, xfer_stream);
-	if (err != cudaSuccess) { printf("memcpy 2 error : %s!\n", cudaGetErrorString(err));	return; }
+	if (err != cudaSuccess) { CUDA_ERROR_CHECK;	return; }
 
 	cudaEventCreateWithFlags(&ev_sht0, cudaEventDisableTiming );
 	cudaEventRecord(ev_sht0, comp_stream);					// record the end of scalar SH (radial).
@@ -1140,8 +1142,7 @@ void SHqst_to_spat_gpu2_hostfft(shtns_cfg shtns, cplx *Qlm, cplx *Slm, cplx *Tlm
 	cudaEventCreateWithFlags(&ev_sht1, cudaEventDisableTiming );
 	cudaEventRecord(ev_sht1, comp_stream);					// record the end of scalar SH (theta+phi).
 
-	err = cudaGetLastError();
-	if (err != cudaSuccess) { printf("SH_to_spat CUDA error : %s!\n", cudaGetErrorString(err));	return; }
+	CUDA_ERROR_CHECK;
 
 	cudaStreamWaitEvent(xfer_stream, ev_sht0, 0);					// xfer stream waits for end of scalar SH (radial).
 	cudaMemcpyAsync(VrF, d_vrtp + 2*spat_stride, nlat*(mmax+1)*sizeof(double), cudaMemcpyDeviceToHost, xfer_stream);
@@ -1198,15 +1199,15 @@ void SHqst_to_spat_gpu2(shtns_cfg shtns, cplx *Qlm, cplx *Slm, cplx *Tlm, double
 	}
 	/// 1) start scalar SH for radial component.
 	err = cudaMemcpy(d_qvwlm, Qlm, 2*nlm*sizeof(double), cudaMemcpyHostToDevice);
-	if (err != cudaSuccess) { printf("memcpy 0 error : %s!\n", cudaGetErrorString(err));	return; }
+	if (err != cudaSuccess) { CUDA_ERROR_CHECK;	return; }
 	// SHT on the GPU
 	cuda_SH_to_spat<0,1>(shtns, (cplx*) d_qvwlm, d_vrtp + 2*spat_stride, llim, mmax);
 
 	// OR transfer and convert on gpu
 	err = cudaMemcpyAsync(d_vrtp, Slm, 2*nlm*sizeof(double), cudaMemcpyHostToDevice, xfer_stream);
-	if (err != cudaSuccess) { printf("memcpy 1 error : %s!\n", cudaGetErrorString(err));	return; }
+	if (err != cudaSuccess) { CUDA_ERROR_CHECK;	return; }
 	err = cudaMemcpyAsync(d_vrtp + nlm_stride, Tlm, 2*nlm*sizeof(double), cudaMemcpyHostToDevice, xfer_stream);
-	if (err != cudaSuccess) { printf("memcpy 2 error : %s!\n", cudaGetErrorString(err));	return; }
+	if (err != cudaSuccess) { CUDA_ERROR_CHECK;	return; }
 
 	cudaEventCreateWithFlags(&ev_sht0, cudaEventDisableTiming );
 	cudaEventRecord(ev_sht0, comp_stream);					// record the end of scalar SH (radial).
@@ -1219,8 +1220,7 @@ void SHqst_to_spat_gpu2(shtns_cfg shtns, cplx *Qlm, cplx *Slm, cplx *Tlm, double
 	// SHT on the GPU
 	cuda_SH_to_spat<1,2>(shtns, (cplx*) d_qvwlm, d_vrtp, llim+1, mmax);
 
-	err = cudaGetLastError();
-	if (err != cudaSuccess) { printf("SH_to_spat CUDA error : %s!\n", cudaGetErrorString(err));	return; }
+	CUDA_ERROR_CHECK;
 
 	cudaStreamWaitEvent(xfer_stream, ev_sht0, 0);					// xfer stream waits for end of scalar SH (radial).
 	cudaMemcpyAsync(Vr, d_vrtp + 2*spat_stride, nlat*nphi*sizeof(double), cudaMemcpyDeviceToHost, xfer_stream);
@@ -1251,12 +1251,11 @@ void spat_to_SH_gpu(shtns_cfg shtns, double *Vr, cplx *Qlm, const long int llim)
 
 	// copy spatial data to GPU
 	err = cudaMemcpy(d_q, Vr, nlat*nphi*sizeof(double), cudaMemcpyHostToDevice);
-	if (err != cudaSuccess) { printf("spat_to_SH_gpu failed copy q\n");	return; }
+	if (err != cudaSuccess) { CUDA_ERROR_CHECK;	return; }
 
 	// SHT on the GPU
 	cu_spat_to_SH(shtns, d_q, (cplx*) d_qlm, llim);
-	err = cudaGetLastError();
-	if (err != cudaSuccess) { printf("spat_to_SH_gpu CUDA error : %s!\n", cudaGetErrorString(err));	return; }
+	CUDA_ERROR_CHECK;
 
 	int mmax = shtns->mmax;
 	int mres = shtns->mres;
@@ -1268,7 +1267,7 @@ void spat_to_SH_gpu(shtns_cfg shtns, double *Vr, cplx *Qlm, const long int llim)
 	}
 	// copy back spectral data
 	err = cudaMemcpy(Qlm, d_qlm, 2*nlm*sizeof(double), cudaMemcpyDeviceToHost);
-	if (err != cudaSuccess) { printf("spat_to_SH_gpu failed copy back\n");	return; }
+	if (err != cudaSuccess) { CUDA_ERROR_CHECK;	return; }
 }
 
 
@@ -1292,18 +1291,17 @@ void spat_to_SHsphtor_gpu(shtns_cfg shtns, double *Vt, double *Vp, cplx *Slm, cp
 
 	// copy spatial data to gpu
 	err = cudaMemcpy(d_vtp, Vt, nlat*nphi*sizeof(double), cudaMemcpyHostToDevice);
-	if (err != cudaSuccess) { printf("memcpy 3 error : %s!\n", cudaGetErrorString(err));	return; }
+	if (err != cudaSuccess) { CUDA_ERROR_CHECK;	return; }
 	// SHT on the GPU
 	cuda_spat_to_SH<1,1>(shtns, d_vtp, (cplx*) d_vwlm, llim+1);
 
 	err = cudaMemcpyAsync(d_vtp + spat_stride, Vp, nlat*nphi*sizeof(double), cudaMemcpyHostToDevice, xfer_stream);
-	if (err != cudaSuccess) { printf("memcpy 4 error : %s!\n", cudaGetErrorString(err));	return; }
+	if (err != cudaSuccess) { CUDA_ERROR_CHECK;	return; }
 	cudaEventCreateWithFlags(&ev_up, cudaEventDisableTiming );
 	cudaEventRecord(ev_up, xfer_stream);				// record the end of scalar SH (theta).
 	cudaStreamWaitEvent(shtns->comp_stream, ev_up, 0);					// compute stream waits for end of data transfer (phi).
 	cuda_spat_to_SH<1,1>(shtns, d_vtp + spat_stride, (cplx*) (d_vwlm + nlm_stride), llim+1);
-	err = cudaGetLastError();
-	if (err != cudaSuccess) { printf("spat_to_SHsphtor CUDA error : %s!\n", cudaGetErrorString(err));	return; }
+	CUDA_ERROR_CHECK;
 
 	scal2sphtor_gpu(shtns, (cplx*) d_vwlm, (cplx*) (d_vwlm+nlm_stride), (cplx*) d_vtp, (cplx*) (d_vtp+nlm_stride), llim);
 
@@ -1345,7 +1343,7 @@ void spat_to_SHsphtor_gpu2(shtns_cfg shtns, double *Vt, double *Vp, cplx *Slm, c
 	// copy spatial data to gpu
 	err = cudaMemcpy(d_vtp, Vt, nlat*nphi*sizeof(double), cudaMemcpyHostToDevice);
 	err = cudaMemcpy(d_vtp + spat_stride, Vp, nlat*nphi*sizeof(double), cudaMemcpyHostToDevice);
-	if (err != cudaSuccess) { printf("memcpy 3 error : %s!\n", cudaGetErrorString(err));	return; }
+	if (err != cudaSuccess) { CUDA_ERROR_CHECK;	return; }
 	// SHT on the GPU
 	cuda_spat_to_SH<1,2>(shtns, d_vtp, (cplx*) d_vwlm, llim+1);
 
@@ -1378,25 +1376,24 @@ void spat_to_SHqst_gpu(shtns_cfg shtns, double *Vr, double *Vt, double *Vp, cplx
 
 	// copy spatial data to gpu
 	err = cudaMemcpy(d_vrtp, Vt, nlat*nphi*sizeof(double), cudaMemcpyHostToDevice);
-	if (err != cudaSuccess) { printf("memcpy 3 error : %s!\n", cudaGetErrorString(err));	return; }
+	if (err != cudaSuccess) { CUDA_ERROR_CHECK;	return; }
 	// SHT on the GPU
 	cuda_spat_to_SH<1,1>(shtns, d_vrtp, (cplx*) d_qvwlm, llim+1);
 
 	err = cudaMemcpyAsync(d_vrtp + spat_stride, Vp, nlat*nphi*sizeof(double), cudaMemcpyHostToDevice, xfer_stream);
-	if (err != cudaSuccess) { printf("memcpy 4 error : %s!\n", cudaGetErrorString(err));	return; }
+	if (err != cudaSuccess) { CUDA_ERROR_CHECK;	return; }
 	cudaEventCreateWithFlags(&ev_up, cudaEventDisableTiming );
 	cudaEventRecord(ev_up, xfer_stream);				// record the end of scalar SH (theta).
 	cudaStreamWaitEvent(comp_stream, ev_up, 0);			// compute stream waits for end of data transfer (phi).
 	cuda_spat_to_SH<1,1>(shtns, d_vrtp + spat_stride, (cplx*) (d_qvwlm + nlm_stride), llim+1);
-	err = cudaGetLastError();
-	if (err != cudaSuccess) { printf("spat_to_SHsphtor CUDA error : %s!\n", cudaGetErrorString(err));	return; }
+	CUDA_ERROR_CHECK;
 
 	scal2sphtor_gpu(shtns, (cplx*) d_qvwlm, (cplx*) (d_qvwlm+nlm_stride), (cplx*) d_vrtp, (cplx*) (d_vrtp+nlm_stride), llim);
 	cudaEventCreateWithFlags(&ev_sh2, cudaEventDisableTiming );
 	cudaEventRecord(ev_sh2, comp_stream);				// record the end of vector transform.
 
 	err = cudaMemcpyAsync(d_vrtp + 2*spat_stride, Vr, nlat*nphi*sizeof(double), cudaMemcpyHostToDevice, xfer_stream);
-	if (err != cudaSuccess) { printf("memcpy 5 error : %s!\n", cudaGetErrorString(err));	return; }
+	if (err != cudaSuccess) { CUDA_ERROR_CHECK;	return; }
 	cudaEventCreateWithFlags(&ev_up2, cudaEventDisableTiming );
 	cudaEventRecord(ev_up2, xfer_stream);				// record the end of scalar SH (theta).
 	cudaStreamWaitEvent(comp_stream, ev_up2, 0);		// compute stream waits for end of data transfer (phi).
@@ -1447,9 +1444,9 @@ void spat_to_SHqst_gpu2(shtns_cfg shtns, double *Vr, double *Vt, double *Vp, cpl
 
 	// copy Vt and Vp to gpu (async)
 	err = cudaMemcpy(d_vrtp, Vt, nlat*nphi*sizeof(double), cudaMemcpyHostToDevice);
-	if (err != cudaSuccess) { printf("memcpy 4 error : %s!\n", cudaGetErrorString(err));	return; }
+	if (err != cudaSuccess) { CUDA_ERROR_CHECK;	return; }
 	err = cudaMemcpy(d_vrtp + spat_stride, Vp, nlat*nphi*sizeof(double), cudaMemcpyHostToDevice);
-	if (err != cudaSuccess) { printf("memcpy 3 error : %s!\n", cudaGetErrorString(err));	return; }
+	if (err != cudaSuccess) { CUDA_ERROR_CHECK;	return; }
 	cuda_spat_to_SH<1,2>(shtns, d_vrtp, (cplx*) d_qvwlm, llim+1);
 	scal2sphtor_gpu(shtns, (cplx*) d_qvwlm, (cplx*) (d_qvwlm+nlm_stride), (cplx*) d_vrtp, (cplx*) (d_vrtp+nlm_stride), llim);
 	cudaEventCreateWithFlags(&ev_sh2, cudaEventDisableTiming );
@@ -1457,7 +1454,7 @@ void spat_to_SHqst_gpu2(shtns_cfg shtns, double *Vr, double *Vt, double *Vp, cpl
 
 	// copy Vr to gpu
 	err = cudaMemcpyAsync(d_vrtp + 2*spat_stride, Vr, nlat*nphi*sizeof(double), cudaMemcpyHostToDevice, xfer_stream);
-	if (err != cudaSuccess) { printf("memcpy 5 error : %s!\n", cudaGetErrorString(err));	return; }
+	if (err != cudaSuccess) { CUDA_ERROR_CHECK;	return; }
 	cudaEventCreateWithFlags(&ev_up, cudaEventDisableTiming );
 	cudaEventRecord(ev_up, xfer_stream);				// record the end of data transfer.
 	cudaStreamWaitEvent(comp_stream, ev_up, 0);			// compute stream waits for end of data transfer.

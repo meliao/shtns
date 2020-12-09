@@ -75,6 +75,18 @@ __device__ __forceinline__ void namedBarrierArrived(int name, int numThreads) {
 }
 */
 
+/// Macro to check for cuda error and print details
+#define CUDA_ERROR_CHECK cuda_error_check(__FILE__, __LINE__)
+bool cuda_error_check(const char* fname, int l)
+{
+	cudaError_t err = cudaGetLastError();
+	if (err != cudaSuccess) {
+		printf("CUDA ERROR %s:%d : %s!\n", fname, l, cudaGetErrorString(err));
+		return true;
+	}
+	return false;
+}
+
 /// dim0, dim1 : size in complex numbers !
 /// BLOCK_DIM_Y must be between 1 and 16
 template<int BLOCK_DIM_Y> __global__ void
@@ -908,8 +920,7 @@ void sh2ishioka_gpu(shtns_cfg shtns, cplx* d_Qlm, cplx* d_Qlm_ish, int llim, int
 	dim3 threads(blksze, 1);
 	sh2ishioka_kernel <<< blocks, threads,(blksze/4*7-3)*sizeof(double), shtns->comp_stream >>>
 		(shtns->d_xlm, (double*) d_Qlm, (double*) d_Qlm_ish, llim, shtns->lmax, shtns->mres, S);
-	cudaError_t err = cudaGetLastError();
-	if (err != cudaSuccess) { printf("sh2ishioka_gpu error : %s!\n", cudaGetErrorString(err));	return; }
+	CUDA_ERROR_CHECK;
 }
 
 void ishioka2sh_gpu(shtns_cfg shtns, cplx* d_Qlm_ish, cplx* d_Qlm, int llim, int mmax, int S=0)
@@ -920,8 +931,7 @@ void ishioka2sh_gpu(shtns_cfg shtns, cplx* d_Qlm_ish, cplx* d_Qlm, int llim, int
 	dim3 threads(blksze, 1);
 	ishioka2sh_kernel <<< blocks, threads, (blksze/4*7+3)*sizeof(double), shtns->comp_stream >>>
 		(shtns->d_xlm, (double*) d_Qlm_ish, (double*) d_Qlm, llim, shtns->lmax, shtns->mres, S);
-	cudaError_t err = cudaGetLastError();
-	if (err != cudaSuccess) { printf("ishioka2sh_gpu error : %s!\n", cudaGetErrorString(err));	return; }
+	if (CUDA_ERROR_CHECK) return;
 	if (mmax < shtns->mmax) {		// set to zero m>mmax
 		long nlm = nlm_calc(shtns->lmax+S, mmax, shtns->mres);
 		cudaMemsetAsync(d_Qlm+nlm, 0, sizeof(double) * (shtns->nlm - nlm), shtns->comp_stream);
@@ -943,8 +953,7 @@ void sphtor2scal_gpu(shtns_cfg shtns, cplx* d_Slm, cplx* d_Tlm, cplx* d_Vlm, cpl
 	sphtor2scal_kernel<MAX_THREADS_PER_BLOCK> <<< blocks, threads,0, shtns->comp_stream >>>
 		(shtns->d_mx_stdt, (double*) d_Slm, (double*) d_Tlm, (double*) d_Vlm, (double*) d_Wlm, llim, shtns->lmax, shtns->mres);
   #endif
-	cudaError_t err = cudaGetLastError();
-	if (err != cudaSuccess) { printf("sphtor2scal_gpu error : %s!\n", cudaGetErrorString(err));	return; }
+	CUDA_ERROR_CHECK;
 }
 
 void scal2sphtor_gpu(shtns_cfg shtns, cplx* d_Vlm, cplx* d_Wlm, cplx* d_Slm, cplx* d_Tlm, int llim)
@@ -962,8 +971,7 @@ void scal2sphtor_gpu(shtns_cfg shtns, cplx* d_Vlm, cplx* d_Wlm, cplx* d_Slm, cpl
 	scal2sphtor_kernel<MAX_THREADS_PER_BLOCK> <<<blocks, threads, 0, shtns->comp_stream>>>
 		(shtns->d_mx_van, (double*) d_Vlm, (double*) d_Wlm, (double*)d_Slm, (double*)d_Tlm, llim, shtns->lmax, shtns->mres);
   #endif
-	cudaError_t err = cudaGetLastError();
-	if (err != cudaSuccess) { printf("scal2sphtor_gpu error : %s!\n", cudaGetErrorString(err));	return; }
+	CUDA_ERROR_CHECK;
 }
 
 
