@@ -934,7 +934,7 @@ void ishioka2sh_gpu(shtns_cfg shtns, cplx* d_Qlm_ish, cplx* d_Qlm, int llim, int
 	if (CUDA_ERROR_CHECK) return;
 	if (mmax < shtns->mmax) {		// set to zero m>mmax
 		long nlm = nlm_calc(shtns->lmax+S, mmax, shtns->mres);
-		cudaMemsetAsync(d_Qlm+nlm, 0, sizeof(double) * (shtns->nlm - nlm), shtns->comp_stream);
+		cudaMemsetAsync(d_Qlm+nlm, 0, sizeof(double)*2 * (shtns->nlm - nlm), shtns->comp_stream);
 	}
 }
 
