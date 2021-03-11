@@ -1,4 +1,4 @@
-image: gcc
+image: nvidia/cuda:10.2-devel-ubuntu18.04
 
 before_script:
   - apt-get update -qq && apt-get install -y -qq libfftw3-dev python-numpy python-dev swig
@@ -9,6 +9,10 @@ before_script:
 build:
   stage: build
   script:
+    - export CUDA_PATH=/usr/local/cuda
+    - echo "test CUDA_PATH=$CUDA_PATH"
+    - ./configure --enable-cuda
+    - make time_SHT && mv time_SHT time_SHT_cuda
     - ./configure --disable-simd
     - make time_SHT && mv time_SHT time_SHT_nosimd
     - ./configure
@@ -39,6 +43,7 @@ test:
   script:
     - ./test_suite
     - ./test_rot
+    - ./time_SHT_cuda 1023
     - ./time_SHT_nosimd 127 -quickinit -vector -nlorder=2
     - ./time_SHT_sse3 127 -quickinit -vector -nlorder=2
     - ./time_SHT_avx2 127 -quickinit -vector -nlorder=2
