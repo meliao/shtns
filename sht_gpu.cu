@@ -455,7 +455,7 @@ void fourier_to_spat_host(shtns_cfg shtns, double* qf, double* q)
 
 /// Perform SH transform on data that is already on the GPU. d_Qlm and d_Vr are pointers to GPU memory (obtained by cudaMalloc() for instance)
 template<int S, int NFIELDS>
-void cuda_SH_to_spat(shtns_cfg shtns, cplx* d_Qlm, double *d_Vr, const long int llim, const int mmax, int spat_dist = 0)
+void cuda_SH_to_spat(shtns_cfg shtns, cplx* d_Qlm, double *d_Vr, const long int llim, const int mmax, long spat_dist = 0)
 {
 	if (spat_dist == 0) spat_dist = shtns->spat_stride;
 
@@ -474,7 +474,7 @@ void cuda_SH_to_spat(shtns_cfg shtns, cplx* d_Qlm, double *d_Vr, const long int 
 
 /// Perform SH transform on data that is already on the GPU. d_Qlm and d_Vr are pointers to GPU memory (obtained by cudaMalloc() for instance)
 template<int S, int NFIELDS>
-void cuda_spat_to_SH(shtns_cfg shtns, double *d_Vr, cplx* d_Qlm, const long int llim, int spat_dist = 0)
+void cuda_spat_to_SH(shtns_cfg shtns, double *d_Vr, cplx* d_Qlm, const long int llim, long spat_dist = 0)
 {
 	int mmax = shtns->mmax;
 	const int mres = shtns->mres;
