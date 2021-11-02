@@ -42,6 +42,7 @@ int NPHI = 0;
 
 // number of SH iterations
 int SHT_ITER = 50;		// do 50 iterations by default
+int batch = 1;			// perform 1 transform together by default
 
 int error = 0;
 #define COLOR_OK  "\033[92m"
@@ -89,7 +90,7 @@ double tdiff(struct timeval *start, struct timeval *end)
 {
 	double sec = ((long) end->tv_sec - (long) start->tv_sec);
 	sec += 1.e-6*((long) end->tv_usec - (long) start->tv_usec);
-	return sec * (1.e3/SHT_ITER);	// time in ms.
+	return sec * (1.e3/(SHT_ITER*batch));	// time in ms.
 }
 
 /// check if an IEEE754 double precision number is finite (works also with -ffinite-math).
@@ -405,8 +406,8 @@ void test_SHT_vect_l(int ltr)
 	double ts, ta;
 	struct timeval t1, t2;
 
-	complex double *S2 = (complex double *) shtns_malloc(sizeof(complex double)* NLM);
-	complex double *T2 = (complex double *) shtns_malloc(sizeof(complex double)* NLM);
+	complex double *S2 = (complex double *) shtns_malloc(sizeof(complex double)* NLM * batch);
+	complex double *T2 = (complex double *) shtns_malloc(sizeof(complex double)* NLM * batch);
 
 	for (i=0;i<NLM;i++) {
 		Slm[i] = Slm0[i];	Tlm[i] = Tlm0[i];
@@ -444,8 +445,8 @@ void test_SHT_vect()
 	double ts, ta;
 	struct timeval t1, t2;
 
-	complex double *S2 = (complex double *) shtns_malloc(sizeof(complex double)* NLM);
-	complex double *T2 = (complex double *) shtns_malloc(sizeof(complex double)* NLM);
+	complex double *S2 = (complex double *) shtns_malloc(sizeof(complex double)* NLM * batch);
+	complex double *T2 = (complex double *) shtns_malloc(sizeof(complex double)* NLM * batch);
 
 	for (i=0;i<NLM;i++) {
 		Slm[i] = Slm0[i];	Tlm[i] = Tlm0[i];
@@ -477,9 +478,9 @@ void test_SHT_vect3d_l(int ltr)
 	double ts, ta;
 	struct timeval t1, t2;
 	
-	complex double *Q2 = (complex double *) shtns_malloc(sizeof(complex double)* NLM);
-	complex double *S2 = (complex double *) shtns_malloc(sizeof(complex double)* NLM);
-	complex double *T2 = (complex double *) shtns_malloc(sizeof(complex double)* NLM);
+	complex double *Q2 = (complex double *) shtns_malloc(sizeof(complex double)* NLM * batch);
+	complex double *S2 = (complex double *) shtns_malloc(sizeof(complex double)* NLM * batch);
+	complex double *T2 = (complex double *) shtns_malloc(sizeof(complex double)* NLM * batch);
 	
 	for (i=0;i<NLM;i++) {
 		Slm[i] = Slm0[i];	Tlm[i] = Tlm0[i];	Qlm[i] = Tlm0[i];
@@ -521,9 +522,9 @@ void test_SHT_vect3d()
 	double ts, ta;
 	struct timeval t1, t2;
 	
-	complex double *Q2 = (complex double *) shtns_malloc(sizeof(complex double)* NLM);
-	complex double *S2 = (complex double *) shtns_malloc(sizeof(complex double)* NLM);
-	complex double *T2 = (complex double *) shtns_malloc(sizeof(complex double)* NLM);
+	complex double *Q2 = (complex double *) shtns_malloc(sizeof(complex double)* NLM * batch);
+	complex double *S2 = (complex double *) shtns_malloc(sizeof(complex double)* NLM * batch);
+	complex double *T2 = (complex double *) shtns_malloc(sizeof(complex double)* NLM * batch);
 	
 	for (i=0;i<NLM;i++) {
 		Slm[i] = Slm0[i];	Tlm[i] = Tlm0[i];	Qlm[i] = Tlm0[i];
@@ -752,7 +753,8 @@ int main(int argc, char *argv[])
 		if (strcmp(name,"robert") == 0) robert_form = t;
 		if (strcmp(name,"nopadding") == 0) layout_opts &= ~SHT_ALLOW_PADDING;		// Disable padding.
 		if (strcmp(name,"nogpu") == 0) layout_opts &= ~SHT_ALLOW_GPU;		// Disable gpu.
-		if (strcmp(name,"accuracy") == 0) accuracy_test = 1;			// Parform an accuracy test instead of a speed test.
+		if (strcmp(name,"accuracy") == 0) accuracy_test = 1;			// Perform an accuracy test instead of a speed test.
+		if (strcmp(name,"batch") == 0) batch = -1;			// Perform several transforms together
 	}
 
 	if (vector == 0) layout_opts |= SHT_SCALAR_ONLY;
@@ -763,6 +765,11 @@ int main(int argc, char *argv[])
 	if (robert_form >= 0) shtns_robert_form(shtns, robert_form);		// keep the default robert_form, unless specified on command line (usefull when built4magic)
 	NLM = shtns->nlm;
 	shtns_set_grid_auto(shtns, shtmode | layout | layout_opts, polaropt, nlorder, &NLAT, &NPHI);
+	if (batch == -1) {
+		batch = SHT_ITER;		SHT_ITER = 1;
+		int r = shtns_set_batch(shtns, batch, shtns->nlm);
+		if (r<0) printf("ERROR batch\n");
+	}
 
 	shtns_print_cfg(shtns);
 
@@ -778,6 +785,7 @@ int main(int argc, char *argv[])
 //	write_vect("cost",ct,NLAT);
 //	write_vect("sint",st,NLAT);
 
+	printf("nspat = %d, nlat = %d, nlat_padded = %d, iter=%d, batch=%d\n",shtns->nspat, shtns->nlat, shtns->nlat_padded, SHT_ITER, batch);
 	ShF = (complex double *) shtns_malloc( shtns->nspat * sizeof(double));
 	Sh = (double *) ShF;
 	if (ShF == NULL) runerr("memory allocation 1 failed");
@@ -789,13 +797,13 @@ int main(int argc, char *argv[])
 		if ((ThF == NULL)||(NLF == NULL)) runerr("memory allocation 2 failed");
 	}
 
-	Slm0 = (complex double *) shtns_malloc(sizeof(complex double)* NLM);
-	Slm = (complex double *) shtns_malloc(sizeof(complex double)* NLM);
-	Tlm = (complex double *) shtns_malloc(sizeof(complex double)* NLM);
+	Slm0 = (complex double *) shtns_malloc(sizeof(complex double)* NLM * batch);
+	Slm = (complex double *) shtns_malloc(sizeof(complex double)* NLM * batch);
+	Tlm = (complex double *) shtns_malloc(sizeof(complex double)* NLM * batch);
 	if ((Slm0 == NULL)||(Slm == NULL)||(Tlm == NULL)) runerr("memory allocation 3 failed");
 	if (vector) {
-		Tlm0 = (complex double *) shtns_malloc(sizeof(complex double)* NLM);
-		Qlm = (complex double *) shtns_malloc(sizeof(complex double)* NLM);
+		Tlm0 = (complex double *) shtns_malloc(sizeof(complex double)* NLM * batch);
+		Qlm = (complex double *) shtns_malloc(sizeof(complex double)* NLM * batch);
 		if ((Tlm0 == NULL)||(Qlm == NULL)) runerr("memory allocation 4 failed");
 	}
 
@@ -804,18 +812,19 @@ int main(int argc, char *argv[])
 //	do_fft_tests();
 //	exit(0);
 
-  if (NLM < 10000) {
+  if (NLM*batch < 10000) {
 // SH_to_spat
-	for (i=0;i<NLM;i++) {
+	for (i=0;i<NLM*batch;i++) {
 		Slm[i] = 0.0;
 		if (vector) Tlm[i] = 0.0;
 	}
 	for (i=0;i<shtns->nspat;i++) {
 		Sh[i] = 0.0;
 	}
-	Slm[LiM(shtns, 1,0)] = sh10_ct(shtns);
-	if ((MMAX > 0)&&(MRES==1))
-		Slm[LiM(shtns, 1,1)] = sh11_st(shtns);
+	for (int b=0; b<batch; b++) {
+		Slm[LiM(shtns, 1,0) + b*NLM] = (b+1)*sh10_ct(shtns);
+		if ((MMAX > 0)&&(MRES==1))	Slm[LiM(shtns, 1,1) + b*NLM] = (b+1)*sh11_st(shtns);
+	}
 //	write_vect("ylm0",Slm, NLM*2);
 //	SH_to_spat_ml(shtns, 0,Slm, Sh, LMAX);
 //	spat_to_SH_ml(shtns, 0,Sh, Slm, LMAX);
@@ -855,12 +864,12 @@ int main(int argc, char *argv[])
 */
 // spat_to_SH
 	for (im=0;im<NPHI;im++) {
-		for (i=0;i<NLAT;i++) {
-			Sh[im*NLAT+i] = shtns->ct[i];
+		for (int b=0;b<batch;b++) {
+			for (i=0;i<shtns->nlat;i++) Sh[im*shtns->nlat_padded+b*shtns->nlat+i] = (b+1) * shtns->ct[i];
 		}
 	}
 	spat_to_SH(shtns, Sh,Slm);
-	write_vect("ylm",(double *)Slm,NLM*2);
+	write_mx("ylm",(double *)Slm,batch, NLM*2);
   }
 
 // test case...

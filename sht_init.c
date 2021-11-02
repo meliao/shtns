@@ -908,7 +908,7 @@ void fprint_ftable(FILE* fp, void* ftable[SHT_NVAR][SHT_NTYP])
 
 void shtns_print_cfg(shtns_cfg shtns)
 {
-	printf("Lmax=%d, Mmax*Mres=%d, Mres=%d, Nlm=%d  [%d threads, ",LMAX, MMAX*MRES, MRES, NLM, shtns->nthreads);
+	printf("Lmax=%d, Mmax*Mres=%d, Mres=%d, Nlm=%d, Nbatch=%d  [%d threads, ",LMAX, MMAX*MRES, MRES, NLM, shtns->nthreads, shtns->howmany);
 	#ifdef HAVE_LIBCUFFT
 		if (shtns->d_alm) printf("gpu ready, ");
 	#endif
@@ -1408,6 +1408,7 @@ int shtns_set_grid_auto(shtns_cfg shtns, enum shtns_type flags, double eps, int 
 	// copy to global variables.
 	shtns->nphi = *nphi;
 	shtns->nlat_2 = (*nlat+1)/2;	shtns->nlat = *nlat;
+	shtns->howmany = 1;		// 1 transform only; use shtns_set_batch() for more.
 
 	if (layout & SHT_LOAD_SAVE_CFG)	{
 		FILE* f = fopen("shtns_cfg_fftw","r");
@@ -1496,6 +1497,40 @@ int shtns_set_grid(shtns_cfg shtns, enum shtns_type flags, double eps, int nlat,
 	if ((nlat == 0)||(nphi == 0)) shtns_runerr("nlat or nphi is zero !");
 	return( shtns_set_grid_auto(shtns, flags, eps, 0, &nlat, &nphi) );
 }
+
+/** Batched transforms, with some constraints.
+ * Currently only theta-contiguous data is allowed.
+ * Data is accessed with data[iphi*shtns->nlat_padded + ibatch*shtns->nlat + itheta].
+*/
+int shtns_set_batch(shtns_cfg shtns, const int howmany, const int spec_dist)
+{
+	//if ((howmany <= 0) || (spec_dist < shtns->nlm)) return -1;		// invalid
+	if (shtns->nlat & 1) return -1;	// only even nlat is allowed.
+	if (shtns->fft_mode != FFT_THETA_CONTIG) return -1;	// only theta-contiguous is allowed for now.
+
+	int nfft =  shtns->nphi;
+	int phi_inc = shtns->nlat * howmany;
+	#ifndef HAVE_LIBCUFFT
+	//if ((layout & SHT_ALLOW_PADDING) && (phi_inc % 64 == 0) && (NPHI * phi_inc > 512))  phi_inc += 8;		// we add some padding, to avoid cache bank conflicts.
+	#endif
+
+	shtns->howmany = howmany;
+	shtns->nspat = shtns->nphi * phi_inc;		// spatial size to be allocated
+	shtns->m_stride_a = phi_inc;		// stride between phi in spectral domain
+	shtns->nlat_padded = phi_inc;		// stride between phi in spatial domain
+	shtns->spec_dist = spec_dist;		// distance between spectral fields.
+
+	if (shtns->nphi > 1) {		// prepare fft
+		fftw_destroy_plan(shtns->ifftc);
+		cplx* ShF = (cplx*) VMALLOC( sizeof(double) * shtns->nspat );
+		shtns->ifftc = fftw_plan_many_dft(1, &nfft, shtns->nlat_2 * howmany, ShF, &nfft, phi_inc/2, 1, ShF, &nfft, phi_inc/2, 1, FFTW_BACKWARD, shtns->fftw_plan_mode);
+		shtns->fftc = shtns->ifftc;
+		VFREE(ShF);
+	}
+
+	return(shtns->nspat);	// returns the number of doubles to be allocated for a spatial field.
+}
+
 
 /*! Simple initialization of Spherical Harmonic transforms (backward and forward, vector and scalar, ...) of given size.
  * This function sets all global variables by calling \ref shtns_create followed by \ref shtns_set_grid, with the

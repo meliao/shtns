@@ -131,6 +131,10 @@ struct shtns_info {		// MUST start with "int nlm;"
 	fftw_plan ifftc, fftc;
 	fftw_plan ifft_cplx, fft_cplx;		// for complex-valued spatial fields.
 	fftw_plan ifftc_block, fftc_block;
+	
+	/* batched transform */
+	int howmany;		///< number of fields to transform simultaneously
+	long spec_dist;		///< pointer distance between two spectral fields (in complex number)
 
 	/* Legendre function generation arrays */
 	double *alm;	// coefficient list for Legendre function recurrence (size 2*NLM)

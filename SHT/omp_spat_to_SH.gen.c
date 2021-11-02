@@ -73,32 +73,42 @@ V			fftw_execute_split_dft(shtns->fftc, Vp+NPHI, Vp, BpF+1, BpF);
 	#pragma omp parallel num_threads(shtns->nthreads)
 	{
 		if (llim < SHT_L_RESCALE_FLY) {
-			#pragma omp for schedule(static,1) nowait
+			#pragma omp for schedule(dynamic,1) nowait
 			for (int im=0; im<=imlim; im++) {
-QX				GEN3(_an1,NWAY,SUFFIX)(shtns, BrF, Qlm, llim, im);
-VX				GEN3(_an2,NWAY,SUFFIX)(shtns, BtF, BpF, Slm, Tlm, llim, im);
-3				GEN3(_an3,NWAY,SUFFIX)(shtns, BrF, BtF, BpF, Qlm, Slm, Tlm, llim, im);
+				for (int b=0; b<shtns->howmany; b++) {
+					long spec_ofs = b * shtns->spec_dist;
+					long spat_ofs = b * shtns->nlat;
+QX					GEN3(_an1,NWAY,SUFFIX)(shtns, BrF+spat_ofs, Qlm+spec_ofs, llim, im);
+VX					GEN3(_an2,NWAY,SUFFIX)(shtns, BtF+spat_ofs, BpF+spat_ofs, Slm+spec_ofs, Tlm+spec_ofs, llim, im);
+3					GEN3(_an3,NWAY,SUFFIX)(shtns, BrF+spat_ofs, BtF+spat_ofs, BpF+spat_ofs, Qlm+spec_ofs, Slm+spec_ofs, Tlm+spec_ofs, llim, im);
+				}
 			}
 		} else {
-			#pragma omp for schedule(static,1) nowait
+			#pragma omp for schedule(dynamic,1) nowait
 			for (int im=0; im<=imlim; im++) {
-QX				GEN3(_an1_hi,NWAY,SUFFIX)(shtns, BrF, Qlm, llim, im);
-VX				GEN3(_an2_hi,NWAY,SUFFIX)(shtns, BtF, BpF, Slm, Tlm, llim, im);
-3				GEN3(_an3_hi,NWAY,SUFFIX)(shtns, BrF, BtF, BpF, Qlm, Slm, Tlm, llim, im);
+				for (int b=0; b<shtns->howmany; b++) {
+					long spec_ofs = b * shtns->spec_dist;
+					long spat_ofs = b * shtns->nlat;
+QX					GEN3(_an1_hi,NWAY,SUFFIX)(shtns, BrF+spat_ofs, Qlm+spec_ofs, llim, im);
+VX					GEN3(_an2_hi,NWAY,SUFFIX)(shtns, BtF+spat_ofs, BpF+spat_ofs, Slm+spec_ofs, Tlm+spec_ofs, llim, im);
+3					GEN3(_an3_hi,NWAY,SUFFIX)(shtns, BrF+spat_ofs, BtF+spat_ofs, BpF+spat_ofs, Qlm+spec_ofs, Slm+spec_ofs, Tlm+spec_ofs, llim, im);
+				}
 			}
 		}
 		#ifndef SHT_AXISYM
 			if (imlim < MMAX) {		// zero out m > imlim
 				long l = LiM(shtns, (imlim+1)*MRES, imlim+1);
-Q				#pragma omp single nowait
-Q				memset(Qlm+l, 0, (shtns->nlm - l)*sizeof(cplx));
-V				#pragma omp single nowait
-V				memset(Slm+l, 0, (shtns->nlm - l)*sizeof(cplx));
-V				#pragma omp single nowait
-V				memset(Tlm+l, 0, (shtns->nlm - l)*sizeof(cplx));
+				#pragma omp for schedule(dynamic,1) nowait
+				for (int b=0; b<shtns->howmany; b++) {
+					long spec_ofs = b * shtns->spec_dist;
+Q					memset(Qlm+l+spec_ofs, 0, (shtns->nlm - l)*sizeof(cplx));
+V					memset(Slm+l+spec_ofs, 0, (shtns->nlm - l)*sizeof(cplx));
+V					memset(Tlm+l+spec_ofs, 0, (shtns->nlm - l)*sizeof(cplx));
+				}
 			}
 		#endif
 	}
+	#pragma omp barrier
 
   #ifndef SHT_AXISYM
   	if (shtns->fft_mode & FFT_OOP) {		// free memory

@@ -80,24 +80,28 @@ VX		BpF = BtF + nv/2;
   {
 	const int it0=0;
 	const int it1=NLAT_2;
-	#pragma omp for schedule(static,1) nowait
+	#pragma omp for schedule(dynamic,1) collapse(2) nowait
 	for (int im=0; im<=imlim; im++)
 	{
-3		GEN3(_sy3_hi,NWAY,SUFFIX)(shtns, Qlm, Slm, Tlm, BrF, BtF, BpF, llim, im, it0, it1);
-QX		GEN3(_sy1_hi,NWAY,SUFFIX)(shtns, Qlm, BrF, llim, im, it0, it1);
+	    for (int b=0; b<shtns->howmany; b++) {		// inner-loop is batch. For best cache-reuse
+		long spec_ofs = b * shtns->spec_dist;
+		long spat_ofs = b * shtns->nlat_2;
+3		GEN3(_sy3_hi,NWAY,SUFFIX)(shtns, Qlm+spec_ofs, Slm+spec_ofs, Tlm+spec_ofs, BrF+spat_ofs, BtF+spat_ofs, BpF+spat_ofs, llim, im, it0, it1);
+QX		GEN3(_sy1_hi,NWAY,SUFFIX)(shtns, Qlm+spec_ofs, BrF+spat_ofs, llim, im, it0, it1);
 	#ifndef SHT_GRAD
-VX		GEN3(_sy2_hi,NWAY,SUFFIX)(shtns, Slm, Tlm, BtF, BpF, llim, im, it0, it1);
+VX		GEN3(_sy2_hi,NWAY,SUFFIX)(shtns, Slm+spec_ofs, Tlm+spec_ofs, BtF+spat_ofs, BpF+spat_ofs, llim, im, it0, it1);
 	#else
-S		GEN3(_sy1s_hi,NWAY,SUFFIX)(shtns, Slm, BtF, BpF, llim, im, it0, it1);
-T		GEN3(_sy1t_hi,NWAY,SUFFIX)(shtns, Tlm, BtF, BpF, llim, im, it0, it1);
+S		GEN3(_sy1s_hi,NWAY,SUFFIX)(shtns, Slm+spec_ofs, BtF+spat_ofs, BpF+spat_ofs, llim, im, it0, it1);
+T		GEN3(_sy1t_hi,NWAY,SUFFIX)(shtns, Tlm+spec_ofs, BtF+spat_ofs, BpF+spat_ofs, llim, im, it0, it1);
 	#endif
+	    }
 	}
 
   #ifndef SHT_AXISYM
 	// padding for high m's
 	if (NPHI-1 > 2*imlim) {
 		const int m_inc = shtns->nlat_padded >> 1;
-		#pragma omp for schedule(static) nowait
+		#pragma omp for schedule(dynamic,1) nowait
 		for (int im=imlim+1; im < NPHI-imlim; im++)  {
 Q			memset(BrF + m_inc*im, 0, sizeof(cplx)* m_inc );
 V			memset(BtF + m_inc*im, 0, sizeof(cplx)* m_inc );
@@ -106,6 +110,7 @@ V			memset(BpF + m_inc*im, 0, sizeof(cplx)* m_inc );
 	}
   #endif
   }
+    #pragma omp barrier
 
   #ifndef SHT_AXISYM
     // NPHI > 1 as SHT_AXISYM is not defined.

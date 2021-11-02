@@ -151,6 +151,8 @@ shtns_cfg shtns_create_with_grid(shtns_cfg, int mmax, int nofft);
 int shtns_use_threads(int num_threads);
 /// Selects the gpu device (device_id % Num_devices). Must be called BEFORE any initialization. Internally calls cudaSetDevice(). Returns the actual device or -1 when no device found.
 int shtns_use_gpu(int device_id);
+/// beta: Perform several transforms together (batch). Howmany is the number of transforms, spec_dist the distance between spectral arrays.
+int shtns_set_batch(shtns_cfg shtns, int howmany, int spec_dist);
 
 void shtns_reset(void);				///< destroy all configs, free memory, and go back to initial state.
 void shtns_destroy(shtns_cfg);		///< free memory of given config, which cannot be used afterwards.
