@@ -620,8 +620,10 @@ sh2ishioka_kernel(const double* __restrict__ xlm, const double* __restrict__ ql,
 }
 
 /// performs: Ql[2*l] = qq[2*l]*xlm[3*l] + qq[2*l-2]*xlm[3*l+1];   Ql[2*l+1] = qq[2*l+1] * xlm[3*l+2];
+/// includes zero-out for unused modes.
 __global__ void
-ishioka2sh_kernel(const double* __restrict__ xlm, const double* __restrict__ ql_ish, double* ql, const int llim, const int lmax, const int mres, const int S)
+ishioka2sh_kernel(const double* __restrict__ xlm, const double* __restrict__ ql_ish, double* ql, 
+	const int llim, const int lmax, const int mmax, const int mres, const int S)
 {
 	const int j = threadIdx.x;
 	const int im = blockIdx.y;
@@ -637,7 +639,7 @@ ishioka2sh_kernel(const double* __restrict__ xlm, const double* __restrict__ ql_
 	double* const xl_ = ql_ + blockDim.x;	// size blockDim.x/4*3 - 3
 
 	double q = 0.0;
-	if (l-2 <= llim_m) {
+	if ((l-2 <= llim_m) && (im <= mmax)) {
 		if ((j<(blockDim.x>>2)*3+3) && (x_ofs+j-3 >= 0)) xl_[j] = xlm[x_ofs +j-3];
 		if (l-2 >= 0) q = ql_ish[q_ofs +j-4];		// ql_[4] = ql_ish[0]
 		ql_[j] = q;
@@ -647,7 +649,7 @@ ishioka2sh_kernel(const double* __restrict__ xlm, const double* __restrict__ ql_
 
 	if (j<blockDim.x-4) {
 		q = 0.0;
-		if (l<=llim_m) {
+		if ((l<=llim_m) && (im <= mmax)) {
 			int ix = 3*(j>>2)+3;		// 3*l/2.
 			q = ql_[j+4] * xl_[ix + (j&2)];	// ix for l-m even, ix+2 for l-m odd
 			if ((j&2)==0) {		// for l-m even
@@ -655,7 +657,7 @@ ishioka2sh_kernel(const double* __restrict__ xlm, const double* __restrict__ ql_
 			}
 		}
 		if (l<=lmax+S-m)
-			ql[q_ofs +j] = q;	// coalesced store (including zero-out for llim<l<=lmax)
+			ql[q_ofs +j] = q;	// coalesced store (including zero-out for llim<l<=lmax) AND zero-out for m>mmax
 	}
 }
 
@@ -927,15 +929,11 @@ void ishioka2sh_gpu(shtns_cfg shtns, cplx* d_Qlm_ish, cplx* d_Qlm, int llim, int
 {
 	int blksze = (((shtns->lmax+3)*2+WARPSZE-1)/WARPSZE) * WARPSZE;
 	if (blksze > MAX_THREADS_PER_BLOCK) blksze = MAX_THREADS_PER_BLOCK;
-	dim3 blocks((2*(shtns->lmax+3)+blksze-5)/(blksze-4), mmax+1);
+	dim3 blocks((2*(shtns->lmax+3)+blksze-5)/(blksze-4), shtns->mmax+1);
 	dim3 threads(blksze, 1);
 	ishioka2sh_kernel <<< blocks, threads, (blksze/4*7+3)*sizeof(double), shtns->comp_stream >>>
-		(shtns->d_xlm, (double*) d_Qlm_ish, (double*) d_Qlm, llim, shtns->lmax, shtns->mres, S);
+		(shtns->d_xlm, (double*) d_Qlm_ish, (double*) d_Qlm, llim, shtns->lmax, mmax, shtns->mres, S);
 	if (CUDA_ERROR_CHECK) return;
-	if (mmax < shtns->mmax) {		// set to zero m>mmax
-		long nlm = nlm_calc(shtns->lmax+S, mmax, shtns->mres);
-		cudaMemsetAsync(d_Qlm+nlm, 0, sizeof(double)*2 * (shtns->nlm - nlm), shtns->comp_stream);
-	}
 }
 
 void sphtor2scal_gpu(shtns_cfg shtns, cplx* d_Slm, cplx* d_Tlm, cplx* d_Vlm, cplx* d_Wlm, int llim, int mmax)
