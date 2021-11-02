@@ -980,12 +980,12 @@ void scal2sphtor_gpu(shtns_cfg shtns, cplx* d_Vlm, cplx* d_Wlm, cplx* d_Slm, cpl
 template<int BLOCKSIZE, int S, int NFIELDS, int NW, bool HI_LLIM>
 static __global__ void leg_m_kernel(
 	const double* __restrict__ al, const double* __restrict__ ct, const double* __restrict__ ql, double *q, 
-	const int llim, const int nlat_2, const int lmax, const int mres, const int nphi, const int ql_dist=0, const int q_dist=0)
+	const int llim, const int nlat_2, const int lmax, const int mres, const int nphi, const int m_inc, const int ql_dist=0, const int q_dist=0)
 {
 	const int it = BLOCKSIZE*NW * blockIdx.x + threadIdx.x;
 	const int im = blockIdx.y;
 	const int j = threadIdx.x;
-	const int m_inc = 2*nlat_2;
+	//const int m_inc = 2*nlat_2;
 	const int k_inc = 1;
 
 	__shared__ double ak[BLOCKSIZE];		// size blockDim.x
@@ -1532,16 +1532,17 @@ static void leg_m(shtns_cfg shtns, const double *ql, double *q, const int llim, 
 	if (spat_dist == 0) spat_dist = shtns->spat_stride;
 	dim3 blocks(blocksPerGrid, mmax+1);
 	dim3 threads(threadsPerBlock, 1);
-	leg_m_kernel<BLOCKSIZE, S, NFIELDS, NW, HI_LLIM> <<<blocks, threads, 0, stream>>>(d_alm, d_ct, (double*) ql, (double*) q, llim, nlat_2, lmax,mres, nphi, shtns->nlm_stride, spat_dist);
+	leg_m_kernel<BLOCKSIZE, S, NFIELDS, NW, HI_LLIM> <<<blocks, threads, 0, stream>>>(d_alm, d_ct, (double*) ql, (double*) q, llim, nlat_2, lmax,mres, nphi, shtns->nlat_padded, shtns->nlm_stride, spat_dist);
 }
 
 template<int BLOCKSIZE, int LSPAN, int S, int NFIELDS, bool HI_LLIM> __global__ void
-ileg_m_kernel(const double* __restrict__ al, const double* __restrict__ ct, const double* __restrict__ q, double *ql, const int llim, const int nlat_2, const int lmax, const int mres, const int nphi, const double mpos_scale, const int q_dist=0, const int ql_dist=0)
+ileg_m_kernel(const double* __restrict__ al, const double* __restrict__ ct, const double* __restrict__ q, double *ql, const int llim, 
+	const int nlat_2, const int lmax, const int mres, const int nphi, const int m_inc, const double mpos_scale, const int q_dist=0, const int ql_dist=0)
 {
 	const int it = BLOCKSIZE * blockIdx.x + threadIdx.x;
 	const int j = threadIdx.x;
 	const int im = blockIdx.y;
-	const int m_inc = 2*nlat_2;
+	//const int m_inc = 2*nlat_2;
 
 	static_assert((BLOCKSIZE % (2*LSPAN)) == 0, "BLOCKSIZE must be a multiple of 2*LSPAN");
 	static_assert( ((WARPSZE >= BLOCKSIZE/LSPAN) ? (WARPSZE % (BLOCKSIZE/LSPAN)) : ((BLOCKSIZE/LSPAN) % WARPSZE)) == 0, "WARPSZE and BLOCKSIZE/LSPAN must be multiples");
@@ -1902,7 +1903,8 @@ static void ileg_m(shtns_cfg shtns, const double* q, double *ql, const int llim,
 	if (llim < mmax*mres) mmax = llim / mres;	// truncate mmax too !
 	dim3 blocks(blocksPerGrid, mmax+1);
 	dim3 threads(threadsPerBlock, 1);
-	ileg_m_kernel<BLOCKSIZE, LSPAN_, S, NFIELDS, HI_LLIM><<<blocks, threads, 0, stream>>>(d_alm, d_ct, (double*) q, (double*) ql, llim, nlat_2, lmax,mres, nphi, shtns->mpos_scale_analys, q_dist, ql_dist);
+	ileg_m_kernel<BLOCKSIZE, LSPAN_, S, NFIELDS, HI_LLIM> <<<blocks, threads, 0, stream>>>
+		(d_alm, d_ct, (double*) q, (double*) ql, llim, nlat_2, lmax,mres, nphi, shtns->nlat_padded, shtns->mpos_scale_analys, q_dist, ql_dist);
 }
 
 template<int S, int NFIELDS>
