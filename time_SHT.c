@@ -129,9 +129,9 @@ int isNotNormal(double x) {
 	return 0;
 }
 
-void print_error(double err_rms, double err_max, int l_max, int lm_max, char* name)
+void print_error(double err_rms, double err_max, int l_max, int lm_max, int b_max, char* name)
 {
-	printf("  %s => max error = %g (l=%d,lm=%ld)   rms error = %g   ",	name, err_max, l_max, lm_max, err_rms);
+	printf("  %s => max error = %g (l=%d,lm=%ld,batch=%d)   rms error = %g   ",	name, err_max, l_max, lm_max, b_max, err_rms);
 
 	if ((err_max > 1e-4) || (err_rms > 1e-6) || isNotFinite(err_rms)) {
 		printf(COLOR_ERR " **** ERROR **** " COLOR_END "\n");
@@ -144,41 +144,43 @@ void print_error(double err_rms, double err_max, int l_max, int lm_max, char* na
 
 double scal_error(complex double *Slm, complex double *Slm0, int ltr)
 {
-	long int jj,i, nlm_cplx;
+	long int jj,i, nlm_cplx, ib;
 	double tmax,t,n2;
 
 	nlm_cplx = (MMAX*2 == NPHI) ? LiM(shtns, MRES*MMAX,MMAX) : NLM;
 // compute error :
-	tmax = 0;	n2 = 0;		jj=0;
+	tmax = 0;	n2 = 0;		jj=0;	ib=0;
 //	if (!allFinite((double*)Slm, 2*NLM)) printf("NaN, Inf or Denormal detected\n");
-	for (i=0;i<NLM;i++) {
-		//if ((isNaN(creal(Slm[i]))) || (isNaN(cimag(Slm[i])))) printf("NaN @ lm=%ld (l=%d)\n",i,shtns->li[i]);
-		if ((i <= LMAX)||(i >= nlm_cplx)) {		// m=0, and 2*m=nphi is real
-			if (shtns->li[i] <= ltr)	Slm[i] = creal(Slm[i]-Slm0[i]);
-			t = fabs(creal(Slm[i]));
-		} else {
-			if (shtns->li[i] <= ltr)	Slm[i] -= Slm0[i];
-			t = cabs(Slm[i]);
+	for (int b=0;b<batch;b++) {
+		for (i=0;i<NLM;i++) {
+			//if ((isNaN(creal(Slm[i]))) || (isNaN(cimag(Slm[i])))) printf("NaN @ lm=%ld (l=%d)\n",i,shtns->li[i]);
+			if ((i <= LMAX)||(i >= nlm_cplx)) {		// m=0, and 2*m=nphi is real
+				if (shtns->li[i] <= ltr)	Slm[i+b*NLM] = creal(Slm[i+b*NLM]-Slm0[i+b*NLM]);
+				t = fabs(creal(Slm[i+b*NLM]));
+			} else {
+				if (shtns->li[i] <= ltr)	Slm[i+b*NLM] -= Slm0[i+b*NLM];
+				t = cabs(Slm[i+b*NLM]);
+			}
+			n2 += t*t;
+	//		if (isNotFinite(t)) printf("NaN or Inf @ lm=%ld (l=%d)  Slm=%g,%g  Slm0=%g,%g\n",i,shtns->li[i], creal(Slm[i]), cimag(Slm[i]), creal(Slm0[i]), cimag(Slm0[i]));
+			if (t>tmax) { tmax = t; jj = i; ib=b; }
 		}
-		n2 += t*t;
-//		if (isNotFinite(t)) printf("NaN or Inf @ lm=%ld (l=%d)  Slm=%g,%g  Slm0=%g,%g\n",i,shtns->li[i], creal(Slm[i]), cimag(Slm[i]), creal(Slm0[i]), cimag(Slm0[i]));
-		if (t>tmax) { tmax = t; jj = i; }
 	}
-	print_error(sqrt(n2/NLM), tmax, shtns->li[jj],jj, "");
+	print_error(sqrt(n2/(NLM*batch)), tmax, shtns->li[jj],jj,ib, "");
 	if ((tmax > 1e-7) && (NLM < 15)) {
 		printf("\n orig:");
 		for (i=0; i<NLM;i++)
 			if ((i <= LMAX)||(i >= nlm_cplx)) {		// m=0, and 2*m=nphi is real
-				printf("  %g",creal(Slm0[i]));
+				printf("  %g",creal(Slm0[i+ib*NLM]));
 			} else {
-				printf("  %g,%g",creal(Slm0[i]),cimag(Slm0[i]));
+				printf("  %g,%g",creal(Slm0[i+ib*NLM]),cimag(Slm0[i+ib*NLM]));
 			}
 		printf("\n diff:");
 		for (i=0; i<NLM;i++)
 			if ((i <= LMAX)||(i >= nlm_cplx)) {		// m=0, and 2*m=nphi is real
-				printf("  %g",creal(Slm[i]));
+				printf("  %g",creal(Slm[i+ib*NLM]));
 			} else {
-				printf("  %g,%g",creal(Slm[i]),cimag(Slm[i]));
+				printf("  %g,%g",creal(Slm[i+ib*NLM]),cimag(Slm[i+ib*NLM]));
 			}
 	}
 	return(tmax);
@@ -186,23 +188,25 @@ double scal_error(complex double *Slm, complex double *Slm0, int ltr)
 
 double vect_error(complex double *Slm, complex double *Tlm, complex double *Slm0, complex double *Tlm0, int ltr)
 {
-	long int jj,i;
+	long int jj,i,ib;
 	double tmax0, tmax,t,n2;
 
 // compute error :
-	tmax = 0;	n2 = 0;		jj=0;
-	for (i=0;i<NLM;i++) {
-		if ((i <= LMAX)||(i >= LiM(shtns, MRES*(NPHI+1)/2,(NPHI+1)/2))) {
-			if (shtns->li[i] <= ltr)	Slm[i] = creal(Slm[i]-Slm0[i]);
-			t = fabs(creal(Slm[i]));
-		} else {
-			if (shtns->li[i] <= ltr)	Slm[i] -= Slm0[i];
-			t = cabs(Slm[i]);
+	tmax = 0;	n2 = 0;		jj=0;	ib=0;
+	for (int b=0;b<batch;b++) {
+		for (i=0;i<NLM;i++) {
+			if ((i <= LMAX)||(i >= LiM(shtns, MRES*(NPHI+1)/2,(NPHI+1)/2))) {
+				if (shtns->li[i] <= ltr)	Slm[i+b*NLM] = creal(Slm[i+b*NLM]-Slm0[i+b*NLM]);
+				t = fabs(creal(Slm[i+b*NLM]));
+			} else {
+				if (shtns->li[i] <= ltr)	Slm[i+b*NLM] -= Slm0[i+b*NLM];
+				t = cabs(Slm[i+b*NLM]);
+			}
+			n2 += t*t;
+			if (t>tmax) { tmax = t; jj = i; ib = b; }
 		}
-		n2 += t*t;
-		if (t>tmax) { tmax = t; jj = i; }
 	}
-	print_error(sqrt(n2/NLM), tmax, shtns->li[jj],jj, "Spheroidal");
+	print_error(sqrt(n2/(NLM*batch)), tmax, shtns->li[jj],jj,ib, "Spheroidal");
 	if ((tmax > 1e-4) && (NLM < 15)) {
 		printf("\n orig:");
 		for (i=0; i<NLM;i++)
@@ -223,19 +227,21 @@ double vect_error(complex double *Slm, complex double *Tlm, complex double *Slm0
 	tmax0 = tmax;
 
 // compute error :
-	tmax = 0;	n2 = 0;		jj=0;
-	for (i=0;i<NLM;i++) {
-		if ((i <= LMAX)||(i >= LiM(shtns, MRES*(NPHI+1)/2,(NPHI+1)/2))) {
-			if (shtns->li[i] <= ltr)	Tlm[i] = creal(Tlm[i]- Tlm0[i]);
-			t = fabs(creal(Tlm[i]));
-		} else {
-			if (shtns->li[i] <= ltr)	Tlm[i] -= Tlm0[i];
-			t = cabs(Tlm[i]);
+	tmax = 0;	n2 = 0;		jj=0;	ib=0;
+	for (int b=0;b<batch;b++) {
+		for (i=0;i<NLM;i++) {
+			if ((i <= LMAX)||(i >= LiM(shtns, MRES*(NPHI+1)/2,(NPHI+1)/2))) {
+				if (shtns->li[i] <= ltr)	Tlm[i+b*NLM] = creal(Tlm[i+b*NLM]- Tlm0[i+b*NLM]);
+				t = fabs(creal(Tlm[i+b*NLM]));
+			} else {
+				if (shtns->li[i] <= ltr)	Tlm[i+b*NLM] -= Tlm0[i+b*NLM];
+				t = cabs(Tlm[i+b*NLM]);
+			}
+			n2 += t*t;
+			if (t>tmax) { tmax = t; jj = i; ib=b; }
 		}
-		n2 += t*t;
-		if (t>tmax) { tmax = t; jj = i; }
 	}
-	print_error(sqrt(n2/NLM), tmax, shtns->li[jj],jj, "Toroidal");
+	print_error(sqrt(n2/(NLM*batch)), tmax, shtns->li[jj],jj,ib, "Toroidal");
 	if ((tmax > 1e-4) && (NLM < 15)) {
 		printf("\n orig:");
 		for (i=0; i<NLM;i++)
@@ -296,7 +302,7 @@ void test_SHT()
 	struct timeval t1, t2;
 	double gflop = 1e-6 * (NLAT*(NLM*4 +(MMAX+1)*2 + MMAX*log2(MMAX+1) + 5*NPHI*log2(NPHI)));		// Million floating point ops
 
-	for (i=0;i<NLM;i++) Slm[i] = Slm0[i];	// restore test case...
+	for (i=0;i<NLM*batch;i++) Slm[i] = Slm0[i];	// restore test case...
 
 	tcpu = clock();
 	gettimeofday(&t1, NULL);
@@ -329,7 +335,7 @@ void test_SHT()
 
 void test_SHT_accuracy()
 {
-	for (int i=0;i<NLM;i++) Slm[i] = Slm0[i];	// restore test case...
+	for (int i=0;i<NLM*batch;i++) Slm[i] = Slm0[i];	// restore test case...
 	for (int jj=0; jj< SHT_ITER; jj++) {
 		SH_to_spat(shtns, Slm,Sh);
 		spat_to_SH(shtns, Sh, Tlm);
@@ -344,7 +350,7 @@ void test_SHT_m0()
 	double ts, ta;
 	struct timeval t1, t2;
 
-	for (i=0;i<NLM;i++) Slm[i] = Slm0[i];	// restore test case...
+	for (i=0;i<NLM*batch;i++) Slm[i] = Slm0[i];	// restore test case...
 
 	gettimeofday(&t1, NULL);
 	for (jj=0; jj< SHT_ITER; jj++) {
@@ -371,7 +377,7 @@ void test_SHT_l(int ltr)
 	double ts, ta;
 	struct timeval t1, t2;
 
-	for (i=0;i<NLM;i++) Slm[i] = Slm0[i];	// restore test case...
+	for (i=0;i<NLM*batch;i++) Slm[i] = Slm0[i];	// restore test case...
 
 	
 	gettimeofday(&t1, NULL);
@@ -409,7 +415,7 @@ void test_SHT_vect_l(int ltr)
 	complex double *S2 = (complex double *) shtns_malloc(sizeof(complex double)* NLM * batch);
 	complex double *T2 = (complex double *) shtns_malloc(sizeof(complex double)* NLM * batch);
 
-	for (i=0;i<NLM;i++) {
+	for (i=0;i<NLM*batch;i++) {
 		Slm[i] = Slm0[i];	Tlm[i] = Tlm0[i];
 	}
 	gettimeofday(&t1, NULL);
@@ -448,7 +454,7 @@ void test_SHT_vect()
 	complex double *S2 = (complex double *) shtns_malloc(sizeof(complex double)* NLM * batch);
 	complex double *T2 = (complex double *) shtns_malloc(sizeof(complex double)* NLM * batch);
 
-	for (i=0;i<NLM;i++) {
+	for (i=0;i<NLM*batch;i++) {
 		Slm[i] = Slm0[i];	Tlm[i] = Tlm0[i];
 	}
 	gettimeofday(&t1, NULL);
@@ -482,7 +488,7 @@ void test_SHT_vect3d_l(int ltr)
 	complex double *S2 = (complex double *) shtns_malloc(sizeof(complex double)* NLM * batch);
 	complex double *T2 = (complex double *) shtns_malloc(sizeof(complex double)* NLM * batch);
 	
-	for (i=0;i<NLM;i++) {
+	for (i=0;i<NLM*batch;i++) {
 		Slm[i] = Slm0[i];	Tlm[i] = Tlm0[i];	Qlm[i] = Tlm0[i];
 	}
 
@@ -526,7 +532,7 @@ void test_SHT_vect3d()
 	complex double *S2 = (complex double *) shtns_malloc(sizeof(complex double)* NLM * batch);
 	complex double *T2 = (complex double *) shtns_malloc(sizeof(complex double)* NLM * batch);
 	
-	for (i=0;i<NLM;i++) {
+	for (i=0;i<NLM*batch;i++) {
 		Slm[i] = Slm0[i];	Tlm[i] = Tlm0[i];	Qlm[i] = Tlm0[i];
 	}
 
@@ -875,7 +881,7 @@ int main(int argc, char *argv[])
 // test case...
 	printf("generating random test case...\n");
 	t = 1.0 / (RAND_MAX/2);
-	for (i=0;i<NLM;i++) {
+	for (i=0;i<NLM*batch;i++) {
 		Slm0[i] = t*((double) (rand() - RAND_MAX/2)) + I*t*((double) (rand() - RAND_MAX/2));
 		if (vector) Tlm0[i] = t*((double) (rand() - RAND_MAX/2)) + I*t*((double) (rand() - RAND_MAX/2));
 	}
@@ -902,9 +908,9 @@ int main(int argc, char *argv[])
 	test_SHT_l(LMAX/2);
 
 	if (vector) {
-		Slm0[LM(shtns, 0,0)] = 0.0;	// l=0, m=0 n'a pas de signification sph/tor
-		Tlm0[LM(shtns, 0,0)] = 0.0;	// l=0, m=0 n'a pas de signification sph/tor
-	//	for (i=0;i<NLM;i++) Slm0[i] = 0.0;	// zero out Slm.
+		for (int b=0;b<batch;b++) Slm0[LM(shtns, 0,0) + b*NLM] = 0.0;	// l=0, m=0 n'a pas de signification sph/tor
+		for (int b=0;b<batch;b++) Tlm0[LM(shtns, 0,0) + b*NLM] = 0.0;	// l=0, m=0 n'a pas de signification sph/tor
+	//	for (i=0;i<NLM*batch;i++) Slm0[i] = 0.0;	// zero out Slm.
 
 		printf("** performing %d vector SHT\n", SHT_ITER);
 		printf(":: STD\n");

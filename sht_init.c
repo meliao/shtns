@@ -1498,6 +1498,8 @@ int shtns_set_grid(shtns_cfg shtns, enum shtns_type flags, double eps, int nlat,
 	return( shtns_set_grid_auto(shtns, flags, eps, 0, &nlat, &nphi) );
 }
 
+int cushtns_set_batch(shtns_cfg shtns);
+
 /** Batched transforms, with some constraints.
  * Currently only theta-contiguous data is allowed.
  * Data is accessed with data[iphi*shtns->nlat_padded + ibatch*shtns->nlat + itheta].
@@ -1527,6 +1529,12 @@ int shtns_set_batch(shtns_cfg shtns, const int howmany, const int spec_dist)
 		shtns->fftc = shtns->ifftc;
 		VFREE(ShF);
 	}
+
+	#ifdef HAVE_LIBCUFFT
+	if (shtns->d_alm) {		// go for gpu batched transforms
+		int gpu_ok = cushtns_set_batch(shtns);
+	}
+	#endif
 
 	return(shtns->nspat);	// returns the number of doubles to be allocated for a spatial field.
 }
