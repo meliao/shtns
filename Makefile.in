@@ -35,7 +35,7 @@ install-lib : $(libname)
 	cp $(libname) $(PREFIX)/lib/$(libname)
 	cp shtns.h $(PREFIX)/include/
 	cp shtns_cuda.h $(PREFIX)/include/
-	cp shtns.f shtns.f03 $(PREFIX)/include/
+	cp shtns.f shtns.f03 shtns_cuda.f03 $(PREFIX)/include/
 	@echo " "
 	@cat COPYRIGHT
 	@echo " "

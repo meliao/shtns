@@ -1504,7 +1504,7 @@ int cushtns_set_batch(shtns_cfg shtns);
  * Currently only theta-contiguous data is allowed.
  * Data is accessed with data[iphi*shtns->nlat_padded + ibatch*shtns->nlat + itheta].
 */
-int shtns_set_batch(shtns_cfg shtns, const int howmany, const int spec_dist)
+int shtns_set_batch(shtns_cfg shtns, const int howmany, const long spec_dist)
 {
 	//if ((howmany <= 0) || (spec_dist < shtns->nlm)) return -1;		// invalid
 	if (shtns->nlat & 1) return -1;	// only even nlat is allowed.
