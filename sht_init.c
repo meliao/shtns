@@ -1282,11 +1282,11 @@ void shtns_free(void* p) {
 static int choose_nlat(int n)
 {
 	#if HAVE_LIBCUFFT
-	n = ((n+63)/64) * 64;		// multiple of 64 for GPUs
-	return n;
+	n = ((n+3)/4) * 4;		// multiple of 4 for GPUs
+	#else
+	n += (n&1);		// even is better.
 	#endif
 
-	n += (n&1);		// even is better.
 	#ifndef SHTNS4MAGIC
 	n = ((n+(VSIZE2-1))/VSIZE2) * VSIZE2;		// multiple of vector size
 	#else
@@ -1322,7 +1322,7 @@ int shtns_set_grid_auto(shtns_cfg shtns, enum shtns_type flags, double eps, int 
 	const int req_flags = flags;		// requested flags.
 
 	#if HAVE_LIBCUFFT
-		if (*nlat % 64) shtns_runerr("Nlat must be a multiple of 64 for GPUs\n");
+		if (*nlat % 4) shtns_runerr("Nlat must be a multiple of 4 for GPUs\n");
 	#endif
 	if (*nlat & 1) shtns_runerr("Nlat must be even\n");
 	#if _GCC_VEC_
