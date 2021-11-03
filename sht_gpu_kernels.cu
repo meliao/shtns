@@ -368,7 +368,7 @@ leg_m0_kernel(const double *al, const double *ct, const double *ql, double *q, c
 }
 
 template<int S, int NFIELDS>
-static void leg_m0(shtns_cfg shtns, const double *ql, double *q, const int llim, int spat_dist = 0)
+static void leg_m0(shtns_cfg shtns, const double *ql, double *q, const int llim, long spat_dist = 0)
 {
 	const int nlat_2 = shtns->nlat_2;
 	double *d_ct = shtns->d_ct;
@@ -1511,7 +1511,7 @@ static __global__ void leg_m_kernel(
 }
 
 template<int S, int NFIELDS, bool HI_LLIM=false>
-static void leg_m(shtns_cfg shtns, const double *ql, double *q, const int llim, const int mmax, int spat_dist=0)
+static void leg_m(shtns_cfg shtns, const double *ql, double *q, const int llim, const int mmax, long spat_dist=0)
 {
 	const int lmax = shtns->lmax;
 	const int mres = shtns->mres;
@@ -1916,7 +1916,7 @@ static void ileg_m(shtns_cfg shtns, const double* q, double *ql, const int llim,
 }
 
 template<int S, int NFIELDS>
-static void legendre(shtns_cfg shtns, const double *ql, double *q, const int llim, const int mmax, int spat_dist = 0)
+static void legendre(shtns_cfg shtns, const double *ql, double *q, const int llim, const int mmax, long spat_dist = 0)
 {
 	if (spat_dist == 0) spat_dist = shtns->spat_stride;
 	if (mmax==0) {
@@ -1932,7 +1932,7 @@ static void legendre(shtns_cfg shtns, const double *ql, double *q, const int lli
 
 /// Perform SH transform on data that is already on the GPU. d_Qlm and d_Vr are pointers to GPU memory (obtained by cudaMalloc() for instance)
 template<int S, int NFIELDS>
-static void ilegendre(shtns_cfg shtns, const double *q, double* ql, const int llim, int spat_dist = 0)
+static void ilegendre(shtns_cfg shtns, const double *q, double* ql, const int llim, long spat_dist = 0)
 {
 	int mmax = shtns->mmax;
 	const int mres = shtns->mres;
