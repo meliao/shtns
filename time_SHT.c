@@ -714,6 +714,7 @@ int main(int argc, char *argv[])
 	enum shtns_norm shtnorm = sht_orthonormal;		// default to "orthonormal" SH.
 	int layout = SHT_NATIVE_LAYOUT;
 	int layout_opts = SHT_ALLOW_PADDING | SHT_ALLOW_GPU;
+	int noltr = 0;
 	int nlorder = 0;
 	int point = 0;
 	int vector = 0;
@@ -760,7 +761,8 @@ int main(int argc, char *argv[])
 		if (strcmp(name,"nopadding") == 0) layout_opts &= ~SHT_ALLOW_PADDING;		// Disable padding.
 		if (strcmp(name,"nogpu") == 0) layout_opts &= ~SHT_ALLOW_GPU;		// Disable gpu.
 		if (strcmp(name,"accuracy") == 0) accuracy_test = 1;			// Perform an accuracy test instead of a speed test.
-		if (strcmp(name,"batch") == 0) batch = -1;			// Perform several transforms together
+		if (strcmp(name,"batch") == 0) { batch = -1;  layout = SHT_THETA_CONTIGUOUS; }	// Perform several transforms together, this implies a specific layout.
+		if (strcmp(name,"noltr") == 0) noltr = 1;
 	}
 
 	if (vector == 0) layout_opts |= SHT_SCALAR_ONLY;
@@ -904,8 +906,10 @@ int main(int argc, char *argv[])
 		exit(error);
 	}
 	test_SHT();
-	printf(":: LTR\n");
-	test_SHT_l(LMAX/2);
+	if (!noltr) {
+		printf(":: LTR\n");
+		test_SHT_l(LMAX/2);
+	}
 
 	if (vector) {
 		for (int b=0;b<batch;b++) Slm0[LM(shtns, 0,0) + b*NLM] = 0.0;	// l=0, m=0 n'a pas de signification sph/tor
@@ -915,14 +919,18 @@ int main(int argc, char *argv[])
 		printf("** performing %d vector SHT\n", SHT_ITER);
 		printf(":: STD\n");
 		test_SHT_vect();
-		printf(":: LTR\n");
-		test_SHT_vect_l(LMAX/2);
+		if (!noltr) {
+			printf(":: LTR\n");
+			test_SHT_vect_l(LMAX/2);
+		}
 
 		printf("** performing %d 3D vector SHT\n", SHT_ITER);
 		printf(":: STD\n");
 		test_SHT_vect3d();
-		printf(":: LTR\n");
-		test_SHT_vect3d_l(LMAX/2);
+		if (!noltr) {
+			printf(":: LTR\n");
+			test_SHT_vect3d_l(LMAX/2);
+		}
 
 		if (NPHI == 1) {		// test the special m=0 transforms
 			printf("** performing %d m=0 gradient SHT\n", SHT_ITER);
