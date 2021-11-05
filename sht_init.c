@@ -444,10 +444,10 @@ static void planFFT(shtns_cfg shtns, int layout)
 		// for complex transform it is much simpler (out-of-place):
 		shtns->ifft_cplx = fftw_plan_many_dft(1, &nfft, NLAT, ShF, &nfft, NLAT, 1, (cplx*)Sh, &nfft, 1, NPHI, FFTW_BACKWARD, shtns->fftw_plan_mode);
 		shtns->fft_cplx =  fftw_plan_many_dft(1, &nfft, NLAT, ShF, &nfft, 1, NPHI, (cplx*)Sh, &nfft, NLAT, 1, FFTW_BACKWARD, shtns->fftw_plan_mode);
-	#ifdef HAVE_LIBCUFFT
+	#if defined( HAVE_LIBCUFFT ) && !defined( VKFFT_BACKEND )
 	} else if ((!(layout & SHT_THETA_CONTIGUOUS)) && (nfft % 16 == 0) && (shtns->nlat_2 % 16 == 0)) {		// use the fastest layout compatible with cuFFT
 		#if SHT_VERBOSE > 0
-		if (verbose) printf("(native cuFFT layout: phi_inc=2, theta_inc=NA)\n");
+		if (verbose) printf("(best cuFFT layout: phi_inc=2, theta_inc=NA)\n");
 		#endif
 		shtns->fft_mode = FFT_PHI_CONTIG_CPLX | FFT_OOP;	// out-of-place
 		// Fourier -> spatial

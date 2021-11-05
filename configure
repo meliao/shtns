@@ -4751,6 +4751,100 @@ else
   as_fn_error $? "cufft library not found." "$LINENO" 5
 fi
 
+	{ $as_echo "$as_me:${as_lineno-$LINENO}: checking for nvrtcGetPTX in -lnvrtc" >&5
+$as_echo_n "checking for nvrtcGetPTX in -lnvrtc... " >&6; }
+if ${ac_cv_lib_nvrtc_nvrtcGetPTX+:} false; then :
+  $as_echo_n "(cached) " >&6
+else
+  ac_check_lib_save_LIBS=$LIBS
+LIBS="-lnvrtc  $LIBS"
+cat confdefs.h - <<_ACEOF >conftest.$ac_ext
+/* end confdefs.h.  */
+
+/* Override any GCC internal prototype to avoid an error.
+   Use char because int might match the return type of a GCC
+   builtin and then its argument prototype would still apply.  */
+#ifdef __cplusplus
+extern "C"
+#endif
+char nvrtcGetPTX ();
+int
+main ()
+{
+return nvrtcGetPTX ();
+  ;
+  return 0;
+}
+_ACEOF
+if ac_fn_c_try_link "$LINENO"; then :
+  ac_cv_lib_nvrtc_nvrtcGetPTX=yes
+else
+  ac_cv_lib_nvrtc_nvrtcGetPTX=no
+fi
+rm -f core conftest.err conftest.$ac_objext \
+    conftest$ac_exeext conftest.$ac_ext
+LIBS=$ac_check_lib_save_LIBS
+fi
+{ $as_echo "$as_me:${as_lineno-$LINENO}: result: $ac_cv_lib_nvrtc_nvrtcGetPTX" >&5
+$as_echo "$ac_cv_lib_nvrtc_nvrtcGetPTX" >&6; }
+if test "x$ac_cv_lib_nvrtc_nvrtcGetPTX" = xyes; then :
+  cat >>confdefs.h <<_ACEOF
+#define HAVE_LIBNVRTC 1
+_ACEOF
+
+  LIBS="-lnvrtc $LIBS"
+
+else
+  as_fn_error $? "nvrtc library not found. Try adding LDFLAGS=\"-L/usr/local/cuda/lib64\"" "$LINENO" 5
+fi
+
+	{ $as_echo "$as_me:${as_lineno-$LINENO}: checking for cuLaunchKernel in -lcuda" >&5
+$as_echo_n "checking for cuLaunchKernel in -lcuda... " >&6; }
+if ${ac_cv_lib_cuda_cuLaunchKernel+:} false; then :
+  $as_echo_n "(cached) " >&6
+else
+  ac_check_lib_save_LIBS=$LIBS
+LIBS="-lcuda  $LIBS"
+cat confdefs.h - <<_ACEOF >conftest.$ac_ext
+/* end confdefs.h.  */
+
+/* Override any GCC internal prototype to avoid an error.
+   Use char because int might match the return type of a GCC
+   builtin and then its argument prototype would still apply.  */
+#ifdef __cplusplus
+extern "C"
+#endif
+char cuLaunchKernel ();
+int
+main ()
+{
+return cuLaunchKernel ();
+  ;
+  return 0;
+}
+_ACEOF
+if ac_fn_c_try_link "$LINENO"; then :
+  ac_cv_lib_cuda_cuLaunchKernel=yes
+else
+  ac_cv_lib_cuda_cuLaunchKernel=no
+fi
+rm -f core conftest.err conftest.$ac_objext \
+    conftest$ac_exeext conftest.$ac_ext
+LIBS=$ac_check_lib_save_LIBS
+fi
+{ $as_echo "$as_me:${as_lineno-$LINENO}: result: $ac_cv_lib_cuda_cuLaunchKernel" >&5
+$as_echo "$ac_cv_lib_cuda_cuLaunchKernel" >&6; }
+if test "x$ac_cv_lib_cuda_cuLaunchKernel" = xyes; then :
+  cat >>confdefs.h <<_ACEOF
+#define HAVE_LIBCUDA 1
+_ACEOF
+
+  LIBS="-lcuda $LIBS"
+
+else
+  as_fn_error $? "cufft library not found. Try adding LDFLAGS=\"-L/usr/local/cuda/lib64\"" "$LINENO" 5
+fi
+
 	objs="$objs sht_gpu.o"
 	target="libshtns_cuda.a"
 	if test "x$enable_openmp" = "xyes"; then :
@@ -4865,6 +4959,27 @@ fi
 fi
 	nvcc_flags="$nvcc_flags $nvcc_gencode_flags"
 	LIBS="$LIBS -lstdc++"	# cuda uses the c++ standard library. This is needed to link with gcc
+	{ $as_echo "$as_me:${as_lineno-$LINENO}: checking for vkfft/vkFFT.h" >&5
+$as_echo_n "checking for vkfft/vkFFT.h... " >&6; }
+if ${ac_cv_file_vkfft_vkFFT_h+:} false; then :
+  $as_echo_n "(cached) " >&6
+else
+  test "$cross_compiling" = yes &&
+  as_fn_error $? "cannot check for file existence when cross compiling" "$LINENO" 5
+if test -r "vkfft/vkFFT.h"; then
+  ac_cv_file_vkfft_vkFFT_h=yes
+else
+  ac_cv_file_vkfft_vkFFT_h=no
+fi
+fi
+{ $as_echo "$as_me:${as_lineno-$LINENO}: result: $ac_cv_file_vkfft_vkFFT_h" >&5
+$as_echo "$ac_cv_file_vkfft_vkFFT_h" >&6; }
+if test "x$ac_cv_file_vkfft_vkFFT_h" = xyes; then :
+
+$as_echo "#define VKFFT_BACKEND 1" >>confdefs.h
+
+fi
+
 
 fi
 libname=$target		# set the libname befor checking for python.

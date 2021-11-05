@@ -155,6 +155,9 @@ static void destroy_cuda_buffer_fft(shtns_cfg shtns)
 #ifdef HAVE_LIBCUFFT
 int cuda_gpu_id = 0;	// by default, use gpu device 0
 #endif
+#ifdef VKFFT_BACKEND
+CUdevice vkfft_device_struct;
+#endif
 
 // WARNING! streams should be set BEFORE this routine is called!!
 static int init_cuda_buffer_fft(shtns_cfg shtns)
@@ -181,6 +184,35 @@ static int init_cuda_buffer_fft(shtns_cfg shtns)
 			int howmany = shtns->nlat_2 * shtns->howmany;		// support batched transforms
 			int dist = shtns->nlat_padded / 2;
 			res = cufftPlanMany(&shtns->cufft_plan, 1, &nfft, &nfft, dist, 1, &nfft, dist, 1, CUFFT_Z2Z, howmany);
+			#ifdef VKFFT_BACKEND
+				VkFFTConfiguration config = {};		//zero-initialize configuration
+				config.FFTdim = 2; //FFT dimension: 1D, but we use a second dimension to get non-unit strides.
+				config.size[0] = howmany;
+				config.size[1] = nfft;
+				config.bufferStride[0] = dist;
+				config.bufferStride[1] = dist * nfft;
+				config.omitDimension[0] = 1;		// no FFT on the first dimension.
+				config.doublePrecision = 1;
+				/*if (2*(shtns->mmax+1) <= nfft) {	// let vkFFT perform the zero-padding
+					config.performZeropadding[1] = 1;
+					config.frequencyZeroPadding = 1;	// 1 for "fourier_to_spat", 0 for "spat_to_fourier" 
+					config.fft_zeropad_left[1] = shtns->mmax + 1;
+					config.fft_zeropad_right[1] = nfft - shtns->mmax -1;
+				}*/
+				//config.disableReorderFourStep = 1;		// avoids the use of temp buffer for large transforms at the cost of a mangled output.
+				cuDeviceGet(&vkfft_device_struct, cuda_gpu_id);
+				config.device = &vkfft_device_struct;
+				config.stream = &shtns->comp_stream;
+				config.num_streams = 1;
+				VkFFTResult vk_res = initializeVkFFT(&shtns->vkfft_plan, config);
+
+				const int ver = VkFFTGetVersion();
+				printf("=> Using VkFFT v%d.%d.%d\n",ver/10000,(ver%10000)/100,ver%100);
+				if (vk_res != VKFFT_SUCCESS) {
+					printf("vkfft init FAILED with error code %d\n", vk_res);
+					err_count ++;
+				}
+			#endif
 		} else {
 			printf("WARNING: layout not available on GPU.\n");
 			err_count ++;
@@ -416,7 +448,13 @@ void fourier_to_spat_gpu(shtns_cfg shtns, double* q, const int mmax)
 				const int nlat = shtns->nlat_padded;
 				cudaMemsetAsync( q + (mmax+1)*nlat, 0, sizeof(double)*(nphi-2*mmax-1)*nlat, shtns->comp_stream );		// zero out m>mmax before fft
 			}
+			#ifndef VKFFT_BACKEND
 			res = cufftExecZ2Z(shtns->cufft_plan, x, x, CUFFT_INVERSE);
+			#else
+				VkFFTLaunchParams launchParams = {};
+				launchParams.buffer = (void**) &x;
+				VkFFTAppend(&shtns->vkfft_plan, 1, &launchParams);
+			#endif
 		}
 		if (res != CUFFT_SUCCESS) printf("cufft error %d\n", res);
 	}
@@ -433,7 +471,13 @@ void spat_to_fourier_gpu(shtns_cfg shtns, double* q, const int mmax)
 			res = cufftExecZ2Z(shtns->cufft_plan, x, (cufftDoubleComplex*) xfft, CUFFT_FORWARD);
 			transpose_cplx_skip(shtns->comp_stream, xfft, (double*) x, nphi, shtns->nlat_2, mmax);		// ignore m > mmax during transpose
 		} else {	// THETA_CONTIGUOUS:
+			#ifndef VKFFT_BACKEND
 			res = cufftExecZ2Z(shtns->cufft_plan, x, x, CUFFT_FORWARD);
+			#else
+				VkFFTLaunchParams launchParams = {};
+				launchParams.buffer = (void**) &x;
+				VkFFTAppend(&shtns->vkfft_plan, -1, &launchParams);
+			#endif
 		}
 		if (res != CUFFT_SUCCESS) printf("cufft error %d\n", res);
 	}

@@ -59,6 +59,10 @@ int cushtns_use_gpu(int);
 #endif /* __cplusplus */
 #endif
 
+#ifdef VKFFT_BACKEND
+#include "vkfft/vkFFT.h"
+#endif
+
 /* BEGIN COMPILE-TIME SETTINGS */
 
 /// The default \ref opt_polar threshold (0 disabled, 1.e-6 is aggressive, 1.e-10 is safe, 1.e-14 is VERY safe)
@@ -180,6 +184,9 @@ struct shtns_info {		// MUST start with "int nlm;"
 	size_t nlm_stride, spat_stride;
 	cudaStream_t xfer_stream, comp_stream;		// the cuda streams
 	cufftHandle cufft_plan;						// the cufft Handle
+	#endif
+	#ifdef VKFFT_BACKEND
+		VkFFTApplication vkfft_plan;
 	#endif
 
 	/* other misc informations */

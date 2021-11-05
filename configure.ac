@@ -198,6 +198,8 @@ AS_IF([test "x$enable_cuda" != "xno"], [
 	echo $LDFLAGS
 	AC_CHECK_LIB([cudart],[cudaMalloc],,AC_MSG_ERROR([cudart library not found. Try adding LDFLAGS="-L/usr/local/cuda/lib64"]))
 	AC_CHECK_LIB([cufft],[cufftPlanMany],,AC_MSG_ERROR([cufft library not found.]))
+	AC_CHECK_LIB([nvrtc],[nvrtcGetPTX],,AC_MSG_ERROR([nvrtc library not found. Try adding LDFLAGS="-L/usr/local/cuda/lib64"]))
+	AC_CHECK_LIB([cuda],[cuLaunchKernel],,AC_MSG_ERROR([cufft library not found. Try adding LDFLAGS="-L/usr/local/cuda/lib64"]))
 	objs="$objs sht_gpu.o"
 	target="libshtns_cuda.a"
 	AS_IF([test "x$enable_openmp" = "xyes"], [target="libshtns_cuda_omp.a"])
@@ -218,6 +220,7 @@ AS_IF([test "x$enable_cuda" != "xno"], [
 	])
 	nvcc_flags="$nvcc_flags $nvcc_gencode_flags"
 	LIBS="$LIBS -lstdc++"	# cuda uses the c++ standard library. This is needed to link with gcc
+	AC_CHECK_FILE([vkfft/vkFFT.h], AC_DEFINE([VKFFT_BACKEND],[1],[Use vkFFT for the FFT on the GPU when possible]))
 ])
 libname=$target		# set the libname befor checking for python.
 

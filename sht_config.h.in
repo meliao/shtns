@@ -24,6 +24,9 @@
 /* Define to 1 if you have the <inttypes.h> header file. */
 #undef HAVE_INTTYPES_H
 
+/* Define to 1 if you have the `cuda' library (-lcuda). */
+#undef HAVE_LIBCUDA
+
 /* Define to 1 if you have the `cudart' library (-lcudart). */
 #undef HAVE_LIBCUDART
 
@@ -38,6 +41,9 @@
 
 /* Define to 1 if you have the `m' library (-lm). */
 #undef HAVE_LIBM
+
+/* Define to 1 if you have the `nvrtc' library (-lnvrtc). */
+#undef HAVE_LIBNVRTC
 
 /* Define to 1 if the type `long double' works and has more range or precision
    than `double'. */
@@ -131,6 +137,9 @@
 
 /* Define to 1 if you can safely include both <sys/time.h> and <time.h>. */
 #undef TIME_WITH_SYS_TIME
+
+/* Use vkFFT for the FFT on the GPU when possible */
+#undef VKFFT_BACKEND
 
 /* I compile with GCC 4 or ICC 14 or later, and I would like fast vectorized
    code (if SSE2, AVX or MIC is supported) ! */
