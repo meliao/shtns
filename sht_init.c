@@ -49,10 +49,6 @@ shtns_cfg sht_data = NULL;
   #define omp_threads 1
 #endif
 
-#ifdef HAVE_LIBCUFFT
-	int cuda_gpu_id = 0;	// by default, use gpu device 0
-#endif
-
 static int verbose = 0;		// runtime verbosity control: 0 no output, 1 output, 2 debug (if compiled in)
 void shtns_verbose(int v) {
 	verbose = v;
@@ -1592,8 +1588,7 @@ int shtns_use_threads(int num_threads)
 int shtns_use_gpu(int device_id)
 {
 #ifdef HAVE_LIBCUFFT
-	cuda_gpu_id = cushtns_use_gpu(device_id);
-	return cuda_gpu_id;
+	return cushtns_use_gpu(device_id);
 #else
 	return -1;
 #endif

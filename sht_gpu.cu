@@ -63,7 +63,7 @@
 
 #include "sht_gpu_kernels.cu"
 
-enum cushtns_flags { CUSHT_OFF=0, CUSHT_ON=1, CUSHT_OWN_COMP_STREAM=2, CUSHT_OWN_XFER_STREAM=4};
+enum cushtns_flags { CUSHT_OFF=0, CUSHT_ON=1, CUSHT_OWN_XFER_STREAM=4};
 
 /* TOOL FUNCTIONS */
 
@@ -145,7 +145,6 @@ void memzero_omp(double* mem, double* mem2, double* mem3, const size_t sze)
 static void destroy_cuda_buffer_fft(shtns_cfg shtns)
 {
 	if (shtns->nphi > 1) cufftDestroy(shtns->cufft_plan);
-	if (shtns->cu_flags & CUSHT_OWN_COMP_STREAM) cudaStreamDestroy(shtns->comp_stream);
 	if (shtns->cu_flags & CUSHT_OWN_XFER_STREAM) cudaStreamDestroy(shtns->xfer_stream);
 	if (shtns->gpu_mem) cudaFree(shtns->gpu_mem);
 	if (shtns->gpu_buf_out) cudaFree(shtns->gpu_buf_out);
@@ -153,13 +152,16 @@ static void destroy_cuda_buffer_fft(shtns_cfg shtns)
 	if (shtns->xfft_cpu) shtns_free(shtns->xfft_cpu);
 }
 
+#ifdef HAVE_LIBCUFFT
+int cuda_gpu_id = 0;	// by default, use gpu device 0
+#endif
+
+// WARNING! streams should be set BEFORE this routine is called!!
 static int init_cuda_buffer_fft(shtns_cfg shtns)
 {
 	cudaError_t err = cudaSuccess;
 	int err_count = 0;
 
-	shtns->comp_stream = 0;		// use default stream for computations.
-	shtns->cu_flags &= ~((int)CUSHT_OWN_COMP_STREAM);		// mark the compute stream (=default stream) as NOT managed by shtns.
 	err = cudaStreamCreateWithFlags(&shtns->xfer_stream, cudaStreamNonBlocking);		// stream for async data transfer.
 	shtns->cu_flags |= CUSHT_OWN_XFER_STREAM;		// mark the transfer stream as managed by shtns.
 	if (err != cudaSuccess)  err_count ++;
@@ -169,8 +171,8 @@ static int init_cuda_buffer_fft(shtns_cfg shtns)
 	//int nreal = 2*(nfft/2+1);
 	if (nfft > 1) {
 		// cufftPlanMany(cufftHandle *plan, int rank, int *n,   int *inembed, int istride, int idist,   int *onembed, int ostride, int odist,   cufftType type, int batch);
-		cufftResult res;
-		if ((shtns->fft_mode & FFT_PHI_CONTIG_CPLX) && (nfft % 16 == 0) && (shtns->nlat_2 % 16 == 0)) {	// use the fastest data-layout.
+		cufftResult res = CUFFT_SUCCESS;
+		if ((shtns->fft_mode & FFT_PHI_CONTIG_CPLX) && (nfft % 16 == 0) && (shtns->nlat_2 % 16 == 0)) {	// DEPRECATED: use the fastest data-layout for large sizes in CUFFT
 			printf("!!! Use phi-contiguous FFT +transpose: WARNING, the spatial data is neither phi-contiguous nor theta-contiguous !!!\n");
 			res = cufftPlanMany(&shtns->cufft_plan, 1, &nfft, &nfft, 1, shtns->nphi, &nfft, 1, shtns->nphi, CUFFT_Z2Z, shtns->nlat_2);
 			//cufftPlanMany(&shtns->cufft_plan, 1, &nfft, &nfft, 1, shtns->nphi, &nreal, 1, shtns->nphi, CUFFT_D2Z, shtns->nlat);
@@ -185,12 +187,13 @@ static int init_cuda_buffer_fft(shtns_cfg shtns)
 			return 1;
 		}
 		if (res != CUFFT_SUCCESS) {
-			printf("cufft init FAILED!\n");
+			printf("cufft init FAILED with error code %d\n", res);
 			err_count ++;
 		}
-		size_t worksize;
+		res = cufftSetStream(shtns->cufft_plan, shtns->comp_stream);	// select stream for cufft
+		size_t worksize = 0;
 		cufftGetSize(shtns->cufft_plan, &worksize);
-		printf("work-area size: %ld \t nlat*nphi = %ld\n", worksize/8, shtns->nlat * shtns->nphi);
+		printf("cufft work-area size: %ld \t nlat*nphi = %ld\n", worksize/8, shtns->nlat * shtns->nphi);
 	}
 
 	// Allocate working arrays for SHT on GPU:
@@ -342,24 +345,21 @@ int cushtns_use_gpu(int device_id)
 	if (device_id >= 0) {
 		cudaGetDeviceCount(&count);
 		if (count > 0) {
-			device_id = device_id % count;
+			device_id = device_id % count;		// assign actual gpu in a round-robin fashion
 			cudaSetDevice(device_id);
-			return device_id;
+			cuda_gpu_id = device_id;
+			return cuda_gpu_id;
 		}
 	}
+	cuda_gpu_id = -1;
 	return -1;		// disable gpu.
 }
 
-/// WARNING: cushtns_set_streams must be called AFTER cushtns_set_batch
+/// WARNING: cushtns_set_streams must be called BEFORE shtns_set_grid or cushtns_set_batch
 extern "C"
 void cushtns_set_streams(shtns_cfg shtns, cudaStream_t compute_stream, cudaStream_t transfer_stream)
 {
-	if (compute_stream != 0) {
-		if (shtns->cu_flags & CUSHT_OWN_COMP_STREAM) cudaStreamDestroy(shtns->comp_stream);
-		shtns->comp_stream = compute_stream;
-		if (shtns->nphi > 1) cufftSetStream(shtns->cufft_plan, compute_stream);
-		shtns->cu_flags &= ~((int)CUSHT_OWN_COMP_STREAM);		// we don't manage this stream
-	}
+	shtns->comp_stream = compute_stream;
 	if (transfer_stream != 0) {
 		if (shtns->cu_flags & CUSHT_OWN_XFER_STREAM) cudaStreamDestroy(shtns->xfer_stream);
 		shtns->xfer_stream = transfer_stream;
@@ -404,7 +404,7 @@ shtns_cfg cushtns_clone(shtns_cfg shtns, cudaStream_t compute_stream, cudaStream
 void fourier_to_spat_gpu(shtns_cfg shtns, double* q, const int mmax)
 {
 	const int nphi = shtns->nphi;
-	cufftResult res;
+	cufftResult res = CUFFT_SUCCESS;
 	if (nphi > 1) {
 		cufftDoubleComplex* x = (cufftDoubleComplex*) q;
 		if (shtns->fft_mode & FFT_PHI_CONTIG_CPLX) {
@@ -425,7 +425,7 @@ void fourier_to_spat_gpu(shtns_cfg shtns, double* q, const int mmax)
 void spat_to_fourier_gpu(shtns_cfg shtns, double* q, const int mmax)
 {
 	const int nphi = shtns->nphi;
-	cufftResult res;
+	cufftResult res = CUFFT_SUCCESS;
 	if (nphi > 1) {
 		cufftDoubleComplex *x = (cufftDoubleComplex*) q;
 		if (shtns->fft_mode & FFT_PHI_CONTIG_CPLX) {
