@@ -252,12 +252,12 @@ static void init_sht_array_func(shtns_cfg shtns)
 			memcpy(sht_func[SHT_M][SHT_OMP1 + j], &ffly_m[j], sizeof(void*)*SHT_NTYP);		// no omp algo for SHT_M, use fly instead
 		  #endif
 		}
+	}
 	  #ifdef HAVE_LIBCUFFT
 		for (int j=0; j<4; j++) {
 			memcpy(sht_func[SHT_STD][SHT_GPU1+j], &fgpu[j], sizeof(void*)*SHT_NTYP);
 		}
 	  #endif
-	}
 
 	set_sht_fly(shtns, 0);	// default transform is FLY
 }

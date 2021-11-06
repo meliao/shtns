@@ -243,122 +243,50 @@ transpose_cplx_skip(cudaStream_t stream, const double* in, double* out, const in
 }
 
 
-template<int BLOCKSIZE, int LSPAN, int S, int NFIELDS> __global__ void
-ileg_m0_kernel(const double* __restrict__ al, const double* __restrict__ ct, const double* __restrict__ q, double *ql, const int llim, const int nlat_2, const int lmax, const int q_dist=0, const int ql_dist=0)
+
+__device__ double qish(const double* __restrict__ xlm, const double* __restrict__ ql, const int llim_m, int ll)
 {
-	const int it = BLOCKSIZE * blockIdx.x + threadIdx.x;
+	const int l = ll >> 1;
+	const int x_ofs = 3*(ll >> 2);
+
+	double q = 0.0;
+	if (l <= llim_m) {
+		q = ql[ll] * xlm[x_ofs + (ll&2)];
+		if (((ll&2)==0) && (l+2 <=llim_m)) {	// l-m even
+			q += ql[ll+4] * xlm[x_ofs + 1];		// contribution of l+2
+		}
+	}
+	return q;
+}
+
+__global__ void
+sh2ishioka_kernel_alt(const double* __restrict__ xlm, const double* __restrict__ ql, double* ql_ish, 
+		const int llim, const int lmax, const int mres, const int S, const int ql_dist=0, const int ql_ish_dist=0)
+{
 	const int j = threadIdx.x;
+	const int im = blockIdx.y;
+	const int b = blockIdx.z;
+	const int l0 = ((blockDim.x-4) * blockIdx.x) >> 1;              // some overlap needed
+	const int l  = l0 + (j >> 1);
+	const int m = im*mres;
+	const int llim_m = llim-m;
+	const int q_ofs = im*(((lmax+1+S)*2) -m+mres);
 
-	// re-assign each thread an l (transpose)
-	const int ll = j / (BLOCKSIZE/LSPAN);
+	xlm += 3*im*(2*(lmax+4) -m+mres)/4;
+	ql     += q_ofs;
+	ql_ish += q_ofs;
+	
+	if (im==0) { if (l<=lmax) ql_ish[2*l0+j  + b*ql_ish_dist] = ql[2*l0+j + b*ql_dist];	return; }	// DEBUG: copy
 
-	static_assert((BLOCKSIZE % LSPAN) == 0, "BLOCKSIZE must be a multiple of LSPAN");
-	static_assert((LSPAN % 4) == 0, "LSPAN must be a multiple of 4");
-
-	__shared__ double ak[LSPAN+2];	// cache
-	__shared__ double yl[LSPAN/2*BLOCKSIZE];		// yl is also used for even/odd computation. Ensure LSPAN >= 4.
-	const int l_inc = BLOCKSIZE;
-	double cost = (it < nlat_2) ? ct[it] : 0.0;
-	double y0, y1;
-
-	if (j < LSPAN+2) ak[j] = al[j];
-
-	double my_reo[NFIELDS][LSPAN];			// in registers
-
-	#pragma unroll
-	for (int f=0; f<NFIELDS; f++) {
-		y0 = (it < nlat_2) ? q[it + f*q_dist] : 0.0;				// north
-		y1 = (it < nlat_2) ? q[nlat_2*2-1 - it + f*q_dist] : 0.0;	// south
-
-		if (f>0) {
-			if (BLOCKSIZE > WARPSZE) {	__syncthreads(); } else { _syncwarp; }
-		}
-		yl[j] = y0+y1;					// even
-		yl[BLOCKSIZE +j] = (y0-y1)*cost;		// odd
-		if (BLOCKSIZE > WARPSZE) {	__syncthreads(); } else { _syncwarp; }
-
-		// transpose reo to my_reo
-		#pragma unroll
-		for (int i=0, k=0; i<BLOCKSIZE; i+= BLOCKSIZE/LSPAN, k++) {
-			int it = j % (BLOCKSIZE/LSPAN) + i;
-			my_reo[f][k] = yl[(ll&1)*BLOCKSIZE +it];
+	if ((l<=llim_m) && (j < blockDim.x-4)) {
+		double q = qish(xlm, ql + b*ql_dist, llim-m, 2*l0 + j);
+		if (im>0) {
+			ql_ish[2*l0 +j + b*ql_ish_dist] = q;   // coalesced store
+		} else if ((j&1)==0) {
+			ql_ish[l0 +(j>>1) + b*ql_ish_dist] = q;   // coalesced store
 		}
 	}
-
-	int l = 0;
-	y0 = (it < nlat_2) ? ct[it + nlat_2] : 0.0;		// weights are stored just after ct.
-	cost *= cost;	// ct2
-	if (S==1) y0 *= rsqrt(1.0 - cost);
-	y1 = (ak[1]*cost + ak[0]) * y0;
-
-	al+=2;
-	while (l <= llim) {
-		if (BLOCKSIZE > WARPSZE) {	__syncthreads(); } else { _syncwarp; }
-			for (int k=0; k<LSPAN/2; k+=2) {		// compute a block of the matrix, write it in shared mem.
-				double c0 = ak[2*k+3]*cost + ak[2*k+2];
-				double c1 = ak[2*k+5]*cost + ak[2*k+4];
-				yl[k*l_inc +j]     = y0;		// l and l+1
-				yl[(k+1)*l_inc +j] = y1;		// l+2 and l+3
-				al += 4;
-				y0 = c0 * y1 + y0;
-				y1 = c1 * y0 + y1;
-			}
-		if (BLOCKSIZE > WARPSZE) {	__syncthreads(); } else { _syncwarp; }
-
-		double qll[NFIELDS];	// accumulator
-		// now re-assign each thread an l (transpose)
-		const int itl = (ll>>1)*l_inc + j % (BLOCKSIZE/LSPAN);
-		#pragma unroll
-		for (int f=0; f<NFIELDS; f++) qll[f] = my_reo[f][0] * yl[itl];			// first element
-		#pragma unroll
-		for (int i=BLOCKSIZE/LSPAN, k=1; i<BLOCKSIZE; i+= BLOCKSIZE/LSPAN, k++) {		// accumulate
-			#pragma unroll
-			for (int f=0; f<NFIELDS; f++)	qll[f] += my_reo[f][k] * yl[itl+i];
-		}
-
-		static_assert(BLOCKSIZE/LSPAN <= WARPSZE, "Block size must not exceed LSPAN*32");
-			// reduce_add within same l is in same warp too:
-			if (WARPSZE % (BLOCKSIZE/LSPAN)) printf("ERROR\n");
-			#pragma unroll
-			for (int ofs = BLOCKSIZE/(LSPAN*2); ofs > 0; ofs>>=1) {
-				#pragma unroll
-				for (int f=0; f<NFIELDS; f++)	qll[f] += shfl_down(qll[f], ofs, BLOCKSIZE/LSPAN);
-			}
-			if ( ((j % (BLOCKSIZE/LSPAN)) == 0) && ((l+ll)<=llim) ) {	// write result
-				if (nlat_2 <= BLOCKSIZE) {		// do we need atomic add or not ?
-					#pragma unroll
-					for (int f=0; f<NFIELDS; f++)	ql[2*(l+ll) + f*ql_dist] = qll[f];
-				} else {
-					#pragma unroll
-					for (int f=0; f<NFIELDS; f++)	atomicAdd(ql+2*(l+ll) + f*ql_dist, qll[f]);		// VERY slow atomic add on Kepler.
-				}
-			}
-
-		if (j<LSPAN) ak[j+2] = al[j];
-		l+=LSPAN;
-	}
 }
-
-template<int S, int NFIELDS>
-static void ileg_m0(shtns_cfg shtns, const double* q, double *ql, const int llim, int q_dist=0, int ql_dist=0)
-{
-	const int nlat_2 = shtns->nlat_2;
-	double *d_alm = shtns->d_alm;
-	double *d_ct = shtns->d_ct;
-	cudaStream_t stream = shtns->comp_stream;
-
-	const int BLOCKSIZE = 128/NFIELDS;
-	const int LSPAN_ = 16/NFIELDS;
-	d_alm = shtns->d_clm;
-	const int NW = 1;
-
-	const int threadsPerBlock = BLOCKSIZE;	// can be from 32 to 1024, we should try to measure the fastest !
-	const int blocksPerGrid = (nlat_2 + BLOCKSIZE*NW - 1) / (BLOCKSIZE*NW);
-	if (q_dist == 0) q_dist = shtns->spat_stride;
-	if (ql_dist == 0) ql_dist = shtns->nlm_stride;
-	ileg_m0_kernel<BLOCKSIZE, LSPAN_, S, NFIELDS><<<blocksPerGrid, threadsPerBlock, 0, stream>>>(d_alm, d_ct, q, ql, llim, nlat_2, q_dist, ql_dist);
-}
-
 
 __global__ void
 sh2ishioka_kernel(const double* __restrict__ xlm, const double* __restrict__ ql, double* ql_ish, 
@@ -393,7 +321,11 @@ sh2ishioka_kernel(const double* __restrict__ xlm, const double* __restrict__ ql,
 		if ((j&2)==0) {		// for l-m even
 			q += ql_[(j>>1)+(j&1)+2] * xl_[ix+1];			// contribution of l+2
 		}
-		ql_ish[q_ofs +j + b*ql_ish_dist] = q;	// coalesced store
+		if (im > 0) {
+			ql_ish[q_ofs +j + b*ql_ish_dist] = q;	// coalesced store
+		} else if ((j&1)==0) {
+			ql_ish[q_ofs -l0 +(j>>1) + b*ql_ish_dist] = q;	// coalesced store
+		}
 	}
 }
 
@@ -551,8 +483,13 @@ sphtor2ish_kernel(const double* __restrict__ mx, const double* __restrict__ xlm,
 			v += x2 * sl[j2+2];
 			w += x2 * tl[j2+2];
 		}
-		vlm[ofs+2*im+2 + b*ql_ish_dist] = v;
-		wlm[ofs+2*im+2 + b*ql_ish_dist] = w;
+		if (im>0) {
+			vlm[ofs+2*im+2 + b*ql_ish_dist] = v;
+			wlm[ofs+2*im+2 + b*ql_ish_dist] = w;
+		} else if ((j&1)==0) {		// compress complex to real (as imaginary part is zero)
+			vlm[(ofs>>1)+1 + b*ql_ish_dist] = v;	// coalesced store
+			wlm[(ofs>>1)+1 + b*ql_ish_dist] = w;	// coalesced store
+		}
 	}
 }
 
@@ -745,22 +682,23 @@ void scal2sphtor_gpu(shtns_cfg shtns, cplx* d_Vlm, cplx* d_Wlm, cplx* d_Slm, cpl
 /// requirements : blockSize must be 1 in the y-direction and THREADS_PER_BLOCK in the x-direction.
 /// llim MUST BE <= 1800
 /// S can only be 0 (for scalar) or 1 (for spin 1 / vector)
-template<int BLOCKSIZE, int S, int NFIELDS, int NW, bool HI_LLIM>
+template<int BLOCKSIZE, int S, int NFIELDS, int NW, bool HI_LLIM, bool M0_ONLY=false, bool SH2ISH=false>
 static __global__ void leg_m_kernel(
-	const double* __restrict__ al, const double* __restrict__ ct, const double* __restrict__ ql, double *q, 
-	const int llim, const int nlat_2, const int lmax, const int mres, const int nphi, const int m_inc, const int ql_dist=0, const int q_dist=0)
+	const double* __restrict__ al, const double* __restrict__ ct, const double* __restrict__ ql, double *q,
+	const int llim, const int nlat_2, const int lmax, const int mres, const int nphi, const int m_inc,
+	const int ql_dist=0, const int q_dist=0, const double* __restrict__ xlm = 0)
 {
 	const int it = BLOCKSIZE*NW * blockIdx.x + threadIdx.x;
-	const int im = blockIdx.y;
+	const int im = (M0_ONLY) ? 0 : blockIdx.y;
 	const int j = threadIdx.x;
 	const int b = blockIdx.z;		// position in batch
 	//const int m_inc = 2*nlat_2;
 	const int k_inc = 1;
 
 	__shared__ double ak[BLOCKSIZE];		// size blockDim.x
-	__shared__ double qk[NFIELDS][BLOCKSIZE*2];	// size 2*blockDim.x * NFIELDS
+	__shared__ double qk[NFIELDS][(M0_ONLY) ? BLOCKSIZE : BLOCKSIZE*2];	// size 2*blockDim.x * NFIELDS
 
-	static_assert( NFIELDS==1, "only NFIELDS=1 is supported" );		// WIP batch
+	//static_assert( NFIELDS==1, "only NFIELDS=1 is supported" );		// WIP batch
 
 	static_assert( (!HI_LLIM) || ((NW==1) && (BLOCKSIZE == WARPSZE)), "high llim works with NW=1 and BLOCKSIZE=32" );
 
@@ -780,12 +718,11 @@ static __global__ void leg_m_kernel(
 		ak[j] = al[j+2];
 		if (j<2*(llim+1)) {
 			#pragma unroll
-			for (int f=0; f<NFIELDS; f++) 	qk[f][j] = ql[j  + (b*NFIELDS+f)*ql_dist];
-		}
-			if (j+BLOCKSIZE < 2*(llim+1)) {
-				#pragma unroll
-				for (int f=0; f<NFIELDS; f++)	qk[f][j+BLOCKSIZE] = ql[j+BLOCKSIZE + (b*NFIELDS+f)*ql_dist];
+			for (int f=0; f<NFIELDS; f++) 	{
+				if (!SH2ISH) qk[f][j] = ql[j + (b*NFIELDS+f)*ql_dist];		// keep only real part
+				else qk[f][j] = qish(xlm, ql+(b*NFIELDS+f)*ql_dist, llim, 2*j);
 			}
+		}
 		double re[NFIELDS][NW], ro[NFIELDS][NW];
 		#pragma unroll
 		for (int f=0; f<NFIELDS; f++) {
@@ -812,8 +749,8 @@ static __global__ void leg_m_kernel(
 				for (int f=0; f<NFIELDS; f++) {
 					#pragma unroll
 					for (int i=0; i<NW; i++) {
-						re[f][i] += y0[i] * qk[f][2*k];		// real
-						ro[f][i] += y0[i] * qk[f][2*k+2];	// real
+						re[f][i] += y0[i] * qk[f][k];		// real
+						ro[f][i] += y0[i] * qk[f][k+1];		// real
 					}
 				}
 				#pragma unroll
@@ -826,13 +763,10 @@ static __global__ void leg_m_kernel(
 			al += BLOCKSIZE;
 			l  += BLOCKSIZE;
 			if (BLOCKSIZE > WARPSZE) { __syncthreads(); } else { _syncwarp; }
-			if (l+(j>>1) <= llim) {
+			if (l+j <= llim) {
 				#pragma unroll
-				for (int f=0; f<NFIELDS; f++)	qk[f][j] = ql[2*l+j + (b*NFIELDS+f)*ql_dist];
-			}
-			if (l+(j>>1)+BLOCKSIZE/2 <= llim) {
-				#pragma unroll
-				for (int f=0; f<NFIELDS; f++)	qk[f][BLOCKSIZE+j] = ql[2*l+BLOCKSIZE+j + (b*NFIELDS+f)*ql_dist];
+				for (int f=0; f<NFIELDS; f++)	if (!SH2ISH) qk[f][j] = ql[l+j + (b*NFIELDS+f)*ql_dist];
+					else qk[f][j] = qish(xlm, ql+(b*NFIELDS+f)*ql_dist, llim, 2*(l+j));
 			}
 			if (l+j <= llim)	 ak[j] = al[j];
 			if (BLOCKSIZE > WARPSZE) { __syncthreads(); } else { _syncwarp; }
@@ -843,8 +777,8 @@ static __global__ void leg_m_kernel(
 			for (int f=0; f<NFIELDS; f++) {
 				#pragma unroll
 				for (int i=0; i<NW; i++) {
-					re[f][i] += y0[i] * qk[f][2*k];	// real
-					ro[f][i] += y0[i] * qk[f][2*k+2];	// real
+					re[f][i] += y0[i] * qk[f][k];	// real
+					ro[f][i] += y0[i] * qk[f][k+1];	// real
 				}
 			}
 			#pragma unroll
@@ -860,7 +794,7 @@ static __global__ void leg_m_kernel(
 			for (int f=0; f<NFIELDS; f++) {
 				#pragma unroll
 				for (int i=0; i<NW; i++) {
-					re[f][i] += y0[i] * qk[f][2*k];		// real
+					re[f][i] += y0[i] * qk[f][k];		// real
 				}
 			}
 		}
@@ -882,6 +816,7 @@ static __global__ void leg_m_kernel(
 		double rer[NFIELDS][NW], ror[NFIELDS][NW], rei[NFIELDS][NW], roi[NFIELDS][NW];
 		int m = im*mres;
 		int l = (im*(2*(lmax+1)-(m+mres)))>>1;
+		if (SH2ISH)	xlm += 3*im*(2*(lmax+4) -m+mres)/4;
 			#pragma unroll
 			for (int i=0; i<NW; i++) 	y1[i] = sqrt(1.0 - ct2[i]);		// y1 = sin(theta)
 			al += l+m;
@@ -890,11 +825,13 @@ static __global__ void leg_m_kernel(
 		ak[j] = al[j+2];
 		if (m+j/2 <= llim) {
 			#pragma unroll
-			for (int f=0; f<NFIELDS; f++)	qk[f][j] = ql[2*m+j + (b*NFIELDS+f)*ql_dist];
+			for (int f=0; f<NFIELDS; f++)	if (!SH2ISH) qk[f][j] = ql[2*m+j + (b*NFIELDS+f)*ql_dist];
+					else qk[f][j] = qish(xlm, ql+(b*NFIELDS+f)*ql_dist, llim, 2*m+j);
 		}
 			if (m+j/2+BLOCKSIZE/2 <= llim) {
 				#pragma unroll
-				for (int f=0; f<NFIELDS; f++)	qk[f][j+BLOCKSIZE] = ql[2*m+j+BLOCKSIZE + (b*NFIELDS+f)*ql_dist];
+				for (int f=0; f<NFIELDS; f++)	if (!SH2ISH) qk[f][j+BLOCKSIZE] = ql[2*m+j+BLOCKSIZE + (b*NFIELDS+f)*ql_dist];
+					else qk[f][j+BLOCKSIZE] = qish(xlm, ql+(b*NFIELDS+f)*ql_dist, llim, 2*m+j+BLOCKSIZE);
 			}
 
 		#pragma unroll
@@ -988,11 +925,13 @@ static __global__ void leg_m_kernel(
 			if (BLOCKSIZE > WARPSZE) { __syncthreads(); } else { _syncwarp; }
 			if (l+j/2 <= llim) {
 				#pragma unroll
-				for (int f=0; f<NFIELDS; f++)	qk[f][j] = ql[2*l+j + (b*NFIELDS+f)*ql_dist];
+				for (int f=0; f<NFIELDS; f++)	if (!SH2ISH) qk[f][j] = ql[2*l+j + (b*NFIELDS+f)*ql_dist];
+						else qk[f][j] = qish(xlm, ql+(b*NFIELDS+f)*ql_dist, llim, 2*l+j);
 			}
 			if (l+j/2+BLOCKSIZE/2 <= llim) {
 				#pragma unroll
-				for (int f=0; f<NFIELDS; f++)	qk[f][BLOCKSIZE+j] = ql[2*l+BLOCKSIZE+j + (b*NFIELDS+f)*ql_dist];
+				for (int f=0; f<NFIELDS; f++)	if (!SH2ISH) qk[f][BLOCKSIZE+j] = ql[2*l+BLOCKSIZE+j + (b*NFIELDS+f)*ql_dist];
+						else qk[f][j+BLOCKSIZE] = qish(xlm, ql+(b*NFIELDS+f)*ql_dist, llim, 2*l+j+BLOCKSIZE);
 			}
 			if (l+j <= llim)	 ak[j] = al[j];
 			if (BLOCKSIZE > WARPSZE) { __syncthreads(); } else { _syncwarp; }
@@ -1097,22 +1036,34 @@ static void leg_m(shtns_cfg shtns, const double *ql, double *q, const int llim, 
 	const int mres = shtns->mres;
 	const int nlat_2 = shtns->nlat_2;
 	const int nphi = shtns->nphi;
-	double *d_alm = shtns->d_alm;
+	double *d_alm = shtns->d_clm;
 	double *d_ct = shtns->d_ct;
 	cudaStream_t stream = shtns->comp_stream;
 
 	const int BLOCKSIZE = 32;		// 32 allows to use polar optimization; 128 and NW=2 are sometimes better though.
-	const int NW = 1;
-	d_alm = shtns->d_clm;
-
-	// Launch the Legendre CUDA Kernel
 	const int threadsPerBlock = BLOCKSIZE;	// can be from 32 to 1024, we should try to measure the fastest !
-	const int blocksPerGrid = (nlat_2 + BLOCKSIZE*NW - 1) / (BLOCKSIZE*NW);
 	if (spat_dist == 0) spat_dist = shtns->spat_stride;
-	dim3 blocks(blocksPerGrid, mmax+1, shtns->howmany);
+	
 	dim3 threads(threadsPerBlock, 1, 1);
-	leg_m_kernel<BLOCKSIZE, S, NFIELDS, NW, HI_LLIM> <<<blocks, threads, 0, stream>>>
-		(d_alm, d_ct, (double*) ql, (double*) q, llim, nlat_2, lmax,mres, nphi, shtns->nlat_padded, shtns->nlm_stride, spat_dist);
+	if (shtns->howmany % 4 == 0) {	// multiple of 4
+		const int NW = 1;
+		const int blocksPerGrid = (nlat_2 + BLOCKSIZE*NW - 1) / (BLOCKSIZE*NW);
+		dim3 blocks(blocksPerGrid, mmax+1, shtns->howmany/4);
+		leg_m_kernel<BLOCKSIZE, S, 4, NW, HI_LLIM> <<<blocks, threads, 0, stream>>>
+			(d_alm, d_ct, (double*) ql, (double*) q, llim, nlat_2, lmax,mres, nphi, shtns->nlat_padded, shtns->nlm_stride, spat_dist);
+	} else if (shtns->howmany % 2 == 0) {	// multiple of 2
+		const int NW = (HI_LLIM) ? 1 : 2;
+		const int blocksPerGrid = (nlat_2 + BLOCKSIZE*NW - 1) / (BLOCKSIZE*NW);
+		dim3 blocks(blocksPerGrid, mmax+1, shtns->howmany/2);
+		leg_m_kernel<BLOCKSIZE, S, 2, NW, HI_LLIM> <<<blocks, threads, 0, stream>>>
+			(d_alm, d_ct, (double*) ql, (double*) q, llim, nlat_2, lmax,mres, nphi, shtns->nlat_padded, shtns->nlm_stride, spat_dist);
+	} else {
+		const int NW = (HI_LLIM) ? 1 : 2;
+		const int blocksPerGrid = (nlat_2 + BLOCKSIZE*NW - 1) / (BLOCKSIZE*NW);
+		dim3 blocks(blocksPerGrid, mmax+1, shtns->howmany);
+		leg_m_kernel<BLOCKSIZE, S, 1, NW, HI_LLIM> <<<blocks, threads, 0, stream>>>
+			(d_alm, d_ct, (double*) ql, (double*) q, llim, nlat_2, lmax,mres, nphi, shtns->nlat_padded, shtns->nlm_stride, spat_dist);
+	}
 }
 
 template<int S, int NFIELDS>
@@ -1123,44 +1074,58 @@ static void leg_m0(shtns_cfg shtns, const double *ql, double *q, const int llim,
 	cudaStream_t stream = shtns->comp_stream;
 
 	static_assert( NFIELDS == 1, "batched transform requires NFIELDS=1");
+	if (spat_dist == 0) spat_dist = shtns->spat_stride;
 
 	const int BLOCKSIZE = 32;		// good value
-	const int NW = 1;
+	const int NW = 4;
+	const int blocksPerGrid = (nlat_2 + BLOCKSIZE*NW - 1) / (BLOCKSIZE*NW);
 
 	// Launch the Legendre CUDA Kernel
 	const int threadsPerBlock = BLOCKSIZE;	// can be from 32 to 1024, we should try to measure the fastest !
-	const int blocksPerGrid = (nlat_2 + BLOCKSIZE*NW - 1) / (BLOCKSIZE*NW);
-	if (spat_dist == 0) spat_dist = shtns->spat_stride;
-	dim3 blocks(blocksPerGrid, 1, shtns->howmany);
-	dim3 threads(threadsPerBlock, 1, 1);
-	for (int f=0; f<NFIELDS; f++) {
-		leg_m_kernel<BLOCKSIZE, S, 1, NW, false> <<<blocks, threads, 0, stream>>>
-			(shtns->d_clm, d_ct, (double*) ql, (double*) q, llim, nlat_2, llim,1, 1, shtns->nlat_padded, shtns->nlm_stride, spat_dist);
+	if (shtns->howmany % 4 == 0) {
+		dim3 threads(threadsPerBlock, 1, 1);
+		dim3 blocks(blocksPerGrid, 1, shtns->howmany/4);
+		leg_m_kernel<BLOCKSIZE, S, 4, NW, false, true> <<<blocks, threads, 0, stream>>>
+			(shtns->d_clm, d_ct, (double*) ql, (double*) q, llim, nlat_2, llim,1, 1, shtns->nlat_padded, shtns->nlm_stride, spat_dist, shtns->d_xlm);
+	} else if (shtns->howmany % 2 == 0) {
+		const int NW = 4;
+		const int blocksPerGrid = (nlat_2 + BLOCKSIZE*NW - 1) / (BLOCKSIZE*NW);
+		dim3 threads(threadsPerBlock, 1, 1);
+		dim3 blocks(blocksPerGrid, 1, shtns->howmany/2);
+		leg_m_kernel<BLOCKSIZE, S, 2, NW, false, true> <<<blocks, threads, 0, stream>>>
+			(shtns->d_clm, d_ct, (double*) ql, (double*) q, llim, nlat_2, llim,1, 1, shtns->nlat_padded, shtns->nlm_stride, spat_dist, shtns->d_xlm);
+	} else {
+		const int NW = 4;
+		const int blocksPerGrid = (nlat_2 + BLOCKSIZE*NW - 1) / (BLOCKSIZE*NW);
+		dim3 threads(threadsPerBlock, 1, 1);
+		dim3 blocks(blocksPerGrid, 1, shtns->howmany);
+		leg_m_kernel<BLOCKSIZE, S, 1, NW, false, true> <<<blocks, threads, 0, stream>>>
+			(shtns->d_clm, d_ct, (double*) ql, (double*) q, llim, nlat_2, llim,1, 1, shtns->nlat_padded, shtns->nlm_stride, spat_dist, shtns->d_xlm);
 	}
 }
 
 
-template<int BLOCKSIZE, int LSPAN, int S, int NFIELDS, bool HI_LLIM> __global__ void
+template<int BLOCKSIZE, int LSPAN, int S, int NFIELDS, bool HI_LLIM, bool M0_ONLY=false> __global__ void
 ileg_m_kernel(const double* __restrict__ al, const double* __restrict__ ct, const double* __restrict__ q, double *ql, const int llim, 
 	const int nlat_2, const int lmax, const int mres, const int nphi, const int m_inc, const double mpos_scale, const int q_dist=0, const int ql_dist=0)
 {
 	const int it = BLOCKSIZE * blockIdx.x + threadIdx.x;
 	const int j = threadIdx.x;
-	const int im = blockIdx.y;
+	const int im = (M0_ONLY) ? 0 : blockIdx.y;
 	const int b = blockIdx.z;
 	//const int m_inc = 2*nlat_2;
 
-	static_assert( NFIELDS==1, "only NFIELDS=1 is supported for batch transform" );
+	//static_assert( NFIELDS==1, "only NFIELDS=1 is supported for batch transform" );
 	static_assert((BLOCKSIZE % (2*LSPAN)) == 0, "BLOCKSIZE must be a multiple of 2*LSPAN");
 	static_assert( ((WARPSZE >= BLOCKSIZE/LSPAN) ? (WARPSZE % (BLOCKSIZE/LSPAN)) : ((BLOCKSIZE/LSPAN) % WARPSZE)) == 0, "WARPSZE and BLOCKSIZE/LSPAN must be multiples");
 	static_assert( (!HI_LLIM) || (BLOCKSIZE == WARPSZE), "for high llim, BLOCKSIZE must be 32");
-	static_assert(LSPAN >= 8, "LSPAN must be >= 8");
+	static_assert(LSPAN >= (M0_ONLY) ? 4*NFIELDS : 8, "LSPAN must be >= 8 (or 4 for m=0)");
 	static_assert((LSPAN % 4) == 0, "LSPAN must be a multiple of 4");
 
 	const int padding = 2;		// padding = 0 is very bad for performance (shared-memory bank conflicts).
 	const int l_inc = BLOCKSIZE+padding;
 	__shared__ double ak[LSPAN+2];	// cache
-	__shared__ double yl[LSPAN/2*l_inc - padding];		// yl is also used for even/odd computation. Ensure LSPAN >= 8.
+	__shared__ double yl[LSPAN/2*l_inc - padding];		// yl is also used for even/odd computation. Ensure LSPAN >= 8 (or 4 for m=0)
 	double cost = (it < nlat_2) ? ct[it] : 0.0;
 	double y0, y1;
 
@@ -1176,18 +1141,17 @@ ileg_m_kernel(const double* __restrict__ al, const double* __restrict__ ct, cons
 			y0 = (it < nlat_2) ? q[it + (b*NFIELDS+f)*q_dist] : 0.0;				// north
 			y1 = (it < nlat_2) ? q[nlat_2*2-1 - it + (b*NFIELDS+f)*q_dist] : 0.0;	// south
 
-			if (f>0) {
-				if (BLOCKSIZE > WARPSZE) {	__syncthreads(); } else { _syncwarp; }
-			}
-			yl[j] = y0+y1;					// even
-			yl[l_inc +j] = (y0-y1)*cost;	// odd
-			if (BLOCKSIZE > WARPSZE) {	__syncthreads(); } else { _syncwarp; }
-
+			yl[f*2*l_inc +j] = y0+y1;					// even
+			yl[(f*2+1)*l_inc +j] = (y0-y1)*cost;	// odd
+		}
+		if (BLOCKSIZE > WARPSZE) {	__syncthreads(); } else { _syncwarp; }
+		#pragma unroll
+		for (int f=0; f<NFIELDS; f++) {
 			// transpose reo to my_reo
 			#pragma unroll
 			for (int i=0, k=0; i<BLOCKSIZE; i+= BLOCKSIZE/LSPAN, k++) {
 				int it = j % (BLOCKSIZE/LSPAN) + i;
-				my_reo[f][k] = yl[(ll&1)*l_inc +it];
+				my_reo[f][k] = yl[(2*f  + (ll&1))*l_inc +it];
 			}
 		}
 
@@ -1200,6 +1164,7 @@ ileg_m_kernel(const double* __restrict__ al, const double* __restrict__ ct, cons
 		al+=2;
 		while (l <= llim) {
 			if (BLOCKSIZE > WARPSZE) {	__syncthreads(); } else { _syncwarp; }
+				#pragma unroll
 				for (int k=0; k<LSPAN/2; k+=2) {		// compute a block of the matrix, write it in shared mem.
 					double c0 = ak[2*k+3]*cost + ak[2*k+2];
 					double c1 = ak[2*k+5]*cost + ak[2*k+4];
@@ -1211,15 +1176,34 @@ ileg_m_kernel(const double* __restrict__ al, const double* __restrict__ ct, cons
 				}
 			if (BLOCKSIZE > WARPSZE) {	__syncthreads(); } else { _syncwarp; }
 
-			double qll[NFIELDS];	// accumulator
+			const int NACC = (NFIELDS == 1) ? 4 : 1;		// number of independent accumulators per NFIELD. 4 is good for V100
+			double qll[NFIELDS*NACC];		// accumulators
 			// now re-assign each thread an l (transpose)
 			const int itl = (ll >> 1)*l_inc + j % (BLOCKSIZE/LSPAN);
 			#pragma unroll
-			for (int f=0; f<NFIELDS; f++) qll[f] = my_reo[f][0] * yl[itl];			// first element
-			#pragma unroll
-			for (int i=BLOCKSIZE/LSPAN, k=1; i<BLOCKSIZE; i+= BLOCKSIZE/LSPAN, k++) {		// accumulate
+			for (int a=0; a<NACC; a++) {	// NACC independent accumulators
 				#pragma unroll
-				for (int f=0; f<NFIELDS; f++)	qll[f] += my_reo[f][k] * yl[itl+i];
+				for (int f=0; f<NFIELDS; f++) qll[f+a*NFIELDS] = my_reo[f][a] * yl[itl + a*(BLOCKSIZE/LSPAN)];			// first element
+			}
+			#pragma unroll
+			for (int k=NACC; k<LSPAN; k+=NACC) {		// accumulate
+				#pragma unroll
+				for (int a=0; a<NACC; a++) {
+					const int i=(k+a)*BLOCKSIZE/LSPAN;
+					#pragma unroll
+					for (int f=0; f<NFIELDS; f++)	qll[f+a*NFIELDS] += my_reo[f][k+a] * yl[itl+i];
+				}
+			}
+			if (NACC>1) {	// reduce the NACC independent accumulators
+			#pragma unroll
+			for (int a=0; a<NACC; a+=2) {
+				#pragma unroll
+				for (int f=0; f<NFIELDS; f++)	qll[f+a*NFIELDS] += qll[f+(a+1)*NFIELDS];
+			}
+			for (int a=2; a<NACC; a+=2) {
+				#pragma unroll
+				for (int f=0; f<NFIELDS; f++)	qll[f] += qll[f+a*NFIELDS];
+			}
 			}
 
 			static_assert(BLOCKSIZE/LSPAN <= WARPSZE, "Block size must not exceed LSPAN*32");
@@ -1358,7 +1342,7 @@ ileg_m_kernel(const double* __restrict__ al, const double* __restrict__ ct, cons
 						for (int f=0; f<NFIELDS; f++)	qlri[f+a*NFIELDS]   += my_reo[f][k+a]   * yl[itl + (k+a)*(BLOCKSIZE/(2*LSPAN))];
 					}
 				}
-				// reduce the NACC independent accumulators
+				if (NACC>1) {	// reduce the NACC independent accumulators
 				#pragma unroll
 				for (int a=0; a<NACC; a+=2) {
 					#pragma unroll
@@ -1367,6 +1351,7 @@ ileg_m_kernel(const double* __restrict__ al, const double* __restrict__ ct, cons
 				for (int a=2; a<NACC; a+=2) {
 					#pragma unroll
 					for (int f=0; f<NFIELDS; f++)	qlri[f] += qlri[f+a*NFIELDS];
+				}
 				}
 
 				static_assert(BLOCKSIZE/(2*LSPAN) <= WARPSZE, "Blocksize must not exceed 2*LSPAN*WARPSZE");
@@ -1393,7 +1378,7 @@ ileg_m_kernel(const double* __restrict__ al, const double* __restrict__ ct, cons
 	}
 }
 
-template<int S, int NFIELDS, bool HI_LLIM=false>
+template<int S, int ignored, bool HI_LLIM=false>
 static void ileg_m(shtns_cfg shtns, const double* q, double *ql, const int llim, int q_dist=0, int ql_dist=0)
 {
 	const int lmax = shtns->lmax;
@@ -1401,26 +1386,56 @@ static void ileg_m(shtns_cfg shtns, const double* q, double *ql, const int llim,
 	const int nlat_2 = shtns->nlat_2;
 	const int nphi = shtns->nphi;
 	int mmax = shtns->mmax;
-	double *d_alm = shtns->d_alm;
+	double *d_alm = shtns->d_clm;
 	double *d_ct = shtns->d_ct;
 	cudaStream_t stream = shtns->comp_stream;
 
-	const int BLOCKSIZE = 32;
-	const int LSPAN_ = 16/NFIELDS;
-	// on V100, for lmax=1024, BLOCKSIZE=32, LSPAN_=16 is best.
-	d_alm = shtns->d_clm;
-	const int NW = 1;
-
+	const int BLOCKSIZE = 32;	// on V100, 32 is the best choice, by far.
 	const int threadsPerBlock = BLOCKSIZE;	// can be from 32 to 1024, we should try to measure the fastest !
-	const int blocksPerGrid = (nlat_2 + BLOCKSIZE*NW - 1) / (BLOCKSIZE*NW);
+	const int blocksPerGrid = (nlat_2 + BLOCKSIZE - 1) / (BLOCKSIZE);
+
 	if (q_dist == 0) q_dist = shtns->spat_stride;
 	if (ql_dist == 0) ql_dist = shtns->nlm_stride;
 	if (llim < mmax*mres) mmax = llim / mres;	// truncate mmax too !
-	dim3 blocks(blocksPerGrid, mmax+1, shtns->howmany);
+
 	dim3 threads(threadsPerBlock, 1, 1);
-	ileg_m_kernel<BLOCKSIZE, LSPAN_, S, NFIELDS, HI_LLIM> <<<blocks, threads, 0, stream>>>
-		(d_alm, d_ct, (double*) q, (double*) ql, llim, nlat_2, lmax,mres, nphi, shtns->nlat_padded, shtns->mpos_scale_analys, q_dist, ql_dist);
+	if (shtns->howmany & 1 == 0) {	// even number of transforms
+		const int NFIELDS = 2;
+		const int LSPAN_ = 16/NFIELDS;
+		dim3 blocks(blocksPerGrid, mmax+1, shtns->howmany/NFIELDS);
+		ileg_m_kernel<BLOCKSIZE, LSPAN_, S, NFIELDS, HI_LLIM> <<<blocks, threads, 0, stream>>>
+			(d_alm, d_ct, (double*) q, (double*) ql, llim, nlat_2, lmax,mres, nphi, shtns->nlat_padded, shtns->mpos_scale_analys, q_dist, ql_dist);
+	} else {	// odd number of transforms
+		const int NFIELDS = 1;
+		const int LSPAN_ = 16/NFIELDS;
+		dim3 blocks(blocksPerGrid, mmax+1, shtns->howmany/NFIELDS);
+		ileg_m_kernel<BLOCKSIZE, LSPAN_, S, NFIELDS, HI_LLIM> <<<blocks, threads, 0, stream>>>
+			(d_alm, d_ct, (double*) q, (double*) ql, llim, nlat_2, lmax,mres, nphi, shtns->nlat_padded, shtns->mpos_scale_analys, q_dist, ql_dist);
+	}
 }
+
+template<int S, int ignored>
+static void ileg_m0(shtns_cfg shtns, const double* q, double *ql, const int llim, int q_dist=0, int ql_dist=0)
+{
+	const int nlat_2 = shtns->nlat_2;
+	double *d_alm = shtns->d_clm;
+	double *d_ct = shtns->d_ct;
+	cudaStream_t stream = shtns->comp_stream;
+
+	const int NFIELDS = 1;		// V100: best with NFIELDS=1
+	const int BLOCKSIZE = 64;	// V100: best with BLOCKSIZE=64
+	const int LSPAN_ = 32/NFIELDS;	// V100: best with LSPAN_=32
+
+	const int threadsPerBlock = BLOCKSIZE;	// can be from 32 to 1024, we should try to measure the fastest !
+	const int blocksPerGrid = (nlat_2 + BLOCKSIZE - 1) / (BLOCKSIZE);
+	if (q_dist == 0) q_dist = shtns->spat_stride;
+	if (ql_dist == 0) ql_dist = shtns->nlm_stride;
+	dim3 blocks(blocksPerGrid, 1, shtns->howmany/NFIELDS);
+	dim3 threads(threadsPerBlock, 1, 1);
+	ileg_m_kernel<BLOCKSIZE, LSPAN_, S, NFIELDS, false, true> <<<blocks, threads, 0, stream>>>
+		(d_alm, d_ct, (double*) q, (double*) ql, llim, nlat_2, llim,0, 0, 0, shtns->mpos_scale_analys, q_dist, ql_dist);
+}
+
 
 template<int S, int NFIELDS>
 static void legendre(shtns_cfg shtns, const double *ql, double *q, const int llim, const int mmax, long spat_dist = 0)
