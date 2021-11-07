@@ -1262,10 +1262,10 @@ ileg_m_kernel(const double* __restrict__ al, const double* __restrict__ ct, cons
 		const int ofs = (ll&3)*l_inc + j % (BLOCKSIZE/(2*LSPAN)); 
 		#pragma unroll
 		for (int f=0; f<NFIELDS; f++) {
-			double t0  = (it < nlat_2) ? q[im*m_inc + it + (b*NFIELDS+f)*q_dist] : 0.0;		// north imag (ani)
-			double qer = (it < nlat_2) ? q[(nphi-im)*m_inc + it + (b*NFIELDS+f)*q_dist] : 0.0;	// north real (an)
-			double t1  = (it < nlat_2) ? q[im*m_inc + nlat_2*2-1-it + (b*NFIELDS+f)*q_dist] : 0.0;	// south imag (asi)
-			double qor = (it < nlat_2) ? q[(nphi-im)*m_inc + nlat_2*2-1-it + (b*NFIELDS+f)*q_dist] : 0.0;	// south real (as)
+			double qer = (it < nlat_2) ? q[im*m_inc        + it            + (b*NFIELDS+f)*q_dist] : 0.0;	// north imag (ani)
+			double t0  = (it < nlat_2) ? q[(nphi-im)*m_inc + it            + (b*NFIELDS+f)*q_dist] : 0.0;	// north real (an)
+			double qor = (it < nlat_2) ? q[im*m_inc        + nlat_2*2-1-it + (b*NFIELDS+f)*q_dist] : 0.0;	// south imag (asi)
+			double t1  = (it < nlat_2) ? q[(nphi-im)*m_inc + nlat_2*2-1-it + (b*NFIELDS+f)*q_dist] : 0.0;	// south real (as)
 			double qei = t0-qer;		qer += t0;		// ani = -qei[lane+1],   bni = qei[lane-1]
 			double qoi = t1-qor;		qor += t1;		// bsi = -qoi[lane-1],   asi = qoi[lane+1];
 			t0 = shfl_xor(qei, 1);	// exchange between adjacent lanes.

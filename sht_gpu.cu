@@ -430,10 +430,10 @@ void spat_to_fourier_gpu(shtns_cfg shtns, double* q, const int mmax)
 		cufftDoubleComplex *x = (cufftDoubleComplex*) q;
 		if (shtns->fft_mode & FFT_PHI_CONTIG_CPLX) {
 			double* xfft = shtns->gpu_buf_in;
-			res = cufftExecZ2Z(shtns->cufft_plan, x, (cufftDoubleComplex*) xfft, CUFFT_INVERSE);
+			res = cufftExecZ2Z(shtns->cufft_plan, x, (cufftDoubleComplex*) xfft, CUFFT_FORWARD);
 			transpose_cplx_skip(shtns->comp_stream, xfft, (double*) x, nphi, shtns->nlat_2, mmax);		// ignore m > mmax during transpose
 		} else {	// THETA_CONTIGUOUS:
-			res = cufftExecZ2Z(shtns->cufft_plan, x, x, CUFFT_INVERSE);
+			res = cufftExecZ2Z(shtns->cufft_plan, x, x, CUFFT_FORWARD);
 		}
 		if (res != CUFFT_SUCCESS) printf("cufft error %d\n", res);
 	}
