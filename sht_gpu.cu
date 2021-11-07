@@ -193,12 +193,12 @@ static int init_cuda_buffer_fft(shtns_cfg shtns)
 				config.bufferStride[1] = dist * nfft;
 				config.omitDimension[0] = 1;		// no FFT on the first dimension.
 				config.doublePrecision = 1;
-				/*if (2*(shtns->mmax+1) <= nfft) {	// let vkFFT perform the zero-padding
+				if (2*(shtns->mmax+1) <= nfft) {	// let vkFFT perform the zero-padding (saves memory bandwidth)
 					config.performZeropadding[1] = 1;
-					config.frequencyZeroPadding = 1;	// 1 for "fourier_to_spat", 0 for "spat_to_fourier" 
-					config.fft_zeropad_left[1] = shtns->mmax + 1;
-					config.fft_zeropad_right[1] = nfft - shtns->mmax -1;
-				}*/
+					config.frequencyZeroPadding = 1;
+					config.fft_zeropad_left[1] = shtns->mmax + 1;			// first zero element
+					config.fft_zeropad_right[1] = nfft - shtns->mmax;		// first non-zero element
+				}
 				//config.disableReorderFourStep = 1;		// avoids the use of temp buffer for large transforms at the cost of a mangled output.
 				cuDeviceGet(&vkfft_device_struct, cuda_gpu_id);
 				config.device = &vkfft_device_struct;
@@ -433,13 +433,14 @@ void fourier_to_spat_gpu(shtns_cfg shtns, double* q, const int mmax)
 			transpose_cplx_zero(shtns->comp_stream, (double*) x, xfft, shtns->nlat_2, nphi, mmax);		// zero out m>mmax during transpose
 			res = cufftExecZ2Z(shtns->cufft_plan, (cufftDoubleComplex*) xfft, x, CUFFT_INVERSE);
 		} else {	// THETA_CONTIGUOUS:
+			#ifndef VKFFT_BACKEND
 			if (2*(mmax+1) <= nphi) {
 				const int nlat = shtns->nlat_padded;
 				cudaMemsetAsync( q + (mmax+1)*nlat, 0, sizeof(double)*(nphi-2*mmax-1)*nlat, shtns->comp_stream );		// zero out m>mmax before fft
 			}
-			#ifndef VKFFT_BACKEND
 			res = cufftExecZ2Z(shtns->cufft_plan, x, x, CUFFT_INVERSE);
 			#else
+				// rely on vkfft to avoid reading the unused Fourier modes.
 				VkFFTLaunchParams launchParams = {};
 				launchParams.buffer = (void**) &x;
 				VkFFTAppend(&shtns->vkfft_plan, 1, &launchParams);
