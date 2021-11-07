@@ -57,6 +57,10 @@
 /// The warp size is always 32 on cuda devices (up to Ampere at least)
 #define WARPSZE 32
 
+#ifndef SHTNS_ISHIOKA
+#error "GPU transform requires SHTNS_ISHIOKA"
+#endif
+
 #include "sht_gpu_kernels.cu"
 
 enum cushtns_flags { CUSHT_OFF=0, CUSHT_ON=1, CUSHT_OWN_COMP_STREAM=2, CUSHT_OWN_XFER_STREAM=4};
@@ -229,10 +233,8 @@ void cushtns_release_gpu(shtns_cfg shtns)
 	// TODO: arrays possibly shared between different shtns_cfg should be deallocated ONLY if not used by other shtns_cfg.
 	if (shtns->d_ct) cudaFree(shtns->d_ct);
 	if (shtns->d_alm) cudaFree(shtns->d_alm);
-	#ifdef SHTNS_ISHIOKA
 	if (shtns->d_xlm) cudaFree(shtns->d_xlm);
 	if (shtns->d_clm) cudaFree(shtns->d_clm);
-	#endif
 	if (shtns->d_mx_stdt) cudaFree(shtns->d_mx_stdt);
 	if (shtns->d_mx_van) cudaFree(shtns->d_mx_van);
 	shtns->d_alm = 0;		// disable gpu.
@@ -250,10 +252,8 @@ int cushtns_init_gpu(shtns_cfg shtns)
 	double *d_ct  = 0;
 	double *d_mx_stdt = 0;
 	double *d_mx_van = 0;
-	#ifdef SHTNS_ISHIOKA
 	double *d_xlm = 0;
 	double *d_clm = 0;
-	#endif
 	int err_count = 0;
 	int device_id = -1;
 
@@ -270,13 +270,11 @@ int cushtns_init_gpu(shtns_cfg shtns)
 	// Allocate the device input vector alm
 	err = cudaMalloc((void **)&d_alm, (2*nlm+MAX_THREADS_PER_BLOCK-1)*sizeof(double));	// allow some overflow.
 	if (err != cudaSuccess) err_count ++;
-	#ifdef SHTNS_ISHIOKA 
-		const long nlm0 = nlm_calc(LMAX+4, MMAX, MRES);
-		err = cudaMalloc((void **)&d_clm, (nlm0+MAX_THREADS_PER_BLOCK-1)*sizeof(double));	// allow some overflow.
-		if (err != cudaSuccess) err_count ++;
-		err = cudaMalloc((void **)&d_xlm, (3*nlm0/2+MAX_THREADS_PER_BLOCK-1)*sizeof(double));	// allow some overflow.
-		if (err != cudaSuccess) err_count ++;
-	#endif
+	const long nlm0 = nlm_calc(LMAX+4, MMAX, MRES);
+	err = cudaMalloc((void **)&d_clm, (nlm0+MAX_THREADS_PER_BLOCK-1)*sizeof(double));	// allow some overflow.
+	if (err != cudaSuccess) err_count ++;
+	err = cudaMalloc((void **)&d_xlm, (3*nlm0/2+MAX_THREADS_PER_BLOCK-1)*sizeof(double));	// allow some overflow.
+	if (err != cudaSuccess) err_count ++;
 	if (shtns->mx_stdt) {
 		// Allocate the device matrix for d(sin(t))/dt
 		err = cudaMalloc((void **)&d_mx_stdt, (2*nlm+MAX_THREADS_PER_BLOCK-1)*sizeof(double));
@@ -292,12 +290,10 @@ int cushtns_init_gpu(shtns_cfg shtns)
 	if (err_count == 0) {
 		err = cudaMemcpy(d_alm, shtns->alm, 2*nlm*sizeof(double), cudaMemcpyHostToDevice);
 		if (err != cudaSuccess)  err_count ++;
-		#ifdef SHTNS_ISHIOKA
-			err = cudaMemcpy(d_clm, shtns->clm, nlm0*sizeof(double), cudaMemcpyHostToDevice);
-			if (err != cudaSuccess)  err_count ++;
-			err = cudaMemcpy(d_xlm, shtns->xlm, 3*nlm0/2*sizeof(double), cudaMemcpyHostToDevice);
-			if (err != cudaSuccess)  err_count ++;
-		#endif
+		err = cudaMemcpy(d_clm, shtns->clm, nlm0*sizeof(double), cudaMemcpyHostToDevice);
+		if (err != cudaSuccess)  err_count ++;
+		err = cudaMemcpy(d_xlm, shtns->xlm, 3*nlm0/2*sizeof(double), cudaMemcpyHostToDevice);
+		if (err != cudaSuccess)  err_count ++;
 		if (shtns->mx_stdt) {
 			err = cudaMemcpy(d_mx_stdt, shtns->mx_stdt, 2*nlm*sizeof(double), cudaMemcpyHostToDevice);
 			if (err != cudaSuccess)  err_count ++;
@@ -310,10 +306,8 @@ int cushtns_init_gpu(shtns_cfg shtns)
 		if (err != cudaSuccess)  err_count ++;
 	}
 
-	#ifdef SHTNS_ISHIOKA
 	shtns->d_xlm = d_xlm;
 	shtns->d_clm = d_clm;
-	#endif
 	shtns->d_alm = d_alm;
 	shtns->d_ct  = d_ct;
 	shtns->d_mx_stdt = d_mx_stdt;
@@ -481,14 +475,12 @@ void cuda_SH_to_spat(shtns_cfg shtns, cplx* d_Qlm, double *d_Vr, const long int 
 	//if (spat_dist == 0) spat_dist = shtns->spat_stride;
 
 	cplx* d_qlm = d_Qlm;
-	#ifdef SHTNS_ISHIOKA
 		if (S==0) {
 			d_qlm = (cplx*) shtns->gpu_buf_in;
 			//for (int f=0; f<NFIELDS; f++)
 			//	sh2ishioka_gpu(shtns, d_Qlm + f * shtns->nlm_stride, d_qlm + f * shtns->nlm_stride, llim, mmax, S);
 			sh2ishioka_gpu(shtns, d_Qlm, d_qlm, llim, mmax, S);
 		} else
-	#endif
 	if (d_Vr == (double*) d_Qlm) { printf("ERROR: cuda_SH_to_spat must have distinct in and out fields");	exit(1); }
 	legendre<S,NFIELDS>(shtns, (double*) d_qlm, d_Vr, llim, mmax, shtns->nlat);
 	for (int f=0; f<NFIELDS; f++)  fourier_to_spat_gpu(shtns, d_Vr + f*spat_dist, mmax);	// in-place
@@ -507,7 +499,6 @@ void cuda_spat_to_SH(shtns_cfg shtns, double *d_Vr, cplx* d_Qlm, const long int 
 
 	for (int f=0; f<NFIELDS; f++) spat_to_fourier_gpu(shtns, d_Vr + f*spat_dist, mmax);
 
-	#ifdef SHTNS_ISHIOKA
 		if (S==0) {
 			cplx* d_Qlm_ish = (cplx*) shtns->gpu_buf_in;
 			ilegendre<S, NFIELDS>(shtns, d_Vr, (double*) d_Qlm_ish, llim, shtns->nlat);
@@ -516,7 +507,6 @@ void cuda_spat_to_SH(shtns_cfg shtns, double *d_Vr, cplx* d_Qlm, const long int 
 			//	ishioka2sh_gpu(shtns, d_Qlm_ish + f * shtns->nlm_stride, d_Qlm + f * shtns->nlm_stride, llim, mmax, S);
 			return;
 		 } else
-	#endif
 	{
 		if (d_Vr == (double*) d_Qlm) { printf("ERROR: cuda_spat_to_SH must have distinct in and out fields");	exit(1); }
 		ilegendre<S, NFIELDS>(shtns, d_Vr, (double*) d_Qlm, llim, shtns->nlat);
@@ -607,11 +597,7 @@ void SH_to_spat_gpu(shtns_cfg shtns, cplx *Qlm, double *Vr, const long int llim)
 	int mmax = shtns->mmax;
 
 	double *d_q   = shtns->gpu_buf_out;		// outer buffer for transfer (safe)
-	#ifdef SHTNS_ISHIOKA
 	double *d_qlm = d_q;		// "in-place" operation possible with ishioka
-	#else
-	double *d_qlm = shtns->gpu_buf_in;		// "inner" buffer also used by FFT can be used here (no "in-place" allowed)
-	#endif
 
 	if ((llim < mmax*mres) & (shtns->howmany == 1)) {
 		mmax = llim / mres;	// truncate mmax too !
@@ -1265,11 +1251,7 @@ void spat_to_SH_gpu(shtns_cfg shtns, double *Vr, cplx *Qlm, const long int llim)
 {
 	cudaError_t err = cudaSuccess;
 	double *d_q   = shtns->gpu_buf_out;
-	#ifdef SHTNS_ISHIOKA
 	double *d_qlm = d_q;		// "in-place" operation possible
-	#else
-	double *d_qlm = shtns->gpu_buf_in;		// "in-place" operation not possible. gpu_buf_in may be also used as internal buffer by fft
-	#endif
 
 	// copy spatial data to GPU
 	err = cudaMemcpy(d_q, Vr, shtns->nspat * sizeof(double), cudaMemcpyHostToDevice);
