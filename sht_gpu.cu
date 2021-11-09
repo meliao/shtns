@@ -358,17 +358,6 @@ int cushtns_init_gpu(shtns_cfg shtns)
 	return device_id;		// success, return device_id
 }
 
-/// WARNING: user streams must set AFTER cushtns_set_batch, as it resets the streams.
-extern "C"
-int cushtns_set_batch(shtns_cfg shtns)
-{
-	if (shtns->fft_mode & FFT_THETA_CONTIG) {	// only this layout is supported yet.
-		destroy_cuda_buffer_fft(shtns);
-		int err_count = init_cuda_buffer_fft(shtns);
-		return err_count;
-	} else return 1;
-}
-
 /// \internal Enables parallel transforms on selected GPU device, if available. \see shtns_use_gpu
 extern "C"
 int cushtns_use_gpu(int device_id)
@@ -387,7 +376,7 @@ int cushtns_use_gpu(int device_id)
 	return -1;		// disable gpu.
 }
 
-/// WARNING: cushtns_set_streams must be called BEFORE shtns_set_grid or cushtns_set_batch
+/// WARNING: cushtns_set_streams must be called BEFORE shtns_set_grid
 extern "C"
 void cushtns_set_streams(shtns_cfg shtns, cudaStream_t compute_stream, cudaStream_t transfer_stream)
 {

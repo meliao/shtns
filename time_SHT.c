@@ -772,12 +772,12 @@ int main(int argc, char *argv[])
 	shtns = shtns_create(LMAX, MMAX, MRES, shtnorm);
 	if (robert_form >= 0) shtns_robert_form(shtns, robert_form);		// keep the default robert_form, unless specified on command line (usefull when built4magic)
 	NLM = shtns->nlm;
-	shtns_set_grid_auto(shtns, shtmode | layout | layout_opts, polaropt, nlorder, &NLAT, &NPHI);
 	if (batch == -1) {
 		batch = SHT_ITER;		SHT_ITER = 1;
 		int r = shtns_set_batch(shtns, batch, shtns->nlm);
 		if (r<0) printf("ERROR batch\n");
 	}
+	shtns_set_grid_auto(shtns, shtmode | layout | layout_opts, polaropt, nlorder, &NLAT, &NPHI);
 
 	shtns_print_cfg(shtns);
 

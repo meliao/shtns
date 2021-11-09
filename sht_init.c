@@ -352,6 +352,7 @@ static void planFFT(shtns_cfg shtns, int layout)
   #else
 	int in_place = 0;		// do not try to use in-place real fft if no timing data available.
   #endif
+	const int howmany = shtns->howmany;
 
 	if (NPHI <= 2*MMAX) shtns_runerr("the sampling condition Nphi > 2*Mmax is not met.");
 
@@ -361,39 +362,42 @@ static void planFFT(shtns_cfg shtns, int layout)
 			fftw_plan_with_nthreads(omp_threads);
 		} else fftw_plan_with_nthreads(shtns->nthreads);
 	#endif
-
-	shtns->k_stride_a = 1;		shtns->m_stride_a = NLAT;		// default strides
-	shtns->nlat_padded = NLAT;
-	shtns->nspat = NPHI * NLAT;		// default spatial size
+	
+	// default layout:
+	phi_inc = shtns->nlat * howmany;
+	#ifndef HAVE_LIBCUFFT
+	if ((layout & SHT_ALLOW_PADDING) && (phi_inc % 64 == 0) && (NPHI * phi_inc > 512) && ((NPHI>1)||(howmany>1)))
+		phi_inc += 8;		// we add some padding, to avoid cache bank conflicts.
+	#endif
+	shtns->k_stride_a = 1;		shtns->m_stride_a = phi_inc;		// default strides
+	shtns->nlat_padded = phi_inc;		// stride between phi in spectral domain
+	shtns->nspat = NPHI * phi_inc;		// default spatial size to be allocated for a transform call
 
 	if (NPHI==1) 	// no FFT needed.
 	{
 		shtns->fft_mode = FFT_NONE;		// no FFT
 		#if SHT_VERBOSE > 0
-			if (verbose) printf("        => no fft : Mmax=0, Nphi=1, Nlat=%d\n",NLAT);
+			if (verbose) printf("        => no fft : Mmax=0, Nphi=1, Nlat=%d, Nbatch=%d\n",NLAT,howmany);
 		#endif
 		return;
 	}
 
 	/* NPHI > 1 */
-	theta_inc=1;  phi_inc=NLAT;		// SHT_NATIVE_LAYOUT is the default.
-	if (layout & SHT_THETA_CONTIGUOUS) {	theta_inc=1;  phi_inc=NLAT;	}
-	if (layout & SHT_PHI_CONTIGUOUS)   {	phi_inc=1;  theta_inc=NPHI;	}
+	theta_inc=1;  // SHT_NATIVE_LAYOUT is the default.
+	if (layout & SHT_PHI_CONTIGUOUS) {
+		if (howmany != 1) shtns_runerr("batch transform not supported for phi-contiguous layout\n");
+		// shtns->howmany MUST be 1!
+		phi_inc=1;  theta_inc=NPHI;
+		in_place = 0;		// we need to do the fft out-of-place (some transposition is needed)
+		shtns->nspat = NPHI * NLAT;		// no padding, no batching.
+		shtns->nlat_padded = NLAT;
+	}
 	nfft = NPHI;
+	// TODO CHECK THIS: why phi_inc != NLAT requires out-of-place ??
 	if ((theta_inc != 1)||(phi_inc != NLAT))  in_place = 0;		// we need to do the fft out-of-place.
 
-	#ifndef HAVE_LIBCUFFT
-	if ((layout & SHT_ALLOW_PADDING) && (phi_inc % 64 == 0) && (NPHI * phi_inc > 512))
-	{
-		phi_inc += 8;		// we add some padding, to avoid cache bank conflicts.
-		shtns->nspat = NPHI * phi_inc;		// spatial size to be allocated
-		shtns->m_stride_a = phi_inc;		// stride between phi in spectral domain
-		shtns->nlat_padded = phi_inc;		// stride between phi in spatial domain
-	}
-	#endif
-
 	#if SHT_VERBOSE > 0
-	if (verbose) printf("        => using FFTW : Mmax=%d, Nphi=%d, Nlat=%d  ",MMAX,NPHI,NLAT);
+	if (verbose) printf("        => using FFTW : Mmax=%d, Nphi=%d, Nlat=%d, Nbatch=%d  ",MMAX,NPHI,NLAT, howmany);
 	#endif
 
 // Allocate dummy Spatial Fields.
@@ -420,7 +424,6 @@ static void planFFT(shtns_cfg shtns, int layout)
 		many.n = NLAT/2;	many.is = 2*NPHI;	many.os = 2*NPHI;
 		shtns->fftc = fftw_plan_guru_split_dft(1, &dim, 1, &many,  Sh+NPHI, Sh, ((double*)ShF)+1, (double*)ShF, shtns->fftw_plan_mode);
 		shtns->k_stride_a = NPHI;		shtns->m_stride_a = 2;
-		shtns->nlat_padded = NLAT;
 		
 	/*	if (shtns->nthreads > 1) {
 			fftw_plan_with_nthreads(1);
@@ -445,7 +448,7 @@ static void planFFT(shtns_cfg shtns, int layout)
 		shtns->ifft_cplx = fftw_plan_many_dft(1, &nfft, NLAT, ShF, &nfft, NLAT, 1, (cplx*)Sh, &nfft, 1, NPHI, FFTW_BACKWARD, shtns->fftw_plan_mode);
 		shtns->fft_cplx =  fftw_plan_many_dft(1, &nfft, NLAT, ShF, &nfft, 1, NPHI, (cplx*)Sh, &nfft, NLAT, 1, FFTW_BACKWARD, shtns->fftw_plan_mode);
 	#if defined( HAVE_LIBCUFFT ) && !defined( VKFFT_BACKEND )
-	} else if ((!(layout & SHT_THETA_CONTIGUOUS)) && (nfft % 16 == 0) && (shtns->nlat_2 % 16 == 0)) {		// use the fastest layout compatible with cuFFT
+	} else if ((!(layout & SHT_THETA_CONTIGUOUS)) && (nfft % 16 == 0) && (shtns->nlat_2 % 16 == 0) && (howmany==1)) {		// use the fastest layout compatible with cuFFT
 		#if SHT_VERBOSE > 0
 		if (verbose) printf("(best cuFFT layout: phi_inc=2, theta_inc=NA)\n");
 		#endif
@@ -460,7 +463,7 @@ static void planFFT(shtns_cfg shtns, int layout)
 		if (verbose) printf("(theta-contiguous layout: phi_inc=%d, theta_inc=%d)\n",phi_inc,theta_inc);
 		#endif
 		shtns->fft_mode = FFT_THETA_CONTIG;
-		shtns->ifftc = fftw_plan_many_dft(1, &nfft, NLAT/2, ShF, &nfft, phi_inc/2, 1, ShF, &nfft, phi_inc/2, 1, FFTW_BACKWARD, shtns->fftw_plan_mode);
+		shtns->ifftc = fftw_plan_many_dft(1, &nfft, shtns->nlat_2 * howmany, ShF, &nfft, phi_inc/2, 1, ShF, &nfft, phi_inc/2, 1, FFTW_BACKWARD, shtns->fftw_plan_mode);
 		shtns->fftc = shtns->ifftc;		// same thing, with m>0 and m<0 exchanged.
 
 	/*	if (shtns->nthreads > 1) {
@@ -636,13 +639,13 @@ double SHT_error(shtns_cfg shtns, int vector)
 	
 	srand( time(NULL) );	// init random numbers.
 	
-	Slm0 = (cplx *) VMALLOC(sizeof(cplx)* NLM);
-	Slm = (cplx *) VMALLOC(sizeof(cplx)* NLM);
+	Slm0 = (cplx *) VMALLOC(sizeof(cplx)* NLM * shtns->howmany);
+	Slm = (cplx *) VMALLOC(sizeof(cplx)* NLM * shtns->howmany);
 	Sh = (double *) VMALLOC( NSPAT_ALLOC(shtns) * sizeof(double) );
 	if ((Sh==0) || (Slm==0) || (Slm0==0)) shtns_runerr("not enough memory.");
 	if (vector) {
-		Tlm0 = (cplx *) VMALLOC(sizeof(cplx)* NLM);
-		Tlm = (cplx *) VMALLOC(sizeof(cplx)* NLM);
+		Tlm0 = (cplx *) VMALLOC(sizeof(cplx)* NLM * shtns->howmany);
+		Tlm = (cplx *) VMALLOC(sizeof(cplx)* NLM * shtns->howmany);
 		Th = (double *) VMALLOC( NSPAT_ALLOC(shtns) * sizeof(double) );
 		if ((Th==0) || (Tlm==0) || (Tlm0==0)) shtns_runerr("not enough memory.");
 	}
@@ -762,7 +765,7 @@ static void choose_best_sht(shtns_cfg shtns, int* nlp, int vector)
 	if (NLAT < VSIZE2*4) return;			// on-the-fly not possible for NLAT_2 < 2*NWAY (overflow).
 
 	size_t nspat = sizeof(double) * NSPAT_ALLOC(shtns);
-	size_t nspec = sizeof(cplx)* NLM;
+	size_t nspec = sizeof(cplx)* NLM * shtns->howmany;
 	if (nspec>nspat) nspat=nspec;
 	Sh = (double *) VMALLOC(nspat);		Slm = (cplx *) VMALLOC(nspec);
 	if ((Sh==0) || (Slm==0)) shtns_runerr("not enough memory.");
@@ -904,7 +907,7 @@ void fprint_ftable(FILE* fp, void* ftable[SHT_NVAR][SHT_NTYP])
 
 void shtns_print_cfg(shtns_cfg shtns)
 {
-	printf("Lmax=%d, Mmax*Mres=%d, Mres=%d, Nlm=%d, Nbatch=%d  [%d threads, ",LMAX, MMAX*MRES, MRES, NLM, shtns->nthreads, shtns->howmany);
+	printf("Lmax=%d, Mmax*Mres=%d, Mres=%d, Nlm=%d, Nbatch=%d  [%d threads, ",LMAX, MMAX*MRES, MRES, NLM, shtns->howmany, shtns->nthreads);
 	#ifdef HAVE_LIBCUFFT
 		if (shtns->d_alm) printf("gpu ready, ");
 	#endif
@@ -1071,6 +1074,7 @@ shtns_cfg shtns_create(int lmax, int mmax, int mres, enum shtns_norm norm)
 		#else
 		shtns->robert_form = 0;		// no Robert form by default.
 		#endif
+		shtns->howmany = 1;		// 1 transform by default. Use shtns_set_batch() to ask for more.
 	}
 
 	shtns->norm = norm;
@@ -1326,6 +1330,10 @@ int shtns_set_grid_auto(shtns_cfg shtns, enum shtns_type flags, double eps, int 
 			if (*nlat % (VSIZE2*2)) shtns_runerr("Nlat must be an even multiple of vector size\n");
 		#endif
 	#endif
+	if (shtns->howmany != 1) {		// more constraints apply for batched transforms:
+		if (shtns->nlat & 1) shtns_runerr("Nlat must be even for a batched transform\n");
+		if (flags & SHT_PHI_CONTIGUOUS) shtns_runerr("batch transform not supported for phi-contiguous layout\n");
+	}
 	shtns_unset_grid(shtns);		// release grid if previously allocated.
 	if (nl_order <= 0) nl_order = SHT_DEFAULT_NL_ORDER;
 /*	shtns.lshift = 0;
@@ -1401,10 +1409,9 @@ int shtns_set_grid_auto(shtns_cfg shtns, enum shtns_type flags, double eps, int 
 	if (IS_TOO_LARGE(*nlat, shtns->nlat)) shtns_runerr("Nlat too large");
 	if (IS_TOO_LARGE(*nphi, shtns->nphi)) shtns_runerr("Nphi too large");
 
-	// copy to global variables.
+	// copy to plan variables.
 	shtns->nphi = *nphi;
 	shtns->nlat_2 = (*nlat+1)/2;	shtns->nlat = *nlat;
-	shtns->howmany = 1;		// 1 transform only; use shtns_set_batch() for more.
 
 	if (layout & SHT_LOAD_SAVE_CFG)	{
 		FILE* f = fopen("shtns_cfg_fftw","r");
@@ -1494,47 +1501,21 @@ int shtns_set_grid(shtns_cfg shtns, enum shtns_type flags, double eps, int nlat,
 	return( shtns_set_grid_auto(shtns, flags, eps, 0, &nlat, &nphi) );
 }
 
-int cushtns_set_batch(shtns_cfg shtns);
-
 /** Batched transforms, with some constraints.
  * Currently only theta-contiguous data is allowed.
- * Data is accessed with data[iphi*shtns->nlat_padded + ibatch*shtns->nlat + itheta].
+ * Spatial data is accessed with data[iphi*shtns->nlat_padded + ibatch*shtns->nlat + itheta].
+ * Spectral data is accessed with Qlm[ibatch * spec_dist + lm].
 */
-int shtns_set_batch(shtns_cfg shtns, const int howmany, const long spec_dist)
+int shtns_set_batch(shtns_cfg shtns, const int howmany, long spec_dist)
 {
-	//if ((howmany <= 0) || (spec_dist < shtns->nlm)) return -1;		// invalid
-	if (shtns->nlat & 1) return -1;	// only even nlat is allowed.
-	if (shtns->fft_mode != FFT_THETA_CONTIG) return -1;	// only theta-contiguous is allowed for now.
-
-	int nfft =  shtns->nphi;
-	int phi_inc = shtns->nlat * howmany;
-	#ifndef HAVE_LIBCUFFT
-	//if ((layout & SHT_ALLOW_PADDING) && (phi_inc % 64 == 0) && (NPHI * phi_inc > 512))  phi_inc += 8;		// we add some padding, to avoid cache bank conflicts.
-	#endif
+	if (howmany <= 0)	return -1;		// invalid
+	if (spec_dist == 0)  spec_dist = shtns->nlm;
+	if (spec_dist < shtns->nlm) return -1;	// invalid
 
 	shtns->howmany = howmany;
-	shtns->nspat = shtns->nphi * phi_inc;		// spatial size to be allocated
-	shtns->m_stride_a = phi_inc;		// stride between phi in spectral domain
-	shtns->nlat_padded = phi_inc;		// stride between phi in spatial domain
 	shtns->spec_dist = spec_dist;		// distance between spectral fields.
-
-	if (shtns->nphi > 1) {		// prepare fft
-		fftw_destroy_plan(shtns->ifftc);
-		cplx* ShF = (cplx*) VMALLOC( sizeof(double) * shtns->nspat );
-		shtns->ifftc = fftw_plan_many_dft(1, &nfft, shtns->nlat_2 * howmany, ShF, &nfft, phi_inc/2, 1, ShF, &nfft, phi_inc/2, 1, FFTW_BACKWARD, shtns->fftw_plan_mode);
-		shtns->fftc = shtns->ifftc;
-		VFREE(ShF);
-	}
-
-	#ifdef HAVE_LIBCUFFT
-	if (shtns->d_alm) {		// go for gpu batched transforms
-		int gpu_ok = cushtns_set_batch(shtns);
-	}
-	#endif
-
-	return(shtns->nspat);	// returns the number of doubles to be allocated for a spatial field.
+	return howmany;
 }
-
 
 /*! Simple initialization of Spherical Harmonic transforms (backward and forward, vector and scalar, ...) of given size.
  * This function sets all global variables by calling \ref shtns_create followed by \ref shtns_set_grid, with the
