@@ -907,7 +907,7 @@ void fprint_ftable(FILE* fp, void* ftable[SHT_NVAR][SHT_NTYP])
 
 void shtns_print_cfg(shtns_cfg shtns)
 {
-	printf("Lmax=%d, Mmax*Mres=%d, Mres=%d, Nlm=%d, Nbatch=%d  [%d threads, ",LMAX, MMAX*MRES, MRES, NLM, shtns->howmany, shtns->nthreads);
+	printf("Lmax=%d, Mmax*Mres=%d, Mres=%d, Nlm=%d  [%d threads, ",LMAX, MMAX*MRES, MRES, NLM, shtns->nthreads);
 	#ifdef HAVE_LIBCUFFT
 		if (shtns->d_alm) printf("gpu ready, ");
 	#endif
@@ -925,7 +925,7 @@ void shtns_print_cfg(shtns_cfg shtns)
 		case GRID_POLES : printf("Regular grid including poles");  break;
 		default : printf("Unknown grid");
 	}
-	printf(" : Nlat=%d, Nphi=%d\n", NLAT, NPHI);
+	printf(" : Nlat=%d, Nphi=%d, Nbatch=%d\n", NLAT, NPHI, shtns->howmany);
 	printf("      ");
 	for (int it=0; it<SHT_NTYP; it++)
 		printf("%5s ",sht_type[it]);

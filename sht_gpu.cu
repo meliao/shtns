@@ -73,7 +73,9 @@ void* shtns_malloc(size_t size) {
 	cudaError_t err = cudaMallocHost(&ptr, size);		// try to allocate pinned memory (for faster transfers !)
 	if (err != cudaSuccess) {
 		cudaGetLastError();		// clears the error status.
+		#if SHT_VERBOSE > 1
 		printf("!WARNING! [shtns_malloc] failed to alloc pinned memory. using regular memory instead.\n");
+		#endif
 		ptr = VMALLOC(size);		// return regular memory instead...
 	}
 	return ptr;
@@ -81,12 +83,15 @@ void* shtns_malloc(size_t size) {
 
 extern "C"
 void shtns_free(void* p) {
-	cudaError_t err = cudaSuccess;
-	if (p) err = cudaFreeHost(p);
-	if (err != cudaSuccess) {
-		cudaGetLastError();		// clears the error status.
-		printf("!WARNING! [sntns_free] not page locked memory. trying regular free...\n");
-		VFREE(p);
+	if (p) {
+		cudaError_t err = cudaFreeHost(p);
+		if (err != cudaSuccess) {
+			cudaGetLastError();		// clears the error status.
+			#if SHT_VERBOSE > 1
+			printf("!WARNING! [sntns_free] not page locked memory. trying regular free...\n");
+			#endif
+			VFREE(p);
+		}
 	}
 }
 
