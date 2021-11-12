@@ -352,7 +352,13 @@ ishioka2sh_kernel(const double* __restrict__ xlm, const double* __restrict__ ql_
 	double q = 0.0;
 	if ((l-2 <= llim_m) && (im <= mmax)) {
 		if ((j<(blockDim.x>>2)*3+3) && (x_ofs+j-3 >= 0)) xl_[j] = xlm[x_ofs +j-3];
-		if (l-2 >= 0) q = ql_ish[q_ofs +j-4 + b*ql_ish_dist];		// ql_[4] = ql_ish[0]
+		if (l-2 >= 0) {
+			if (im>0) {
+				q = ql_ish[q_ofs +j-4 + b*ql_ish_dist];		// ql_[4] = ql_ish[0]
+			} else if ((j&1) == 0) {
+				q = ql_ish[((q_ofs +j-4)>>1) + b*ql_ish_dist];		// ql_[4] = ql_ish[0]
+			}
+		}
 		ql_[j] = q;
 	}
 
@@ -571,8 +577,13 @@ ish2sphtor_kernel(const double* __restrict__ mx, const double* __restrict__ xlm,
 	if (l-2 <= llim_m_p1) {
 		if ((j<(blockDim.x>>2)*3+3) && (x_ofs+j-3 >= 0)) M[j] = xlm[x_ofs +j-3];
 		if (l-2 >= 0) {
-			v = vlm[q_ofs +2*im +j-4 + b*ql_ish_dist];		// vl[4] = vlm[0]
-			w = wlm[q_ofs +2*im +j-4 + b*ql_ish_dist];		// vl[4] = vlm[0]
+			if (im>0) {
+				v = vlm[q_ofs +2*im +j-4 + b*ql_ish_dist];		// vl[4] = vlm[0]
+				w = wlm[q_ofs +2*im +j-4 + b*ql_ish_dist];		// vl[4] = vlm[0]
+			} else if ((j&1)==0) {
+				v = vlm[((q_ofs +j-4)>>1) + b*ql_ish_dist];		// vl[4] = vlm[0]
+				w = wlm[((q_ofs +j-4)>>1) + b*ql_ish_dist];		// vl[4] = vlm[0]
+			}
 		}
 	}
 	vl[j] = v;
@@ -1216,10 +1227,10 @@ ileg_m_kernel(const double* __restrict__ al, const double* __restrict__ ct, cons
 				if ( ((j % (BLOCKSIZE/LSPAN)) == 0) && ((l+ll)<=llim) ) {	// write result
 					if ((!HI_LLIM) && (nlat_2 <= BLOCKSIZE)) {		// do we need atomic add or not ?
 						#pragma unroll
-						for (int f=0; f<NFIELDS; f++)	ql[2*(l+ll) + (b*NFIELDS+f)*ql_dist] = qll[f];
+						for (int f=0; f<NFIELDS; f++)	ql[(l+ll) + (b*NFIELDS+f)*ql_dist] = qll[f];
 					} else {
 						#pragma unroll
-						for (int f=0; f<NFIELDS; f++)	atomicAdd(ql+2*(l+ll) + (b*NFIELDS+f)*ql_dist, qll[f]);		// VERY slow atomic add on Kepler.
+						for (int f=0; f<NFIELDS; f++)	atomicAdd(ql+(l+ll) + (b*NFIELDS+f)*ql_dist, qll[f]);		// VERY slow atomic add on Kepler.
 					}
 				}
 
