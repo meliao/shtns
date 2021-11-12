@@ -314,6 +314,8 @@ void test_SHT()
 	ts = tcpu / (1000.*SHT_ITER);
 	ts2 = tdiff(&t1, &t2);
 
+	for (i=0;i<NLM*batch;i++) Slm[i] = 1e30 -I*1e31;	// fill destination with garbage
+
 	gettimeofday(&t1, NULL);
 	tcpu = clock();
 	spat_to_SH(shtns, Sh,Slm);
@@ -336,6 +338,7 @@ void test_SHT()
 void test_SHT_accuracy()
 {
 	for (int i=0;i<NLM*batch;i++) Slm[i] = Slm0[i];	// restore test case...
+	for (int i=0;i<NLM*batch;i++) Tlm[i] = 1e30 - I*1e31;	// put garbage everywhere in destination
 	for (int jj=0; jj< SHT_ITER; jj++) {
 		SH_to_spat(shtns, Slm,Sh);
 		spat_to_SH(shtns, Sh, Tlm);
@@ -379,13 +382,14 @@ void test_SHT_l(int ltr)
 
 	for (i=0;i<NLM*batch;i++) Slm[i] = Slm0[i];	// restore test case...
 
-	
 	gettimeofday(&t1, NULL);
 	for (jj=0; jj< SHT_ITER; jj++) {
 		SH_to_spat_l(shtns, Slm,Sh,ltr);
 	}
 	gettimeofday(&t2, NULL);
 	ts = tdiff(&t1, &t2);
+
+	for (i=0;i<NLM*batch;i++) Slm[i] = 1e30 -I*1e31;	// fill destination with garbage
 
 	gettimeofday(&t1, NULL);
 		spat_to_SH_l(shtns, Sh,Slm,ltr);
@@ -424,6 +428,10 @@ void test_SHT_vect_l(int ltr)
 	}
 	gettimeofday(&t2, NULL);
 	ts = tdiff(&t1, &t2);
+
+	for (i=0;i<NLM*batch;i++) {
+		Slm[i] = 1e30 - I*1e31;		Tlm[i] = 1e20 + I*1e19;	// fill destination with garbage
+	}
 
 	gettimeofday(&t1, NULL);
 		spat_to_SHsphtor_l(shtns, Sh,Th,Slm,Tlm, ltr);
@@ -464,6 +472,10 @@ void test_SHT_vect()
 	gettimeofday(&t2, NULL);
 	ts = tdiff(&t1, &t2);
 
+	for (i=0;i<NLM*batch;i++) {
+		Slm[i] = 1e30 - I*1e31;		Tlm[i] = 1e20 + I*1e19;	// fill destination with garbage
+	}
+
 	gettimeofday(&t1, NULL);
 		spat_to_SHsphtor(shtns, Sh,Th,Slm,Tlm);
 	for (jj=1; jj< SHT_ITER; jj++) {
@@ -498,6 +510,10 @@ void test_SHT_vect3d_l(int ltr)
 	}
 	gettimeofday(&t2, NULL);
 	ts = tdiff(&t1, &t2);
+
+	for (i=0;i<NLM*batch;i++) {
+		Slm[i] = 1e30 - I*1e31;		Tlm[i] = 1e20 + I*1e19;		Qlm[i] = 3e25 -I*1e25;	// fill destination with garbage
+	}
 
 	gettimeofday(&t1, NULL);
 		spat_to_SHqst_l(shtns, NL,Sh,Th,Qlm,Slm,Tlm, ltr);
@@ -542,6 +558,10 @@ void test_SHT_vect3d()
 	}
 	gettimeofday(&t2, NULL);
 	ts = tdiff(&t1, &t2);
+
+	for (i=0;i<NLM*batch;i++) {
+		Slm[i] = 1e30 - I*1e31;		Tlm[i] = 1e20 + I*1e19;		Qlm[i] = 3e25 -I*1e25;	// fill destination with garbage
+	}
 
 	gettimeofday(&t1, NULL);
 		spat_to_SHqst(shtns, NL,Sh,Th,Qlm,Slm,Tlm);
