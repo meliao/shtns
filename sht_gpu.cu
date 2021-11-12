@@ -235,11 +235,11 @@ static int init_cuda_buffer_fft(shtns_cfg shtns)
 
 	// Allocate working arrays for SHT on GPU:
 	double* gpu_mem = 0;
+	const int howmany = shtns->howmany;		// batch size
 	const int nlm2 = shtns->nlm + (shtns->mmax+1);		// one more data per m
 	const size_t nlm_stride = ((2*nlm2+WARPSZE-1)/WARPSZE) * WARPSZE;
 	const size_t spat_stride = ((shtns->nlat_padded*shtns->nphi+WARPSZE-1)/WARPSZE) * WARPSZE;
-	const size_t dual_stride = (spat_stride < nlm_stride) ? nlm_stride : spat_stride;		// we need two spatial buffers to also hold spectral data.
-	const int howmany = shtns->howmany;		// batch size
+	const size_t dual_stride = (spat_stride < nlm_stride*howmany) ? nlm_stride*howmany : spat_stride;		// we need two spatial buffers to also hold spectral data.
 
 	size_t sze = 2*nlm_stride;		// 2 spectral buffers
 	if (shtns->fft_mode & FFT_PHI_CONTIG_CPLX) {
@@ -785,20 +785,31 @@ void SHsphtor_to_spat_gpu(shtns_cfg shtns, cplx *Slm, cplx *Tlm, double *Vt, dou
 	sphtor2scal_gpu(shtns, (cplx*) d_Slm, (cplx*) d_Tlm, (cplx*) d_vwlm, (cplx*) (d_vwlm+nlm_stride*howmany), llim, mmax);
 
 	// SHT on the GPU
-	cuda_SH_to_spat<1,1>(shtns, (cplx*) d_vwlm, d_vtp, llim+1, mmax);
-	cudaEventCreateWithFlags(&ev_sht, cudaEventDisableTiming );
-	cudaEventRecord(ev_sht, shtns->comp_stream);					// record the end of scalar SH (theta).
-
-	cuda_SH_to_spat<1,1>(shtns, (cplx*) (d_vwlm + nlm_stride*howmany), d_vtp + spat_stride, llim+1, mmax);
+	if (Vt) {
+		cuda_SH_to_spat<1,1>(shtns, (cplx*) d_vwlm, d_vtp, llim+1, mmax);
+		if (Vp) {
+			cudaEventCreateWithFlags(&ev_sht, cudaEventDisableTiming );
+			cudaEventRecord(ev_sht, shtns->comp_stream);					// record the end of scalar SH (theta).
+		}
+	}
+	if (Vp) {
+		cuda_SH_to_spat<1,1>(shtns, (cplx*) (d_vwlm + nlm_stride*howmany), d_vtp + spat_stride, llim+1, mmax);
+	}
 	if (CUDA_ERROR_CHECK) return;
 
-	cudaStreamWaitEvent(xfer_stream, ev_sht, 0);					// xfer stream waits for end of scalar SH (theta).
-	cudaMemcpyAsync(Vt, d_vtp, nspat*sizeof(double), cudaMemcpyDeviceToHost, shtns->xfer_stream);
-	cudaEventDestroy(ev_sht);
-
-	// copy back spatial data (phi)
-	err = cudaMemcpy(Vp, d_vtp + spat_stride, nspat*sizeof(double), cudaMemcpyDeviceToHost);
-	CUDA_ERROR_CHECK;
+	if (Vt) {	// copy back spatial data (theta)
+		if (Vp) {
+			cudaStreamWaitEvent(xfer_stream, ev_sht, 0);					// xfer stream waits for end of scalar SH (theta).
+			cudaMemcpyAsync(Vt, d_vtp, nspat*sizeof(double), cudaMemcpyDeviceToHost, shtns->xfer_stream);
+			cudaEventDestroy(ev_sht);
+		} else {
+			err = cudaMemcpy(Vt, d_vtp, nspat*sizeof(double), cudaMemcpyDeviceToHost);
+		}
+	}
+	if (Vp) {	// copy back spatial data (phi)
+		err = cudaMemcpy(Vp, d_vtp + spat_stride, nspat*sizeof(double), cudaMemcpyDeviceToHost);
+	}
+	if (err != cudaSuccess) CUDA_ERROR_CHECK;
 }
 
 extern "C"
