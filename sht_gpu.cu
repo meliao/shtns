@@ -440,7 +440,11 @@ void fourier_to_spat_gpu(shtns_cfg shtns, double* q, const int mmax)
 			}
 			res = cufftExecZ2Z(shtns->cufft_plan, x, x, CUFFT_INVERSE);
 			#else
-				// rely on vkfft to avoid reading the unused Fourier modes.
+				// rely on vkfft to avoid reading the unused Fourier modes above shtns->mmax
+				if (mmax < shtns->mmax) {	// some zero must be added, only if more than nominal
+					const int nlat = shtns->nlat_padded;
+					cudaMemsetAsync( q + (mmax+1)*nlat, 0, sizeof(double)*(nphi-2*mmax-1)*nlat, shtns->comp_stream );		// zero out m>mmax before fft
+				}
 				VkFFTLaunchParams launchParams = {};
 				launchParams.buffer = (void**) &x;
 				VkFFTAppend(&shtns->vkfft_plan, 1, &launchParams);
@@ -633,9 +637,9 @@ void SH_to_spat_gpu(shtns_cfg shtns, cplx *Qlm, double *Vr, const long int llim)
 	double *d_q   = shtns->gpu_buf_out;		// outer buffer for transfer (safe)
 	double *d_qlm = d_q;		// "in-place" operation possible with ishioka
 
-	if ((llim < mmax*mres) & (shtns->howmany == 1)) {
+	if (llim < mmax*mres) {
 		mmax = llim / mres;	// truncate mmax too !
-		nlm = nlm_calc( shtns->lmax, mmax, mres);		// transfer less data
+		if (shtns->howmany == 1) nlm = nlm_calc( shtns->lmax, mmax, mres);		// transfer less data
 	}
 
 	// copy spectral data to GPU
@@ -755,9 +759,9 @@ void SHsphtor_to_spat_gpu(shtns_cfg shtns, cplx *Slm, cplx *Tlm, double *Vt, dou
 	double* d_vwlm = shtns->gpu_mem;
 	double* d_vtp = d_vwlm + 2*nlm_stride*howmany;
 
-	if ((llim < mmax*mres) && (howmany == 1)) {
+	if (llim < mmax*mres) {
 		mmax = llim / mres;	// truncate mmax too !
-		nlm = nlm_calc( shtns->lmax, mmax, mres);		// transfer less data
+		if (howmany == 1) nlm = nlm_calc( shtns->lmax, mmax, mres);		// transfer less data
 	}
 	// transfer and convert on gpu
 	double* d_Slm = 0;
@@ -992,9 +996,9 @@ void SHqst_to_spat_gpu(shtns_cfg shtns, cplx *Qlm, cplx *Slm, cplx *Tlm, double 
 	double* d_qvwlm = shtns->gpu_mem;
 	double* d_vrtp = d_qvwlm + 2*nlm_stride*howmany;
 
-	if ((llim < mmax*mres) && (howmany == 1)) {
+	if (llim < mmax*mres) {
 		mmax = llim / mres;	// truncate mmax too !
-		nlm = nlm_calc( shtns->lmax, mmax, mres);		// transfer less data
+		if (howmany == 1) nlm = nlm_calc( shtns->lmax, mmax, mres);		// transfer less data
 	}
 	/// 1) start scalar SH for radial component.
 	err = cudaMemcpy(d_qvwlm, Qlm, 2*nlm*sizeof(double) * howmany, cudaMemcpyHostToDevice);
