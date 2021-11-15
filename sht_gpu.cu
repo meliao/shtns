@@ -172,7 +172,7 @@ static int init_cuda_buffer_fft(shtns_cfg shtns)
 
 	err = cudaStreamCreateWithFlags(&shtns->xfer_stream, cudaStreamNonBlocking);		// stream for async data transfer.
 	shtns->cu_flags |= CUSHT_OWN_XFER_STREAM;		// mark the transfer stream as managed by shtns.
-	if (err != cudaSuccess)  err_count ++;
+	if (err != cudaSuccess)	{	err_count++;	CUDA_ERROR_CHECK;  }
 
 	/* cuFFT init */
 	int nfft = shtns->nphi;
@@ -246,12 +246,12 @@ static int init_cuda_buffer_fft(shtns_cfg shtns)
 		if (spat_stride > sze) sze = spat_stride;		// one spatial buffer for FFT -OR- 2 spectral buffers should fit in.
 	}
 	err = cudaMalloc( (void **)&shtns->gpu_buf_in,  sze*sizeof(double) * howmany );
-	if (err != cudaSuccess)	err_count++;
-	err = cudaMalloc( (void **)&shtns->gpu_buf_out, 2*dual_stride*sizeof(double) * howmany );		// 2 spatial -OR- 2 spectral
-	if (err != cudaSuccess)	err_count++;
+	if (err != cudaSuccess)	{	err_count++;	CUDA_ERROR_CHECK;  }
+	err = cudaMalloc( (void **)&shtns->gpu_buf_out, 2*dual_stride*sizeof(double) );		// 2 spatial -OR- 2 spectral
+	if (err != cudaSuccess)	{	err_count++;	CUDA_ERROR_CHECK;  }
 
 	err = cudaMalloc( (void **)&gpu_mem, (2*nlm_stride*howmany + 2*dual_stride + spat_stride)*sizeof(double) );		// maximum GPU memory required for SHT
-	if (err != cudaSuccess)	err_count++;
+	if (err != cudaSuccess)	{	err_count++;	CUDA_ERROR_CHECK;  }
 	
 	if (shtns->fft_mode & FFT_OOP) {
 		// we also need a buffer on the CPU when the FFT is out-of-place:
