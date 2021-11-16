@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2010-2018 Centre National de la Recherche Scientifique.
+ * Copyright (c) 2010-2021 Centre National de la Recherche Scientifique.
  * written by Nathanael Schaeffer (CNRS, ISTerre, Grenoble, France).
  * 
  * nathanael.schaeffer@univ-grenoble-alpes.fr
@@ -20,7 +20,8 @@
  */
 
 
-/** \addtogroup rotation Rotation of SH fields.
+/** \addtogroup gimbutas_rotation Pseudo-spectral rotations of Spherical Harmonic fields (deprecated).
+ \b deprecated use \ref rotation instead.
 Rotation around axis other than Z should be considered of beta quality (they have been tested but may still contain bugs).
 They also require \c mmax = \c lmax. They use an Algorithm inspired by the pseudospectral rotation described in
 Gimbutas Z. and Greengard L. 2009 "A fast and stable method for rotating spherical harmonic expansions" <i>Journal of Computational Physics</i>.
@@ -28,7 +29,7 @@ doi:<a href="http://dx.doi.org/10.1016/j.jcp.2009.05.014">10.1016/j.jcp.2009.05.
 
 These functions do only require a call to \ref shtns_create, but not to \ref shtns_set_grid.
 */
-//@{
+///@{
 
 /// Rotate a SH representation Qlm around the z-axis by angle alpha (in radians),
 /// which is the same as rotating the reference frame by angle -alpha.
@@ -48,7 +49,7 @@ void SH_Zrotate(shtns_cfg shtns, cplx *Qlm, double alpha, cplx *Rlm)
 	}
 }
 
-//@}
+///@}
 
 /// \internal initialize pseudo-spectral rotations
 static void SH_rotK90_init(shtns_cfg shtns)
@@ -333,8 +334,8 @@ static void SH_rotK90(shtns_cfg shtns, cplx *Qlm, cplx *Rlm, double dphi0, doubl
 }
 
 
-/// \addtogroup rotation
-//@{
+/// \addtogroup gimbutas_rotation
+///@{
 
 /// rotate Qlm by 90 degrees around X axis and store the result in Rlm.
 /// shtns->mres MUST be 1, and lmax=mmax.
@@ -383,14 +384,14 @@ void SH_Yrotate(shtns_cfg shtns, cplx *Qlm, double alpha, cplx *Rlm)
 	SH_rotK90(shtns, Rlm, Rlm, 0.0, M_PI/2);			// Yrotate90 + Zrotate(pi/2)
 }
 
-//@}
+///@}
 
 
 
 /** \addtogroup operators Special operators
  * Apply special operators in spectral space: multiplication by cos(theta), sin(theta).d/dtheta.
 */
-//@{
+///@{
 
 
 /// \internal generates the cos(theta) matrix up to lmax+1
@@ -498,7 +499,7 @@ void SH_mul_mx(shtns_cfg shtns, double* mx, cplx *Qlm, cplx *Rlm)
 		vr[lm] = mxl*vq[lm-1];
 }
 
-//@}
+///@}
 
 // truncation at LMAX and MMAX
 #define LTR LMAX
@@ -509,7 +510,76 @@ void SH_mul_mx(shtns_cfg shtns, double* mx, cplx *Qlm, cplx *Rlm)
  * These functions are not optimized and can be relatively slow, but they provide good
  * reference implemenation for the transforms.
 */
-//@{
+///@{
+
+/// Evaluate scalar SH representation of complex field \b alm at physical point defined by \b cost = cos(theta) and \b phi
+cplx SH_to_point_cplx(shtns_cfg shtns, cplx *alm, double cost, double phi)
+{
+	double yl[LMAX+1];
+	long int l,m;
+	cplx z = 0.0;
+
+	v2d vr0 = vdup(0.0);		v2d vr1 = vdup(0.0);
+	m=0;
+		legendre_sphPlm_array(shtns, LTR, m, cost, &yl[m]);
+
+		int ll = 0;
+		for (l=0; l<LTR; l+=2) {
+			ll += (l<=MMAX) ? 2*l : 2*MMAX+1;
+			vr0 += ((v2d*)alm)[ll] * vdup(yl[l]);
+			ll += (l<MMAX) ? 2*l+2 : 2*MMAX+1;
+			vr1 += ((v2d*)alm)[ll] * vdup(yl[l+1]);
+		}
+		if (l==LTR) {
+			ll += (l<=MMAX) ? 2*l : 2*MMAX+1;
+			vr0 += ((v2d*)alm)[ll] * vdup(yl[l]);
+		}
+		vr0 += vr1;
+		z = vcplx_real(vr0) + I*vcplx_imag(vr0);
+	if (MTR>0) {
+		cplx eip = cos(MRES*phi) + I*sin(MRES*phi);
+		v2d vrc = vdup(0.0);
+		v2d vrs = vdup(0.0);
+		cplx eimp = eip;
+		for (long im=1; im<=MTR; im++) {
+			const long m = im*MRES;
+			//memset(yl+m, 0xFF, sizeof(double)*(LMAX+1-m));
+			long lnz = legendre_sphPlm_array(shtns, LTR, m, cost, &yl[m]);
+			//if (lnz > m) printf("m=%d, lnz=%d  [ %g, %g, %g]\n", m, lnz, yl[lnz-1],yl[lnz],yl[lnz+1]);
+			if (lnz > LTR) break;		// nothing else to do
+
+			v2d vrm = vdup(0.0);		v2d vim = vdup(0.0);
+			long ll = m*m;
+			long l=m;
+			cplx* almm = alm - 2*m;		// m<0
+
+			//for (; l<lnz; l++) 	ll += (l<=MMAX) ? 2*l : 2*MMAX+1;	// skip zeros in yl, replaced by direct computation in next block:
+			if (lnz > m) {	// skip zeros in yl:
+				int lx = (lnz <= MMAX) ? lnz : MMAX+1;
+				ll += ((m+lx-1)*(lx-m));					// for (l=m; l<min(lnz,MMAX+1); l++) ll += 2*l;
+				if (lnz > MMAX+1) {
+					ll += (2*MMAX+1)*(lnz-(MMAX+1));		// for (l=MMAX+1; l<lnz; l++) ll += 2*MMAX+1;
+				}
+				l=lnz;
+			}
+			for (; l<=LMAX; l++) {			// gather from cplx rep
+				ll += (l<=MMAX) ? 2*l : 2*MMAX+1;
+				vim += vdup(yl[l]) * ((v2d*)almm)[ll];	// -m
+				vrm += vdup(yl[l]) * ((v2d*)alm)[ll];	// +m
+			}
+			//cplx eimp = cos(m*phi) + I*sin(m*phi);		// we need something accurate here.
+			if (m&1) vim = -vim;				// m<0, m odd
+			//vrc += vdup(cos(m*phi)) * (vrm+vim);	// error @lmax=1023 = 2e-7
+			//vrs += vdup(sin(m*phi)) * (vrm-vim);
+			vrc += vdup(creal(eimp)) * (vrm+vim);	// error @lmax=1023 = 2e-9
+			vrs += vdup(cimag(eimp)) * (vrm-vim);
+			eimp *= eip;
+		}
+		z += vcplx_real(vrc) - vcplx_imag(vrs) + I*(vcplx_imag(vrc) + vcplx_real(vrs));
+	}
+	return z;
+}
+
 
 /// Evaluate scalar SH representation \b Qlm at physical point defined by \b cost = cos(theta) and \b phi
 double SH_to_point(shtns_cfg shtns, cplx *Qlm, double cost, double phi)
@@ -522,30 +592,31 @@ double SH_to_point(shtns_cfg shtns, cplx *Qlm, double cost, double phi)
 	m=0;	im=0;
 		legendre_sphPlm_array(shtns, LTR, im, cost, &yl[m]);
 		for (l=m; l<LTR; l+=2) {
-			vr0 += yl[l] * creal( Qlm[l] );
+			vr0 += yl[l]   * creal( Qlm[l] );
 			vr1 += yl[l+1] * creal( Qlm[l+1] );
 		}
 		if (l==LTR) {
 			vr0 += yl[l] * creal( Qlm[l] );
 		}
 		vr0 += vr1;
-	if (MTR>0) {
-		im = 1;  do {
-			m = im*MRES;
-			legendre_sphPlm_array(shtns, LTR, im, cost, &yl[m]);
-			v2d* Ql = (v2d*) &Qlm[LiM(shtns, 0,im)];	// virtual pointer for l=0 and im
-			v2d vrm0 = vdup(0.0);		v2d vrm1 = vdup(0.0);
-			for (l=m; l<LTR; l+=2) {
-				vrm0 += vdup(yl[l]) * Ql[l];
-				vrm1 += vdup(yl[l+1]) * Ql[l+1];
-			}
-			cplx eimp = 2.*(cos(m*phi) + I*sin(m*phi));		// we need something accurate here.
-			vrm0 += vrm1;
-			if (l==LTR) {
-				vrm0 += vdup(yl[l]) * Ql[l];
-			}
-			vr0 += vcplx_real(vrm0)*creal(eimp) - vcplx_imag(vrm0)*cimag(eimp);
-		} while(++im <= MTR);
+	
+	for (im=1; im<=MTR; im++) {
+		m = im*MRES;
+		long lnz = legendre_sphPlm_array(shtns, LTR, im, cost, &yl[m]);
+		if (lnz > LTR) break;		// nothing else to do
+
+		v2d* Ql = (v2d*) &Qlm[LiM(shtns, 0,im)];	// virtual pointer for l=0 and im
+		v2d vrm0 = vdup(0.0);		v2d vrm1 = vdup(0.0);
+		for (l=lnz; l<LTR; l+=2) {
+			vrm0 += vdup(yl[l])   * Ql[l];
+			vrm1 += vdup(yl[l+1]) * Ql[l+1];
+		}
+		cplx eimp = 2.*(cos(m*phi) + I*sin(m*phi));		// we need something accurate here.
+		vrm0 += vrm1;
+		if (l==LTR) {
+			vrm0 += vdup(yl[l]) * Ql[l];
+		}
+		vr0 += vcplx_real(vrm0)*creal(eimp) - vcplx_imag(vrm0)*cimag(eimp);
 	}
 	return vr0;
 }
@@ -569,14 +640,16 @@ void SH_to_grad_point(shtns_cfg shtns, cplx *DrSlm, cplx *Slm, double cost, doub
 	if (MTR>0) {
 		im=1;  do {
 			m = im*MRES;
-			legendre_sphPlm_deriv_array(shtns, LTR, im, cost, sint, &yl[m], &dtyl[m]);
+			long lnz = legendre_sphPlm_deriv_array(shtns, LTR, im, cost, sint, &yl[m], &dtyl[m]);
+			if (lnz > LTR) break;		// nothing else to do
+
 			cplx eimp = 2.*(cos(m*phi) + I*sin(m*phi));
 			cplx imeimp = eimp*m*I;
 			l = LiM(shtns, 0,im);
 			v2d* Ql = (v2d*) &DrSlm[l];		v2d* Sl = (v2d*) &Slm[l];
 			v2d qm = vdup(0.0);
 			v2d dsdt = vdup(0.0);		v2d dsdp = vdup(0.0);
-			for (l=m; l<=LTR; ++l) {
+			for (l=lnz; l<=LTR; ++l) {
 				qm += vdup(yl[l]) * Ql[l];
 				dsdt += vdup(dtyl[l]) * Sl[l];
 				dsdp += vdup(yl[l]) * Sl[l];
@@ -640,7 +713,7 @@ void SHqst_to_point(shtns_cfg shtns, cplx *Qlm, cplx *Slm, cplx *Tlm, double cos
 	*vt = vtt;	// Bt = I.m/sint *T  + dS/dt
 	*vp = vpp;	// Bp = I.m/sint *S  - dT/dt
 }
-//@}
+///@}
 	
 #undef LTR
 #undef MTR
@@ -958,12 +1031,13 @@ void SH_to_spat_cplx(shtns_cfg shtns, cplx *alm, cplx *z)
 		for (long i=(MMAX+1)*NLAT; i<(NPHI-MMAX)*NLAT; i++)	 Q[i] = 0.0;
 	} else {
 		long lm = LM(shtns,m,m);
-		int ll = (m-1)*m;
+		int ll = m*m;
+		cplx* almm = alm - 2*m;
 		for (int l=m; l<=LMAX; l++) {			// gather from cplx rep
 			ll += (l<=MMAX) ? 2*l : 2*MMAX+1;
-			cplx rr = alm[ll+m];	// +m
-			cplx ii = alm[ll-m];	// -m
-			if (m&1) ii = -ii;				// m<0, m odd
+			cplx rr = alm[ll];	// +m
+			cplx ii = almm[ll];	// -m
+			if (m&1) ii = -ii;	// m<0, m odd
 			rlm[lm] = rr;
 			ilm[lm] = ii;
 			lm++;
@@ -1295,31 +1369,35 @@ void SH_to_spat_grad(shtns_cfg shtns, cplx *alm, double *gt, double *gp)
 }
 */
 
+#ifdef _GCC_VEC_
+typedef double rndu __attribute__ ((vector_size (VSIZE2*8), aligned (8)));		///< \internal UNALIGNED vector that contains a complex number
+typedef double v2du __attribute__ ((vector_size (16), aligned (8)));		///< \internal UNALIGNED vector that contains a complex number
+#else
+typedef rnd rndu;	///< \internal
+typedef v2d v2du;	///< \internal
+#endif
 
+/** \addtogroup rotation Rotations of Spherical Harmonic fields.
+Rotation of spherical harmonics, using an on-the-fly algorithm (does not store the rotation matrix) inspired by
+the GUMEROV's algorithm to generate the Wigner-d matrices describing rotation of Spherical Harmonics.
+See https://arxiv.org/abs/1403.7698  or  https://doi.org/10.1007/978-3-319-13230-3_5
+Thanks to Alex J. Yuffa, ayuffa@gmail.com  for his suggestions and help.
 
-
-//* GUMEROV's algorithm to generate the Wigner-d matrices describing rotation of Spherical Harmonics
-//* see https://arxiv.org/abs/1403.7698  or  https://doi.org/10.1007/978-3-319-13230-3_5
-//* Thanks to Alex J. Yuffa, ayuffa@gmail.com  for his suggestions and help.
-
-struct shtns_rot_ {		// describe a rotation matrix
-	shtns_cfg sht;
-	int lmax, mmax;
-	int flag_alpha_gamma;
-	double cos_beta, sin_beta;
-	double alpha, beta, gamma; 	// Euler angles, in ZYZ convention
-	double* plm_beta;
-	cplx eia;
-	cplx eig;
-};
+These functions are more accurate and faster than the \link gimbutas_rotation pseudo-spectral rotations of Gimbutas\endlink and do not require mmax=lmax.
+Note that if mmax<lmax, the rotations are apprixmate only, with the quality of the approximation decreasing with increasing
+'beta' angle (rotation angle around Y-axis).
+*/
+///@{
 
 /// Allocate memory and precompute some recurrence coefficients for rotation (independent of angle).
 /// Setting mmax < lmax will result in approximate rotations if not aligned with the z-axis, while mmax=lmax leads to exact rotations.
-shtns_rot shtns_rotation_create(const int lmax, const int mmax)
+shtns_rot shtns_rotation_create(const int lmax, const int mmax, int norm)
 {
 	shtns_rot r = (shtns_rot) malloc(sizeof(struct shtns_rot_));
 	r->lmax = lmax;
 	r->mmax = mmax;
+	r->no_cs_phase = (norm & SHT_NO_CS_PHASE) ? -1. : 1.;	// adapt rotations to Condon-Shortley phase
+	r->m0_renorm = (norm & SHT_REAL_NORM) ? sqrt(2.) : 1.;	// adapt to real norm
 	r->plm_beta = (double*) malloc( sizeof(double) * nlm_calc(lmax+1, lmax+1, 1) );
 	r->sht = shtns_create(lmax+1, lmax+1, 1, sht_for_rotations | SHT_NO_CS_PHASE);		// need SH up to lmax+1, with Schmidt semi-normalization.
 	r->alpha = 0.0;
@@ -1339,6 +1417,7 @@ void shtns_rotation_destroy(shtns_rot r)
 	}
 }
 
+/// \internal retruns cos(phi) + I*sin(phi), with specialization for some particular values of phi.
 static cplx special_eiphi(const double phi)
 {
 	cplx eip;
@@ -1346,11 +1425,11 @@ static cplx special_eiphi(const double phi)
 		eip = 1.0;
 	} else if (phi == M_PI) {
 		eip = -1.0;
-	} else if ((phi == M_PI/2) || (phi == M_PI_2)) {
+	} else if (phi == M_PI/2) {
 		eip = I;
-	} else if ((phi == 3*M_PI/2) || (phi == -M_PI/2) || (phi == -M_PI_2)) {
+	} else if ((phi == 3*M_PI/2) || (phi == -M_PI/2)) {
 		eip = -I;
-	} else if ((phi == M_PI/4) || (phi == M_PI_4)) {
+	} else if (phi == M_PI/4) {
 		eip = sqrt(0.5) + I*sqrt(0.5);
 	} else if (phi == M_PI/3) {
 		eip = 0.5 + I*sqrt(3)*0.5;
@@ -1360,11 +1439,12 @@ static cplx special_eiphi(const double phi)
 	return eip;
 }
 
-/// Set the rotation angle, and compute associated Legendre functions.
+/// Set the rotation angles, and compute associated Legendre functions, given the 3 intrinsic Euler angles in ZYZ convention.
 void shtns_rotation_set_angles_ZYZ(shtns_rot r, double alpha, double beta, double gamma)
 {
-	if (fabs(beta) > M_PI) {
-		printf("ERROR: angle must be between -pi and pi\n");
+	beta *= r->no_cs_phase;		// condon-shortley phase is the same thing as rotating by 180°, or changing sign of beta.
+	if UNLIKELY(fabs(beta) > M_PI) {
+		printf("ERROR: angle 'beta' must be between -pi and pi\n");
 		exit(1);
 	}
 	if (beta < 0.0) {	// translate to beta>0 as beta<0 is not supported.
@@ -1377,33 +1457,32 @@ void shtns_rotation_set_angles_ZYZ(shtns_rot r, double alpha, double beta, doubl
 	}
 
 	// step 0 : compute plm(beta)
-	const double cos_beta = cos(beta);   //((beta == M_PI_2)||(beta == M_PI/2)) ? 0.0 : cos(beta);
-	r->cos_beta = cos_beta;
-	r->sin_beta = sqrt((1.-cos_beta)*(1.+cos_beta));
+	const cplx eib = special_eiphi(beta);
+	r->cos_beta = creal(eib);
+	r->sin_beta = cimag(eib);
 	r->eia = special_eiphi(-alpha);
 	r->eig = special_eiphi(-gamma);
 	r->alpha = alpha;
 	r->beta = beta;
 	r->gamma = gamma;
 	r->flag_alpha_gamma = (alpha != 0) + 2*(gamma != 0);
-	const int lmax = r->lmax + 1;			// need SH up to lmax+1.
-	#pragma omp parallel
-	{
-		if (beta != 0.0) {
-			#pragma omp for schedule(dynamic) nowait
-			for (int m=0; m<=lmax; m++) {
-				const long ofs = m*(lmax+2) - (m*(m+1))/2;
-				legendre_sphPlm_array(r->sht, lmax, m, cos_beta, r->plm_beta + ofs);
-			}
+	if (beta != 0.0) {
+		const int lmax = r->lmax + 1;			// need SH up to lmax+1.
+		#pragma omp parallel for schedule(dynamic) firstprivate(lmax)
+		for (int m=0; m<=lmax; m++) {
+			const long ofs = m*(lmax+2) - (m*(m+1))/2;
+			legendre_sphPlm_array(r->sht, lmax, m, r->cos_beta, r->plm_beta + ofs);
 		}
 	}
 }
 
+/// Set the rotation angles, and compute associated Legendre functions, given the 3 intrinsic Euler angles in ZXZ convention.
 void shtns_rotation_set_angles_ZXZ(shtns_rot r, double alpha, double beta, double gamma)
 {
-	shtns_rotation_set_angles_ZYZ(r, alpha-M_PI/2, beta, gamma+M_PI/2);
+	shtns_rotation_set_angles_ZYZ(r, alpha+M_PI/2, beta, gamma-M_PI/2);
 }
 
+/// Sets a rotation by angle theta around axis of cartesian coordinates (Vx,Vy,Vz), and compute associated Legendre functions.
 void shtns_rotation_set_angle_axis(shtns_rot r, double theta, double Vx, double Vy, double Vz)
 {
 	if ((Vx==0) && (Vy==0)) {	// rotation along Z-axis
@@ -1416,26 +1495,26 @@ void shtns_rotation_set_angle_axis(shtns_rot r, double theta, double Vx, double 
 		double n = s / sqrt(Vx*Vx + Vy*Vy + Vz*Vz);
 		Vx *= n;	Vy *= n;	Vz *= n;
 
-		// 2) convert from quaternion to euler angle ZXZ:
+		// 2) convert from quaternion to extrinsic Euler angles:
 		double beta = acos( 1.0 - 2.0*(Vx*Vx + Vy*Vy) );  // = acos( c*c + Vz*Vz - (Vx*Vx + Vy*Vy) );
 		double Vxz = Vx*Vz;
 		double Vyz = Vy*Vz;
 		double cVx = c*Vx;
 		double cVy = c*Vy;
-		double alpha = atan2( Vxz + cVy, cVx - Vyz );
-		double gamma = atan2( Vxz - cVy, cVx + Vyz );
-
-		shtns_rotation_set_angles_ZXZ(r, alpha, beta, gamma);
+		double alpha = atan2( Vyz - cVx, cVy + Vxz );		// note: for ZXZ convention: switch x with y and alpha with gamma.
+		double gamma = atan2( Vyz + cVx, cVy - Vxz );
+		shtns_rotation_set_angles_ZYZ(r, gamma, beta, alpha);	// extrinsic rotation: swap gamma and alpha. See https://en.wikipedia.org/wiki/Euler_angles#Conventions_by_intrinsic_rotations
 	}
 }
 
-/// lw is the line-width. Use lw=2*l+1 for the full matrix, or l+1 for a compressed matrix.
+/// \internal lw is the line-width. Use lw=2*l+1 for the full matrix, or l+1 for a compressed matrix.
 /// It always has 2*l+1 lines.
-void quarter_wigner_d_matrix(shtns_rot r, const int l, double* mx, const int compressed)
+/// \return the number of columns in the matrix (l+1 for compressed or 2*l+1 for the full matrix; 0 if l is out of the 0..lmax range.
+int quarter_wigner_d_matrix(shtns_rot r, const int l, double* mx, const int compressed)
 {
-	if (l > r->lmax) {
-		printf("ERROR: l <= lmax not satified.\n");
-		exit(1);
+	if ((l > r->lmax) || (l<0)) {
+		printf("ERROR: 0 <= l <= lmax not satified.\n");
+		return 0;	// error, nothing written into mx.
 	}
 
 	const int lmax = r->lmax + 1;
@@ -1496,26 +1575,25 @@ void quarter_wigner_d_matrix(shtns_rot r, const int l, double* mx, const int com
 			mx[lw*mp + m]  = H  * c_1;		// d(m',m)
 			mx[-lw*mp + m] = H_ * c_1;		// d(-m',m)
 	}
+
+	return lw;	// return the number of lines (or columns) in the matrix.
 }
 
 
-/// Generate spherical-harmonic rotation matrix for given degree l (Wigner-d matrix), using GUMEROV's algorithm
-/// see https://arxiv.org/abs/1403.7698  or  https://doi.org/10.1007/978-3-319-13230-3_5
-/// Thanks to Alex J. Yuffa, ayuffa@gmail.com  for his suggestions and help.
-/// \param[out] mx is an (2*l+1)*(2*l+1) array that will be filled with the Wigner-d matrix elements.
-void shtns_rotation_wigner_d_matrix(shtns_rot r, const int l, double* mx)
+/// Generate spherical-harmonic rotation matrix for given degree l and orthonormal convention (Wigner-d matrix)
+/// \param[out] mx is an (2*l+1)*(2*l+1) array that will be filled with the Wigner-d matrix elements (rotation matrix along Y-axis in orthonormal spherical harmonic space).
+/// \return 0 if error, or 2*l+1 (size of the square matrix) otherwise.
+/// \warning The returned rotation matrix only applies to **orthonormal** convention (see \ref norm)
+int shtns_rotation_wigner_d_matrix(shtns_rot r, const int l, double* mx)
 {
 	// step 1:
 	if (l==0) {
 		mx[0] = 1;
-		return;
-	}
-	if (l > r->lmax) {
-		printf("ERROR: l <= lmax not satisfied.\n");
-		exit(1);
+		return 1;
 	}
 
-	quarter_wigner_d_matrix(r, l, mx, 0);		// generate quarter of wigner-d matrix (but full storage)
+	const int lw = quarter_wigner_d_matrix(r, l, mx, 0);		// generate quarter of wigner-d matrix (but full storage)
+	if (lw <= 0) return 0;	// error
 
 	// shift mx to index by negative values:
 	mx += l*(2*l+1) + l;
@@ -1534,6 +1612,7 @@ void shtns_rotation_wigner_d_matrix(shtns_rot r, const int l, double* mx)
 			mx[(2*l+1)*(-mp) - m] = x * parity;
 		}
 	}
+	return lw;
 }
 
 /*
@@ -1588,15 +1667,6 @@ void shtns_rotation_apply_cplx(shtns_rot r, cplx* Zlm, cplx* Rlm)
 }
 */
 
-
-#ifdef _GCC_VEC_
-typedef double rndu __attribute__ ((vector_size (VSIZE2*8), aligned (8)));		// UNALIGNED vector that contains a complex number
-typedef double v2du __attribute__ ((vector_size (16), aligned (8)));		// UNALIGNED vector that contains a complex number
-#else
-typedef rnd rndu;
-typedef v2d v2du;
-#endif
-
 void shtns_rotation_apply_real(shtns_rot r, cplx* Qlm, cplx* Rlm)
 {
 	const int lmax = r->lmax+1;
@@ -1629,6 +1699,9 @@ void shtns_rotation_apply_real(shtns_rot r, cplx* Qlm, cplx* Rlm)
 		const double cb_p1 = (1. + cos_beta)*0.5;
 		const double cb_m1 = (1. - cos_beta)*0.5;
 
+		const double m0_renorm = r->m0_renorm;
+		const double m0_renorm_1 = 1.0 / m0_renorm;
+
 		const cplx eia = r->eia;
 		const cplx eig = r->eig;
 
@@ -1645,7 +1718,7 @@ void shtns_rotation_apply_real(shtns_rot r, cplx* Qlm, cplx* Rlm)
 
 			// gather all m's for given l of source array:
 			long lm = l;
-			ql[0] = creal(Qlm[lm]);			// m=0
+			ql[0] = creal(Qlm[lm]) * m0_renorm;			// m=0
 			if (flag_ag & 1) {		// pre-rotate along Z-axis
 				cplx eima = eia;
 				for (int m=1; m<=mlim; m++) {
@@ -1854,7 +1927,7 @@ void shtns_rotation_apply_real(shtns_rot r, cplx* Qlm, cplx* Rlm)
 
 			// scatter all m's for current l into dest array:
 			lm = l;
-			Rlm[lm] = creal(rl[0]);			// m=0
+			Rlm[lm] = creal(rl[0]) * m0_renorm_1;			// m=0
 			if (flag_ag & 2) {		// post-rotate along Z-axis
 				cplx eimg = eig;
 				for (int m=1; m<=mlim; m++) {

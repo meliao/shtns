@@ -164,7 +164,7 @@ extern shtns_cfg sht_data;
 #endif
 
 // Fortran API : Call from fortran without the trailing '_'
-//@{
+///@{
 
 	// regular
 /// \ingroup fortapi
@@ -302,5 +302,5 @@ void shtns_sph_to_spat_ml_(int *im, cplx *Slm, cplx *Vt, cplx *Vp, int *ltr) {
 }
 
 
-//@}
+///@}
 #endif

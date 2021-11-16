@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2010-2020 Centre National de la Recherche Scientifique.
+ * Copyright (c) 2010-2021 Centre National de la Recherche Scientifique.
  * written by Nathanael Schaeffer (CNRS, ISTerre, Grenoble, France).
  * 
  * nathanael.schaeffer@univ-grenoble-alpes.fr
@@ -345,14 +345,13 @@ V		}
 		l = shtns->tm[im];
 		l = ((unsigned) l) / VSIZE2;
 		#ifndef SHTNS4MAGIC
-Q		 	zero_poles2_vect(BrF, NLAT-l, 2*l);
-V		 	zero_poles4_vect(BtF, NLAT-l, BpF-BtF, 2*l);
+Q		 	zero_poles2_vect(BrF, NLAT-l*VSIZE2, 2*l);
+V		 	zero_poles4_vect(BtF, NLAT-l*VSIZE2, BpF-BtF, 2*l);
 		#else
 Q			#pragma omp simd
 Q			for (k=0; k<l*4*VSIZE2; k++)	((double*)BrF)[k] = 0.0;
 V			zero_poles2_vect(BtF, BpF-BtF, 4*l);
 		#endif
-
 		k = l;
 		do {
 			al = alm;
@@ -405,7 +404,8 @@ V				poi[j] = vall(0.0);		ter[j] = vall(0.0);
 V				toi[j] = vall(0.0);		per[j] = vall(0.0);
 			}
 			l=m;		al+=2;
-			while ((ny<0) && (l<llim)) {		// ylm treated as zero and ignored if ny < 0
+		  if (ny<0) {
+			while (l<llim) {		// ylm treated as zero and ignored if ny < 0
 				for (int j=0; j<NWAY; ++j) {
 					y0[j] = (vall(al[1])*cost[j])*y1[j] + vall(al[0])*y0[j];
 				}
@@ -414,13 +414,14 @@ V				toi[j] = vall(0.0);		per[j] = vall(0.0);
 				}
 				l+=2;	al+=4;
 				if (fabs(vlo(y0[NWAY-1])) > SHT_ACCURACY*SHT_SCALE_FACTOR + 1.0) {		// rescale when value is significant
-					++ny;
 					for (int j=0; j<NWAY; ++j) {
 						y0[j] *= vall(1.0/SHT_SCALE_FACTOR);		y1[j] *= vall(1.0/SHT_SCALE_FACTOR);
 					}
+					if (++ny == 0) break;
 				}
 			}
-		  if (ny == 0) {
+		  }
+		  if LIKELY(ny == 0) {
 			while (l<llim) {	// compute even and odd parts
 Q				for (int j=0; j<NWAY; ++j) {	rer[j] += y0[j]  * qr(l);		rei[j] += y0[j] * qi(l);	}
 V				for (int j=0; j<NWAY; ++j) {	ter[j] += y0[j]  * vr(l);		tei[j] += y0[j] * vi(l);	}

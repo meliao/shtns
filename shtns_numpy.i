@@ -38,6 +38,7 @@
 #include <numpy/arrayobject.h>
 #include "sht_private.h"
 
+
 // variables used for exception handling.
 static int shtns_error = 0;
 static char* shtns_err_msg;
@@ -109,6 +110,10 @@ inline static PyObject* SpatArray_New(int size) {
 
 %}
 
+%inline{
+const char __version__[] = SHTNS_VER;		// defines a __version__ attribute
+}
+
 // main object is renamed to sht.
 %rename("sht") shtns_info;
 %ignore SHT_NATIVE_LAYOUT;
@@ -118,12 +123,28 @@ inline static PyObject* SpatArray_New(int size) {
 %ignore ct;
 %ignore st;
 
+// shtns_rot_ is renamed to "rotation"
+%rename("rotation") shtns_rot_;
+%ignore flag_alpha_gamma;
+%ignore cos_beta;
+%ignore sin_beta;
+%ignore sht;
+
+%rename(build_info) shtns_get_build_info;
 %rename(print_version) shtns_print_version;
 %rename(set_verbosity) shtns_verbose;
 
 %feature("autodoc");
 %include "shtns.h"
 %include "exception.i"
+
+struct shtns_rot_ {		// describe a rotation matrix
+	const shtns_cfg sht;
+	const int lmax, mmax;
+	const int flag_alpha_gamma;
+	const double cos_beta, sin_beta;
+	const double alpha, beta, gamma; 	// Euler angles, in ZYZ convention
+};
 
 
 %extend shtns_info {
@@ -181,19 +202,22 @@ inline static PyObject* SpatArray_New(int size) {
 	%apply int *OUTPUT { int *nlat_out };
 	%apply int *OUTPUT { int *nphi_out };
 	%feature("kwargs") set_grid;
-	void set_grid(int nlat=0, int nphi=0, int flags=sht_quick_init, double polar_opt=1.0e-8, int nl_order=1, int *nlat_out, int *nphi_out) {	// default arguments
+	void set_grid(int nlat=0, int nphi=0, int flags=sht_quick_init, double polar_opt=1.0e-10, int nl_order=1, int *nlat_out, int *nphi_out) {	// default arguments
 		if (nlat != 0) {
 			if (nlat <= $self->lmax) {	// nlat too small
 				throw_exception(SWIG_ValueError,1,"nlat <= lmax");		return;
-			}
-			if (nlat & 1) {		// nlat must be even
-				throw_exception(SWIG_ValueError,1,"nlat must be even");		return;
 			}
 		}
 		if ((nphi != 0) && (nphi <= $self->mmax *2)) {		// nphi too small
 			throw_exception(SWIG_ValueError,2,"nphi <= 2*mmax");	return;
 		}
 		if (!(flags & SHT_THETA_CONTIGUOUS))  flags |= SHT_PHI_CONTIGUOUS;	// default to SHT_PHI_CONTIGUOUS.
+		int grd = flags & 255;
+		// avoid slow initialization (which sometimes hangs with python)
+		if ((grd == sht_auto) || (grd == sht_gauss_fly) || (grd == sht_gauss)) {
+			grd = sht_quick_init;
+		} else if (grd == sht_reg_dct) grd = sht_reg_fast;
+		flags = (flags &~ 255) | grd;
 		*nlat_out = nlat;		*nphi_out = nphi;
 		shtns_set_grid_auto($self, flags, polar_opt, nl_order, nlat_out, nphi_out);
 	}
@@ -540,9 +564,19 @@ inline static PyObject* SpatArray_New(int size) {
 	%}
 
 	/* local evaluations */
+	%feature("autodoc", "evaluate spherical harmonic expansion Qlm of a real-valued scalar field at point given by cost=cos(theta) and phi.") SH_to_point;
 	double SH_to_point(PyObject *Qlm, double cost, double phi) {
 		if (check_spectral(1,Qlm, $self->nlm))	return SH_to_point($self, PyArray_Data(Qlm), cost, phi);
 		return 0.0;
+	}
+	%feature("autodoc", "evaluate spherical harmonic expansion alm of a complex-valued scalar field at point given by cost=cos(theta) and phi.") SH_to_point_cplx;
+	PyObject* SH_to_point_cplx(PyObject *alm, double cost, double phi) {
+		PyObject* obj;
+		int n = $self->lmax + 1;
+		cplx a = 0.0;
+		if (check_spectral(1,alm, n*n))	a = SH_to_point_cplx($self, PyArray_Data(alm), cost, phi);
+		obj = PyComplex_FromDoubles(creal(a), cimag(a));
+		return obj;
 	}
 	%apply double *OUTPUT { double *vr };
 	%apply double *OUTPUT { double *vt };
@@ -670,3 +704,72 @@ inline static PyObject* SpatArray_New(int size) {
 	}
 
 };
+
+
+%extend shtns_rot_ {
+	%exception {
+		shtns_error = 0;	// clear exception
+		$function
+		if (shtns_error) {	// test for exception
+			SWIG_exception(shtns_error, shtns_err_msg);		return NULL;
+		}
+	}
+
+	%feature("kwargs") shtns_rot_;
+	shtns_rot_(int lmax, int mmax=-1, int norm=0) {	// default arguments : mmax, norm
+		if (lmax < 2) {
+			throw_exception(SWIG_ValueError,1,"lmax < 2 not allowed");	return NULL;
+		}
+		if (mmax < 0) mmax = lmax;		// default mmax
+		if (mmax > lmax) {
+			throw_exception(SWIG_ValueError,1,"lmax < mmax invalid");	return NULL;
+		}
+		return shtns_rotation_create(lmax, mmax, norm);
+	}
+
+	~shtns_rot_() {
+		shtns_rotation_destroy($self);		// free memory.
+	}
+
+	%feature("autodoc", "define a rotation with the 3 intrinsic Euler angles (radians) using ZYZ convention.") set_angles_ZYZ;
+	void set_angles_ZYZ(double alpha, double beta, double gamma) {
+		if (fabs(beta) > M_PI) {
+			throw_exception(SWIG_ValueError,2,"beta must be between -pi and pi");	return;
+		}
+		shtns_rotation_set_angles_ZYZ($self, alpha, beta, gamma);
+	}
+	%feature("autodoc", "define a rotation with the 3 intrinsic Euler angles (radians) using ZXZ convention.") set_angles_ZXZ;
+	void set_angles_ZXZ(double alpha, double beta, double gamma) {
+		if (fabs(beta) > M_PI) {
+			throw_exception(SWIG_ValueError,2,"beta must be between -pi and pi");	return;
+		}
+		shtns_rotation_set_angles_ZXZ($self, alpha, beta, gamma);
+	}
+	%feature("autodoc", "define a rotation along axis of cartesian coorinates (Vx,Vy,Vz) and of angle theta (radians).") set_angle_axis;
+	void set_angle_axis(double theta, double Vx, double Vy, double Vz) {
+		shtns_rotation_set_angle_axis($self, theta, Vx, Vy, Vz);
+	}
+	%feature("autodoc", "get the Wigner d-matrix associated with rotation around Y axis (in ZYZ Euler angle convention and for orthonormal harmonics).") wigner_d_matrix;
+	PyObject* wigner_d_matrix(const int l) {
+		if ((l<0) || (l > $self->lmax)) {
+			throw_exception(SWIG_ValueError,1,"l must be between 0 and lmax");	return NULL;
+		}
+		npy_intp dims[2] = {2*l+1, 2*l+1};
+		PyObject *mx = PyArray_New(&PyArray_Type, 2, &dims[0], NPY_DOUBLE, NULL, NULL, sizeof(double), 0, NULL);
+		shtns_rotation_wigner_d_matrix($self, l, PyArray_Data(mx));
+		return mx;
+	}
+	%feature("autodoc", "apply a rotation (previously defined by set_angles_ZYZ(), set_angles_ZXZ() or set_angle_axis()) to a spherical harmonic expansion of a real field with 'orthonormal' convention.") apply_real;
+	PyObject* apply_real(PyObject* Qlm) {
+		PyObject *Rlm = SpecArray_New(nlm_calc($self->lmax, $self->mmax, 1));
+		shtns_rotation_apply_real($self, PyArray_Data(Qlm), PyArray_Data(Rlm));
+		return Rlm;
+	}
+	%feature("autodoc", "apply a rotation (previously defined by set_angles_ZYZ(), set_angles_ZXZ() or set_angle_axis()) to a spherical harmonic expansion of a complex-valued field with 'orthonormal' convention.") apply_cplx;
+	PyObject* apply_cplx(PyObject* Qlm) {
+		PyObject *Rlm = SpecArray_New(nlm_cplx_calc($self->lmax, $self->mmax, 1));
+		shtns_rotation_apply_cplx($self, PyArray_Data(Qlm), PyArray_Data(Rlm));
+		return Rlm;
+	}
+};
+

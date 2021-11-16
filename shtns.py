@@ -141,8 +141,8 @@ class sht(object):
 
     __swig_destroy__ = _shtns.delete_sht
 
-    def set_grid(self, nlat=0, nphi=0, flags=sht_quick_init, polar_opt=1.0e-8, nl_order=1):
-        r"""set_grid(sht self, int nlat=0, int nphi=0, int flags=sht_quick_init, double polar_opt=1.0e-8, int nl_order=1)"""
+    def set_grid(self, nlat=0, nphi=0, flags=sht_quick_init, polar_opt=1.0e-10, nl_order=1):
+        r"""set_grid(sht self, int nlat=0, int nphi=0, int flags=sht_quick_init, double polar_opt=1.0e-10, int nl_order=1)"""
         val = _shtns.sht_set_grid(self, nlat, nphi, flags, polar_opt, nl_order)
 
         		## array giving the cosine of the colatitude for the grid.
@@ -447,8 +447,12 @@ class sht(object):
 
 
     def SH_to_point(self, Qlm, cost, phi):
-        r"""SH_to_point(sht self, PyObject * Qlm, double cost, double phi) -> double"""
+        r"""evaluate spherical harmonic expansion Qlm of a real-valued scalar field at point given by cost=cos(theta) and phi."""
         return _shtns.sht_SH_to_point(self, Qlm, cost, phi)
+
+    def SH_to_point_cplx(self, alm, cost, phi):
+        r"""evaluate spherical harmonic expansion alm of a complex-valued scalar field at point given by cost=cos(theta) and phi."""
+        return _shtns.sht_SH_to_point_cplx(self, alm, cost, phi)
 
     def SH_to_grad_point(self, DrSlm, Slm, cost, phi):
         r"""SH_to_grad_point(sht self, PyObject * DrSlm, PyObject * Slm, double cost, double phi)"""
@@ -520,6 +524,8 @@ class sht(object):
 
 # Register sht in _shtns:
 _shtns.sht_swigregister(sht)
+cvar = _shtns.cvar
+__version__ = cvar.__version__
 
 
 def nlm_calc(lmax, mmax, mres):
@@ -537,5 +543,52 @@ def set_verbosity(arg1):
 def print_version():
     r"""print_version()"""
     return _shtns.print_version()
+
+def build_info():
+    r"""build_info() -> char const *"""
+    return _shtns.build_info()
+class rotation(object):
+    r"""Proxy of C shtns_rot_ struct."""
+
+    thisown = property(lambda x: x.this.own(), lambda x, v: x.this.own(v), doc="The membership flag")
+    __repr__ = _swig_repr
+    lmax = property(_shtns.rotation_lmax_get, doc=r"""lmax : q(const).int""")
+    mmax = property(_shtns.rotation_mmax_get, doc=r"""mmax : q(const).int""")
+    alpha = property(_shtns.rotation_alpha_get, doc=r"""alpha : q(const).double""")
+    beta = property(_shtns.rotation_beta_get, doc=r"""beta : q(const).double""")
+    gamma = property(_shtns.rotation_gamma_get, doc=r"""gamma : q(const).double""")
+
+    def __init__(self, lmax, mmax=-1, norm=0):
+        r"""__init__(rotation self, int lmax, int mmax=-1, int norm=0) -> rotation"""
+        _shtns.rotation_swiginit(self, _shtns.new_rotation(lmax, mmax, norm))
+    __swig_destroy__ = _shtns.delete_rotation
+
+    def set_angles_ZYZ(self, alpha, beta, gamma):
+        r"""define a rotation with the 3 intrinsic Euler angles (radians) using ZYZ convention."""
+        return _shtns.rotation_set_angles_ZYZ(self, alpha, beta, gamma)
+
+    def set_angles_ZXZ(self, alpha, beta, gamma):
+        r"""define a rotation with the 3 intrinsic Euler angles (radians) using ZXZ convention."""
+        return _shtns.rotation_set_angles_ZXZ(self, alpha, beta, gamma)
+
+    def set_angle_axis(self, theta, Vx, Vy, Vz):
+        r"""define a rotation along axis of cartesian coorinates (Vx,Vy,Vz) and of angle theta (radians)."""
+        return _shtns.rotation_set_angle_axis(self, theta, Vx, Vy, Vz)
+
+    def wigner_d_matrix(self, l):
+        r"""get the Wigner d-matrix associated with rotation around Y axis (in ZYZ Euler angle convention and for orthonormal harmonics)."""
+        return _shtns.rotation_wigner_d_matrix(self, l)
+
+    def apply_real(self, Qlm):
+        r"""apply a rotation (previously defined by set_angles_ZYZ(), set_angles_ZXZ() or set_angle_axis()) to a spherical harmonic expansion of a real field with 'orthonormal' convention."""
+        return _shtns.rotation_apply_real(self, Qlm)
+
+    def apply_cplx(self, Qlm):
+        r"""apply a rotation (previously defined by set_angles_ZYZ(), set_angles_ZXZ() or set_angle_axis()) to a spherical harmonic expansion of a complex-valued field with 'orthonormal' convention."""
+        return _shtns.rotation_apply_cplx(self, Qlm)
+
+# Register rotation in _shtns:
+_shtns.rotation_swigregister(rotation)
+
 
 

@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2010-2020 Centre National de la Recherche Scientifique.
+ * Copyright (c) 2010-2021 Centre National de la Recherche Scientifique.
  * written by Nathanael Schaeffer (CNRS, ISTerre, Grenoble, France).
  * 
  * nathanael.schaeffer@univ-grenoble-alpes.fr
@@ -184,6 +184,9 @@ struct shtns_info {		// MUST start with "int nlm;"
 	size_t nlm_stride, spat_stride;
 	cudaStream_t xfer_stream, comp_stream;		// the cuda streams
 	cufftHandle cufft_plan;						// the cufft Handle
+	cufftHandle cufft_plan_float;						// the cufft Handle single precision
+	float* d_alm_f;
+	float* d_ct_f;
 	#endif
 	#ifdef VKFFT_BACKEND
 		VkFFTApplication vkfft_plan;
@@ -197,6 +200,19 @@ struct shtns_info {		// MUST start with "int nlm;"
 	double Y00_1, Y10_ct, Y11_st;
 	shtns_cfg next;		// pointer to next sht_setup or NULL (records a chained list of SHT setup).
 	// the end should be aligned on the size of int, to allow the storage of small arrays.
+};
+
+struct shtns_rot_ {		// describe a rotation matrix
+	shtns_cfg sht;
+	int lmax, mmax;
+	int flag_alpha_gamma;
+	double no_cs_phase;			// +1 or -1 depending on Condon-Shortley phase.
+	double cos_beta, sin_beta;
+	double alpha, beta, gamma; 	// Euler angles, in ZYZ convention
+	double* plm_beta;
+	double m0_renorm;
+	cplx eia;
+	cplx eig;
 };
 
 // define shortcuts to sizes.

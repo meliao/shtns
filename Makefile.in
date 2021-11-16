@@ -3,15 +3,17 @@ PREFIX=@prefix@
 SED=@SED@
 LIBS=@LIBS@
 PYTHON=@PYTHON@
+shtns_ver := $(shell grep -m 1 -e "^* v" CHANGELOG.md | sed -e "s/^* v\([^ ]*\).*/-DSHTNS_VER=\\\\\"\1\\\\\"/")
+git_id := $(shell git describe --tags --always --dirty=*)
 
 # compiler command with options for the sht codelets
 shtcc=@CC2@ @CFLAGS2@ -D_GNU_SOURCE
 # compiler command with options for other source (initialization, ...)
-cc=@CC@ @CFLAGS@ -D_GNU_SOURCE @LDFLAGS@
+cc=@CC@ @CFLAGS@ -D_GNU_SOURCE -DSHTNS_GIT=\"$(git_id)\" $(shtns_ver) @LDFLAGS@
 fc=@FC@ @FFLAGS@ @LDFLAGS@
 
 hfiles = sht_private.h sht_config.h shtns.h shtns_simd.h
-objs = sht_init.o sht_kernels_a.o sht_kernels_s.o @objs@
+objs = sht_init.o sht_kernels_a.o sht_kernels_s.o sht_odd_nlat.o @objs@
 libname = @libname@
 
 default : @target@
@@ -63,6 +65,8 @@ SHT/spat_to_SH_kernel.c : SHT/kernel_spat_to_SH.gen.c
 sht_init.o : sht_init.c Makefile sht_legendre.c sht_func.c sht_com.c $(hfiles)
 	$(cc) -c $< -o $@
 
+sht_odd_nlat.o : sht_odd_nlat.c Makefile sht_private.h
+	$(cc) -c $< -o $@
 sht_fly.o : sht_fly.c Makefile $(hfiles) SHT/SH_to_spat_fly.c SHT/spat_to_SH_fly.c
 	$(cc) -c $< -o $@
 sht_omp.o : sht_omp.c Makefile $(hfiles) SHT/SH_to_spat_omp.c SHT/spat_to_SH_omp.c
@@ -96,7 +100,7 @@ wigner : examples/wigner.c $(libname) shtns.h
 
 #documentation :
 docs :
-	( cat doc/doxygen.conf ; echo "PROJECT_NUMBER=@PACKAGE_VERSION@" ) | doxygen -
+	( cat doc/doxygen.conf ; grep -m 1 -e "^* v" CHANGELOG.md | sed -e "s/^* v\([^ ]*\).*/PROJECT_NUMBER=\1/" ) | doxygen -
 
 clean :
 	$(MAKE) clean -C SHT

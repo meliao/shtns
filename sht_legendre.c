@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2010-2018 Centre National de la Recherche Scientifique.
+ * Copyright (c) 2010-2021 Centre National de la Recherche Scientifique.
  * written by Nathanael Schaeffer (CNRS, ISTerre, Grenoble, France).
  * 
  * nathanael.schaeffer@univ-grenoble-alpes.fr
@@ -85,7 +85,7 @@ static real a_sint_pow_n_hp(real val, real cost, long int n)
 	if (sizeof(s2) > 8) k = 0;		// enough accuracy, we do not bother.
 
 #ifdef LEG_RANGE_CHECK
-	if (s2 < 0) shtns_runerr("sin(t)^2 < 0 !!!");
+	if (s2 < 0) return NAN;		// sin(t)^2 < 0 !
 #endif
 
 	if (n&1) val *= SQRT(s2);	// = sin(t)
@@ -104,21 +104,20 @@ static real a_sint_pow_n_hp(real val, real cost, long int n)
 #endif
 
 
-/// \internal computes val.sin(t)^n from cos(t). ie returns val.(1-x^2)^(n/2), with x = cos(t)
-/// assumes: -1 <= cost <= 1, n>=0, and nval<=0 is the extended exponent associated to val.
-/// updates nval, and returns val such as the result is val.SHT_SCALE_FACTOR^(nval)
-static double a_sint_pow_n_ext(double val, double cost, int n, int *nval)
+/// \internal computes sin(t)^n from cos(t). ie returns (1-x^2)^(n/2), with x = cos(t)
+/// assumes: -1 <= cost <= 1, n>=0.
+/// writes nval, and returns val such as the result is val.SHT_SCALE_FACTOR^(nval)
+static double sint_pow_n_ext(double cost, int n, int *nval)
 {
 	double s2 = (1.-cost)*(1.+cost);		// sin(t)^2 = 1 - cos(t)^2 >= 0
-	double val0 = val;		// store sign
 	int ns2 = 0;
-	int nv = *nval;
+	int nv = 0;
 
 #ifdef LEG_RANGE_CHECK
-	if (s2 < 0) shtns_runerr("sin(t)^2 < 0 !!!");
+	if (s2 < 0) return NAN;		// sin(t)^2 < 0 !!!
 #endif
 
-	val = fabs(val);		// val >= 0
+	double val = 1.0;		// val >= 0
 	if (n&1) val *= sqrt(s2);	// = sin(t)
 	while (n >>= 1) {
 		if (n&1) {
@@ -135,13 +134,12 @@ static double a_sint_pow_n_ext(double val, double cost, int n, int *nval)
 	while ((nv < 0) && (val > 1.0/SHT_SCALE_FACTOR)) {	// try to minimize |nv|
 		++nv;	val *= 1.0/SHT_SCALE_FACTOR;
 	}
-	if (val0 < 0) val *= -1.0;		// restore sign.
 	*nval = nv;
 	return val;		// 1/S^2 < val < 1
 }
 
 
-/// \internal Returns the value of a legendre polynomial of degree l and order im*MRES, noramalized for spherical harmonics, using recurrence.
+/// \internal Returns the value of a legendre polynomial of degree l and order im*MRES, normalized for spherical harmonics, using recurrence.
 /// Requires a previous call to \ref legendre_precomp().
 /// Output compatible with the GSL function gsl_sf_legendre_sphPlm(l, m, x)
 static double legendre_sphPlm(shtns_cfg shtns, const int l, const int im, const double x)
@@ -158,7 +156,7 @@ static double legendre_sphPlm(shtns_cfg shtns, const int l, const int im, const 
 	ny = 0;
 	al = alm_im(shtns, im);
 	ymm = al[0];
-	if (m>0) ymm = a_sint_pow_n_ext(ymm, x, m, &ny);	// ny <= 0
+	if (m>0) ymm *= sint_pow_n_ext(x, m, &ny);	// ny <= 0
 
 	ymmp1 = ymm;			// l=m
 	if (l == m) goto done;
@@ -236,11 +234,12 @@ done:
 /// Output compatible with the GSL function gsl_sf_legendre_sphPlm_array(lmax, m, x, yl)
 /// \param lmax maximum degree computed, \param im = m/MRES with m the SH order, \param x argument, x=cos(theta).
 /// \param[out] yl is a double array of size (lmax-m+1) filled with the values.
-void legendre_sphPlm_array(shtns_cfg shtns, const int lmax, const int im, const double x, double *yl)
+/// \returns the first degree l of non-zero value.
+int legendre_sphPlm_array(shtns_cfg shtns, const int lmax, const int im, const double x, double *yl)
 {
 	double *al;
-	int l, m, ny;
 	double ymm, ymmp1;
+	int l, m, ny, lnz;
 
 	m = im*MRES;
 #ifdef LEG_RANGE_CHECK
@@ -249,36 +248,50 @@ void legendre_sphPlm_array(shtns_cfg shtns, const int lmax, const int im, const 
 
 	al = alm_im(shtns, im);
 	yl -= m;			// shift pointer
-	for (l=m; l<=lmax; ++l) yl[l] = 0.0;		// zero out array.
+	lnz = m;			// all non-zero a priori
 
 	ny = 0;
 	ymm = al[0];
-	if (m>0) ymm = a_sint_pow_n_ext(ymm, x, m, &ny);	// l=m,  ny <= 0
-	if (ny==0) yl[m] = ymm;
-	if (lmax==m) return;
-
-	ymmp1 = ymm * al[1] * x;		// l=m+1
-	if (ny==0) yl[m+1] = ymmp1;
-	if (lmax==m+1) return;
+	if (m>0) ymm *= sint_pow_n_ext(x, m, &ny);	// l=m,  ny <= 0
 
 	l=m+2;	al+=2;
-	while ((ny < 0) && (l < lmax)) {		// values are negligible => discard.
-		ymm   = al[1]*(x*ymmp1) + al[0]*ymm;
-		ymmp1 = al[3]*(x*ymm)   + al[2]*ymmp1;
-		l+=2;	al+=4;
-		if (fabs(ymm) > 1.0/SHT_SCALE_FACTOR) {		// rescale when value is significant
-			++ny;	ymm *= 1.0/SHT_SCALE_FACTOR;	ymmp1 *= 1.0/SHT_SCALE_FACTOR;
+	if (ny<0) {
+		yl[m] = 0.0;	lnz++;
+		if (lmax==m) return lnz;
+		ymmp1 = ymm * (al[-1] * x);		// l=m+1
+		yl[m+1] = 0.0;	lnz++;
+		if (lmax==m+1) return lnz;
+		while (l < lmax) {		// values are negligible => discard.
+			ymm   = (al[1]*x)*ymmp1 + al[0]*ymm;
+			ymmp1 = (al[3]*x)*ymm   + al[2]*ymmp1;
+			yl[l] = 0.0;	yl[l+1] = 0.0;
+			l+=2;	al+=4;		lnz+=2;
+			if (fabs(ymm) > 1.0) {		// rescale when value is significant
+				ymm *= 1.0/SHT_SCALE_FACTOR;	ymmp1 *= 1.0/SHT_SCALE_FACTOR;
+				if (++ny == 0) goto ny_zero;
+			}
 		}
+		if (l == lmax) {
+			yl[l] = 0.0;	lnz++;
+		}
+		return lnz;
 	}
+	yl[m] = ymm;
+	if (lmax==m) return lnz;
+	ymmp1 = ymm * (al[-1] * x);		// l=m+1
+	yl[m+1] = ymmp1;
+	if (lmax==m+1) return lnz;
+  ny_zero:
 	while (l < lmax) {		// values are unscaled => store
-		ymm   = al[1]*(x*ymmp1) + al[0]*ymm;
-		ymmp1 = al[3]*(x*ymm)   + al[2]*ymmp1;
+		ymm   = (al[1]*x)*ymmp1 + al[0]*ymm;
+		ymmp1 = (al[3]*x)*ymm   + al[2]*ymmp1;
 		yl[l] = ymm;		yl[l+1] = ymmp1;
 		l+=2;	al+=4;
 	}
-	if ((l == lmax) && (ny == 0)) {
-		yl[l] = al[1]*(x*ymmp1) + al[0]*ymm;
+	if (l == lmax) {
+		yl[l] = (al[1]*x)*ymmp1 + (al[0]*ymm);
 	}
+	return lnz;
 }
 
 #if HAVE_LONG_DOUBLE_WIDER
@@ -349,11 +362,12 @@ done:
 /// \param sint = sqrt(1-x^2) to avoid recomputation of sqrt.
 /// \param[out] yl is a double array of size (lmax-m+1) filled with the values (divided by sin(theta) if m>0)
 /// \param[out] dyl is a double array of size (lmax-m+1) filled with the theta-derivatives.
-void legendre_sphPlm_deriv_array(shtns_cfg shtns, const int lmax, const int im, const double x, const double sint, double *yl, double *dyl)
+/// \returns the first degree l of non-zero value.
+int legendre_sphPlm_deriv_array(shtns_cfg shtns, const int lmax, const int im, const double x, const double sint, double *yl, double *dyl)
 {
 	double *al;
-	int l,m, ny;
 	double st, y0, y1, dy0, dy1;
+	int l,m, ny, lnz;
 
 	m = im*MRES;
 #ifdef LEG_RANGE_CHECK
@@ -362,43 +376,50 @@ void legendre_sphPlm_deriv_array(shtns_cfg shtns, const int lmax, const int im, 
 
 	al = alm_im(shtns, im);
 	yl -= m;	dyl -= m;			// shift pointers
-	for (l=m; l<=lmax; ++l) {
-		yl[l] = 0.0;	dyl[l] = 0.0;	// zero out arrays.
-	}
+	lnz = m;			// all non-zero apriori
 
 	ny = 0;
 	st = sint;
 	y0 = al[0];
 	dy0 = 0.0;
 	if (m>0) {
-		y0 = a_sint_pow_n_ext(y0, x, m-1, &ny);
+		y0 *= sint_pow_n_ext(x, m-1, &ny);
 		dy0 = x*m*y0;
 		st *= st;		// st = sin(theta)^2 is used in the recurrence for m>0
 	}
-	if (ny==0) {
-		yl[m] = y0; 	dyl[m] = dy0;		// l=m
-	}
-	if (lmax==m) return;		// done.
-
-	y1 = al[1] * (x * y0);
+	y1 = al[1] * (x * y0);		// l=m+1
 	dy1 = al[1]*( x*dy0 - st*y0 );
-	if (ny == 0) {
-		yl[m+1] = y1; 	dyl[m+1] = dy1;		// l=m+1
-	}
-	if (lmax==m+1) return;		// done.
 
 	l=m+2;	al+=2;
-	while ((ny < 0) && (l < lmax)) {		// values are negligible => discard.
-		y0 = al[1]*(x*y1) + al[0]*y0;
-		dy0 = al[1]*(x*dy1 - y1*st) + al[0]*dy0;
-		y1 = al[3]*(x*y0) + al[2]*y1;
-		dy1 = al[3]*(x*dy0 - y0*st) + al[2]*dy1;
-		l+=2;	al+=4;
-		if (fabs(y0) > 1.0/SHT_SCALE_FACTOR) {		// rescale when value is significant
-			++ny;	y0 *= 1.0/SHT_SCALE_FACTOR;		dy0 *= 1.0/SHT_SCALE_FACTOR;
-					y1 *= 1.0/SHT_SCALE_FACTOR;		dy1 *= 1.0/SHT_SCALE_FACTOR;
+	if (ny<0) {
+		yl[m] = 0.0;	dyl[m] = 0.0;		lnz++;
+		if (lmax==m) return lnz;		// done.
+		yl[m+1] = 0.0;	dyl[m+1] = 0.0;		lnz++;
+		if (lmax==m+1) return lnz;
+		while (l < lmax) {		// values are negligible => discard.
+			y0 = (al[1]*x)*y1 + al[0]*y0;
+			dy0 = al[1]*(x*dy1 - y1*st) + al[0]*dy0;
+			y1 = (al[3]*x)*y0 + al[2]*y1;
+			dy1 = al[3]*(x*dy0 - y0*st) + al[2]*dy1;
+			yl[l] = 0.0;	yl[l+1] = 0.0;
+			dyl[l] = 0.0;	dyl[l+1] = 0.0;
+			l+=2;	al+=4;	lnz+=2;
+			if (fabs(y0) > 1.0) {		// rescale when value is significant
+				y0 *= 1.0/SHT_SCALE_FACTOR;		dy0 *= 1.0/SHT_SCALE_FACTOR;
+				y1 *= 1.0/SHT_SCALE_FACTOR;		dy1 *= 1.0/SHT_SCALE_FACTOR;
+				if (++ny == 0) goto ny_zero;
+			}
 		}
+		if (l == lmax) {
+			yl[l] = 0.0;	dyl[l] = 0.0;	lnz++;
+		}
+		return lnz;
 	}
+	yl[m] = y0; 	dyl[m] = dy0;		// l=m
+	if (lmax==m) return lnz;		// done.
+	yl[m+1] = y1; 	dyl[m+1] = dy1;		// l=m+1
+	if (lmax==m+1) return lnz;		// done.
+  ny_zero:
 	while (l < lmax) {		// values are unscaled => store.
 		y0 = al[1]*(x*y1) + al[0]*y0;
 		dy0 = al[1]*(x*dy1 - y1*st) + al[0]*dy0;
@@ -408,10 +429,11 @@ void legendre_sphPlm_deriv_array(shtns_cfg shtns, const int lmax, const int im, 
 		yl[l+1] = y1;	dyl[l+1] = dy1;
 		l+=2;	al+=4;
 	}
-	if ((l==lmax) && (ny == 0)) {
+	if (l==lmax) {
 		yl[l] = al[1]*(x*y1) + al[0]*y0;
 		dyl[l] = al[1]*(x*dy1 - y1*st) + al[0]*dy0;
 	}
+	return lnz;
 }
 
 #if HAVE_LONG_DOUBLE_WIDER
@@ -526,7 +548,6 @@ static void legendre_sphPlm_deriv_array_equ(shtns_cfg shtns, const int lmax, con
 	}
 }
 
-
 /// \internal Precompute constants for the recursive generation of Legendre associated functions, with given normalization.
 /// this function is called by \ref shtns_set_size, and assumes up-to-date values in \ref shtns.
 /// For the same conventions as GSL, use \c legendre_precomp(sht_orthonormal,1);
@@ -570,12 +591,23 @@ void legendre_precomp(shtns_cfg shtns, enum shtns_norm norm, int with_cs_phase, 
 		alm[0] = SQRT(t1);		/// \f$ Y_0^0 = 1/\sqrt{4\pi} \f$ for orthonormal
 	}
 	t1 *= mpos_renorm;		// renormalization for m>0
+	real e=0.0;
 	for (int im=1, m=0; im<=MMAX; ++im) {
 		while(m<im*MRES) {
 			++m;
-			t1 *= ((real)m + 0.5)/m;	// t1 *= (m+0.5)/m;
+			real x = ((real)m + 0.5)/m;
+		#if HAVE_LONG_DOUBLE_WIDER
+			t1 *= x;	// t1 *= (m+0.5)/m;
+		#else
+			// compensated product algorithm, see Algorithm 3.4 of https://hal.archives-ouvertes.fr/hal-00164607
+			// => gets some extra bits of precision at negligible cost (which is dominated by the division above)
+			real tt = t1*x;
+			real t1e = fma(t1,x,-tt);	// = t1*x -tt  (C99)
+			t1 = tt;
+			e = fma(e,x,t1e);	// = e*x+t1e (C99) => accumulate error
+		#endif
 		}
-		t2 = SQRT(t1);
+		t2 = SQRT(t1+e);
 		if ( m & with_cs_phase ) t2 = -t2;		/// optional \f$ (-1)^m \f$ Condon-Shortley phase.
 		alm_im(shtns, im)[0] = t2;
 	}
@@ -725,85 +757,139 @@ static double legendre_Pl(const int l, double x)
 
 /// \internal Generates the abscissa and weights for a Gauss-Legendre quadrature.
 /// Newton method from initial Guess to find the zeros of the Legendre Polynome
-/// \param x = abscissa, \param w = weights, \param n points.
+/// \param x = abscissa, \param st = sin(theta)=sqrt(1-x*x), \param w = weights, \param n points.
 /// \note Reference:  Numerical Recipes, Cornell press.
-static void gauss_nodes(real *x, real *w, const int n)
+void gauss_nodes(double *x, double* st, double *w, const int n)
 {
-	long int i,l,m, k;
-	real z, z1, p1, p2, p3, pp;
-	real eps;
+	double eps = 2.3e-16;		// desired precision, minimum = 2.2204e-16 (double)
+	if ((sizeof(real) > 8) && (long_double_caps > 1))	eps = 1.1e-19;		// desired precision, minimum = 1.0842e-19 (long double i387)
 
-	eps = 2.3e-16;		// desired precision, minimum = 2.2204e-16 (double)
-	if ((sizeof(eps) > 8) && (long_double_caps > 1))	eps = 1.1e-19;		// desired precision, minimum = 1.0842e-19 (long double i387)
-
-	m = (n+1)/2;
-	for (i=1;i<=m;++i) {
-		k=10;		// maximum Newton iteration count to prevent infinite loop.
-		p1 = M_PIl;		p2 = 2*n;
-		z = (1.0 - (n-1)/(p2*p2*p2)) * COS((p1*(4*i-1))/(4*n+2));	// initial guess
+	const long m = n/2;
+	#pragma omp parallel for
+	for (long i=0;i<m;++i) {
+		real z, z1, pp, p2, p1;
+		int k=10;		// maximum Newton iteration count to prevent infinite loop.
+		z = (1.0 - (n-1.)/(8.*n*n*n)) * cos((M_PI*(4*i+3))/(4*n+2));	// initial guess
 		do {
-			p1 = z;		// P_1
+			p1 = z;	// P_1
 			p2 = 1.0;	// P_0
-			for(l=2;l<=n;++l) {		 // recurrence : l P_l = (2l-1) z P_{l-1} - (l-1) P_{l-2}	(works ok up to l=100000)
-				p3 = p2;
+			for(long l=2;l<=n;++l) {		 // recurrence : l P_l = (2l-1) z P_{l-1} - (l-1) P_{l-2}	(works ok up to l=100000)
+				real p3 = p2;
 				p2 = p1;
 				p1 = ((2*l-1)*z*p2 - (l-1)*p3)/l;		// The Legendre polynomial...
 			}
-			pp = ((1.-z)*(1.+z))/(n*(p2-z*p1));			// ... and its inverse derivative.
+			pp = n*(p2-z*p1);			// ... and its (almost) derivative.
 			z1 = z;
-			z -= p1*pp;		// Newton's method
-		} while (( FABS(z-z1) > (z1+z)*0.5*eps ) && (--k > 0));
-		x[i-1] = z;		// Build up the abscissas.
-		w[i-1] = 2.0*pp*pp/((1.-z)*(1.+z));		// Build up the weights.
-		x[n-i] = -z;
-		w[n-i] = w[i-1];
+			z -= p1*(1.-z*z)/pp;		// Newton's method
+		} while (( fabs(z-z1) > ((double)(z1+z))*0.5*eps ) && (--k > 0));
+		if (k==0) printf("i=%ld, k=%d, z=%g, z1=%g, abs(z-z1)=%g, err=%g\n",i,k, (double) z, (double) z1, fabs(z-z1), 2*fabs(z-z1)/((double)(z1+z)) );
+		real s2 = 1.-z*z;
+		x[i] = z;		// Build up the abscissas.
+		x[n-1-i] = -z;
+		w[i] = 2.0*s2/(pp*pp);		// Build up the weights.
+		w[n-1-i] = w[i];
+		st[i] = SQRT(s2);
+		st[n-1-i] = st[i];
+		if (eps < 1e-16) printf("i=%ld, sin(theta)=%g, sqrt(1-z2)=%g, err=%g\n", i, st[i], sqrt(1.-x[i]*x[i]), (st[i] - sqrt(1.-x[i]*x[i]))/st[i] );
 	}
-	if (n&1) x[n/2] = 0.0;		// exactly zero.
-
-#if SHT_VERBOSE > 1
-// test integral to compute :
-	if (verbose) {
-		z = 0;
-		for (i=0;i<m;++i) {
-			z += w[i]*x[i]*x[i];
-		}
-		#ifndef HAVE_LONG_DOUBLE_WIDER
-			printf("          Gauss quadrature for 3/2.x^2 = %g (should be 1.0) error = %g\n",z*3.,z*3.-1.0);
-		#else
-			printf("          Gauss quadrature for 3/2.x^2 = %Lg (should be 1.0) error = %Lg\n",z*3.,z*3.-1.0);
-		#endif
+	if (n&1) {
+		x[n/2]  = 0.0;		// exactly zero.
+		st[n/2] = 1.0;
+			real p2 = 1.0;	// P_0
+			for(long l=2;l<=n;l+=2) {		 // recurrence : l P_l = (2l-1) z P_{l-1} - (l-1) P_{l-2}	(works ok up to l=100000)
+				p2 *= (1.0-l)/l;		// The Legendre polynomial...
+			}
+			real pp = 1./(n*p2);			// ... and its inverse derivative.
+		w[n/2] = 2.0*pp*pp;
 	}
-#endif
 
-// as we started with initial guesses, we should check if the gauss points are actually unique.
-	for (i=m-1; i>0; i--) {
-		if (((double) x[i]) == ((double) x[i-1])) shtns_runerr("bad gauss points");
+// as we started with initial guesses, we should check if the gauss points are actually unique and ordered.
+	for (long i=m-1; i>0; i--) {
+		if (((double) x[i]) >= ((double) x[i-1])) shtns_runerr("bad gauss points");
 	}
 }
+
+/// Accurate evalutation of Nth-root of unity
+/// Expect 0 <= k <= n.  (use k=k%n to enforce)
+/// Should work well up to n = 2^48.
+cplx exp_2IpiK_N_accurate(long k, long n)
+{
+	// range reduction to 0..2*pi
+	//if ((unsigned) k > n)	k = k % n;		// k modulo n.
+	// range reduction from 0..2*pi to 0..pi/4
+	int quadrant = 0;	// record the quadrant of the result
+	// from 0..2pi to 0..pi
+	if (2*k > n) {
+		quadrant |= 1;	// change sign of sin
+		k = n-k;
+	}
+	// from 0..pi to 0..pi/2
+	if (4*k > n) {
+		quadrant |= 2;	// change sign of cos
+		k = n - 2*k;
+		n *= 2;
+	}
+	// from 0..pi/2 to 0..pi/4
+	if (8*k > n) {		// exchange sin and cos
+		quadrant |= 4;
+		k = n - 4*k;
+		n *= 4;
+	}
+	double c = 1.0;
+	double s = 0.0;
+	if (k != 0) {
+		if (8*k == n) {		// special value for pi/4
+			c = s = sqrt(0.5);
+		} else if (12*k == n) {		// special value for pi/6
+			c = sqrt(3)*0.5;
+			s = 0.5;
+		} else {
+			// use extra precision here, to get accurate double values in the end.
+			long double x = ((long double)(2*k)/n) * M_PIl;		// x should be:  0 <= x <= pi/4
+			c = cosl(x);
+			s = sinl(x);
+		}
+	}
+	if (quadrant & 4) {
+		double t = c;	c = s;	s = t;		// exchange sin and cos
+	}
+	if (quadrant & 2) c = -c;
+	if (quadrant & 1) s = -s;
+	return c + I*s;
+}
+
 
 /// \internal Generates the abscissa and weights for a Féjer quadrature (#1).
 /// Compute weights via FFT
 /// \param x = abscissa, \param w = weights, \param n points.
 /// \note Reference: Waldvogel (2006) "Fast Construction of the Fejér and Clenshaw-Curtis Quadrature Rules"
 /// requires n > 2*lmax
-static void fejer1_nodes(real *x, real *w, const int n)
+static void fejer1_nodes(double *x, double *st, double *w, const int n)
 {
 	fftw_plan ifft;
 	double* wf = (double*) malloc( (2*n+2) * sizeof(double) );
 	cplx* v1 = (cplx*) (wf + n);
 
 	// the nodes
-	for (int i=0; i<n; i++) {
-		x[i] = cos(M_PI*(0.5+i)/n);
+	for (int i=0; i<(n+1)/2; i++) {
+		cplx cs = exp_2IpiK_N_accurate(2*i+1, 4*n);
+		if (fabs(creal(cs) - cos(M_PI*(0.5+i)/n)) > 1e-15) printf("BAD POINTS\n");
+		x[i]      =  creal(cs);		// cos(M_PI*(0.5+i)/n);
+		x[n-1-i]  = -creal(cs);
+		st[i]     =  cimag(cs);
+		st[n-1-i] =  cimag(cs);
 	}
 
 	// the weights
-	for (int k=0; k<n/2+1; k++) {
-		double t = (M_PI*k)/n;
-		v1[k] = (cos(t) + I*sin(t)) * 2.0/(1.0 - 4.0*k*k);
-	}
-
 	ifft = fftw_plan_dft_c2r_1d(n, v1, wf, FFTW_ESTIMATE);
+	for (int k=0; k<n/2+1; k++) {
+		cplx cs = exp_2IpiK_N_accurate(k, 2*n);
+		double t = (M_PI*k)/n;	// 2*M_PI*k/(2*n)
+		if (cabs(cos(t) + I*sin(t) - cs) > 1e-15) printf("BAD WEIGHTS\n");
+		//v1[k] = (cos(t) + I*sin(t)) * 2.0/(1.0 - 4.0*k*k);
+		v1[k] = cs * 2.0/(1.0 - 4.0*k*k);
+	}
+	if ((n&1) == 0) v1[n/2] = 0;
 	fftw_execute_dft_c2r(ifft,v1,wf);
 
 	for (int k=0; k<n; k++)
@@ -813,23 +899,30 @@ static void fejer1_nodes(real *x, real *w, const int n)
 	free(wf);
 }
 
-static void clenshaw_curtis_nodes(real *x, real *w, const int n)
+static void clenshaw_curtis_nodes(double *x, double* st, double *w, const int n)
 {
 	fftw_plan ifft;
-	double* wf = (double*) malloc( (2*n+2) * sizeof(double) );
-	cplx* v1 = (cplx*) (wf + n);
+	double* wf = (double*) malloc( (2*n+10) * sizeof(double) );
+	cplx* v1 = (cplx*) (wf + n+4);
 
 	// the nodes
 	for (int i=0; i<n; i++) {
-		x[i] = cos((M_PI*i)/(n-1));
+		cplx cs = exp_2IpiK_N_accurate(i, 2*(n-1));
+		if (fabs(creal(cs) - cos((M_PI*i)/(n-1))) > 1e-15) printf("BAD POINTS\n");
+		x[i]  = creal(cs);	// cos((M_PI*i)/(n-1));
+		st[i] = cimag(cs);	// sin((M_PI*i)/(n-1));
 	}
 
 	// the weights
-	for (int k=0; k<(n-1)/2+1; k++) {
-		v1[k] = 2.0/(1.0 - 4.0*k*k);
-	}
-
+	double w0 = 1.0/((n-1)*(n-1)-1 + ((n-1)&1));
 	ifft = fftw_plan_dft_c2r_1d(n-1, v1, wf, FFTW_ESTIMATE);
+	for (int k=0; k<n/2; k++) {
+		v1[k] = 2.0/(1.0 - 4.0*k*k);
+		//v1[k] -= w0;
+	}
+	v1[n/2] = (n-1-3.0)/(2*((n-1)/2)-1) - 1.0;
+	//v1[n/2] += w0 * ((2 - ((n-1)&1))*(n-1)-1);
+
 	fftw_execute_dft_c2r(ifft,v1,wf);
 
 	wf[0] *= 0.5;
@@ -853,6 +946,7 @@ static void fejer2_nodes(real *x, real *w, const int n)
 
 	// the nodes
 	for (int i=0; i<n; i++) {
+		cplx cs = exp_2IpiK_N_accurate(i+1, 2*(n+1));
 		x[i] = cos((M_PI*(i+1))*norm);
 		if (n<=128) printf("%g ",acos(x[i])*180./M_PI);
 	}

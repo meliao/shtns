@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2010-2020 Centre National de la Recherche Scientifique.
+ * Copyright (c) 2010-2021 Centre National de la Recherche Scientifique.
  * written by Nathanael Schaeffer (CNRS, ISTerre, Grenoble, France).
  * 
  * nathanael.schaeffer@univ-grenoble-alpes.fr
@@ -385,7 +385,8 @@ V			l=m-1;
 				y1[j]  = (vall(al[1])*y0[j]) *cost[j];
 			}
 			l=m;	al+=2;
-			while ((ny<0) && (l<llim)) {		// ylm treated as zero and ignored if ny < 0
+		  if (ny<0) {
+			while (l<llim) {		// ylm treated as zero and ignored if ny < 0
 				for (int j=0; j<NWAY; ++j) {
 					y0[j] = vall(al[1])*(cost[j]*y1[j]) + vall(al[0])*y0[j];
 				}
@@ -394,13 +395,14 @@ V			l=m-1;
 				}
 				l+=2;	al+=4;
 				if (fabs(vlo(y0[NWAY-1])) > SHT_ACCURACY*SHT_SCALE_FACTOR + 1.0) {		// rescale when value is significant
-					++ny;
 					for (int j=0; j<NWAY; ++j) {
 						y0[j] *= vall(1.0/SHT_SCALE_FACTOR);		y1[j] *= vall(1.0/SHT_SCALE_FACTOR);
 					}
+					if (++ny == 0) break;
 				}
 			}
-		  if (ny == 0) {
+		  }
+		  if LIKELY(ny == 0) {
 Q			q+=2*(l-m);
 V			v+=4*(l-m);
 			for (int j=0; j<NWAY; ++j) {	// prefetch

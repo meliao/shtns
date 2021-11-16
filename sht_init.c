@@ -30,6 +30,7 @@
 // global variables definitions
 #include "sht_private.h"
 
+#include <time.h>		// for the clock() function
 // cycle counter from FFTW
 #include "fftw3/cycle.h"
 
@@ -60,10 +61,14 @@ void shtns_verbose(int v) {
 #define _SHTNS_ID_ _SIMD_NAME_
 #endif
 
+#ifndef SHTNS_VER
+#define SHTNS_VER PACKAGE_VERSION
+#endif
+
 /// \internal Abort program with error message.
 static void shtns_runerr(const char * error_text)
 {
-	printf("*** [" PACKAGE_NAME "] Run-time error : %s\n",error_text);
+	printf("*** [SHTns] Run-time error : %s\n",error_text);
 	exit(1);
 }
 
@@ -158,14 +163,14 @@ static int fft_int(int n, int fmax)
 */
 
 // sht algorithms (hyb, fly1, ...)
-enum sht_algos { SHT_MEM, SHT_SV,
+enum sht_algos { SHT_ODD, SHT_MEM, SHT_SV,
 	SHT_FLY1, SHT_FLY2, SHT_FLY3, SHT_FLY4, SHT_FLY6, SHT_FLY8,
 	SHT_GPU1, SHT_GPU2, SHT_GPU3, SHT_GPU4,
 	SHT_OMP1, SHT_OMP2, SHT_OMP3, SHT_OMP4, SHT_OMP6, SHT_OMP8,
 	SHT_OMP1A, SHT_OMP2A, SHT_OMP3A, SHT_OMP4A, SHT_OMP6A, SHT_OMP8A,
 	SHT_NALG };
 
-char* sht_name[SHT_NALG] = {"mem", "s+v", "fly1", "fly2", "fly3", "fly4", "fly6", "fly8", "gpu1", "gpu2", "gpu3", "gpu4",
+char* sht_name[SHT_NALG] = {"odd", "mem", "s+v", "fly1", "fly2", "fly3", "fly4", "fly6", "fly8", "gpu1", "gpu2", "gpu3", "gpu4",
 	"omp1a", "omp2a", "omp3a", "omp4a", "omp6a", "omp8a",  "omp1b", "omp2b", "omp3b", "omp4b", "omp6b", "omp8b",   };
 char* sht_type[SHT_NTYP] = {"syn", "ana", "vsy", "van", "gsp", "gto", "v3s", "v3a" };
 char* sht_var[SHT_NVAR] = {"std", "m" };
@@ -174,6 +179,7 @@ int sht_npar[SHT_NTYP] = {2, 2, 4, 4, 3, 3, 6, 6};
 extern void* ffly[6][SHT_NTYP];
 extern void* ffly_m[6][SHT_NTYP];
 extern void* ffly_m0[6][SHT_NTYP];
+extern void* fodd[SHT_NTYP];
 #ifdef _OPENMP
 extern void* fomp_a[6][SHT_NTYP];
 extern void* fomp_b[6][SHT_NTYP];
@@ -193,6 +199,10 @@ static void set_sht_fly(shtns_cfg shtns, int typ_start)
 	for (int it=typ_start; it<SHT_NTYP; it++) {
 		for (int v=0; v<SHT_NVAR; v++)
 			shtns->ftable[v][it] = sht_func[v][algo][it];
+	}
+	if (shtns->nlat & 1) {		// odd nlat handled separately (uses other functions)
+		for (int it=typ_start; it<SHT_NTYP; it++)
+			shtns->ftable[0][it] = fodd[it];
 	}
 }
 
@@ -234,6 +244,7 @@ static void init_sht_array_func(shtns_cfg shtns)
 	sht_func[SHT_STD][SHT_SV][SHT_TYP_3AN] = spat_to_SHqst_2l;
 	sht_func[SHT_M][SHT_SV][SHT_TYP_3SY] = SHqst_to_spat_2ml;
 	sht_func[SHT_M][SHT_SV][SHT_TYP_3AN] = spat_to_SHqst_2ml;
+	memcpy(sht_func[SHT_STD][SHT_ODD], fodd, sizeof(void*)*SHT_NTYP);
 
 	if (shtns->nphi==1) {		// axisymmetric transform requested.
 		for (int j=0; j<=alg_lim; j++) {
@@ -345,13 +356,8 @@ static void planFFT(shtns_cfg shtns, int layout)
 	double cost_fft_ip, cost_fft_oop, cost_ifft_ip, cost_ifft_oop;
 	cplx *ShF;
 	double *Sh;
-	int nfft;
+	const int nfft = NPHI;
 	int theta_inc, phi_inc;
-  #ifdef HAVE_FFTW_COST
-	int in_place = 1;		// try to use in-place real fft.
-  #else
-	int in_place = 0;		// do not try to use in-place real fft if no timing data available.
-  #endif
 	const int howmany = shtns->howmany;
 
 	if (NPHI <= 2*MMAX) shtns_runerr("the sampling condition Nphi > 2*Mmax is not met.");
@@ -362,7 +368,7 @@ static void planFFT(shtns_cfg shtns, int layout)
 			fftw_plan_with_nthreads(omp_threads);
 		} else fftw_plan_with_nthreads(shtns->nthreads);
 	#endif
-	
+
 	// default layout:
 	phi_inc = shtns->nlat * howmany;
 	#ifndef HAVE_LIBCUFFT
@@ -383,72 +389,80 @@ static void planFFT(shtns_cfg shtns, int layout)
 	}
 
 	/* NPHI > 1 */
-	theta_inc=1;  // SHT_NATIVE_LAYOUT is the default.
+	theta_inc=1;	// SHT_NATIVE_LAYOUT is the default.
 	if (layout & SHT_PHI_CONTIGUOUS) {
 		if (howmany != 1) shtns_runerr("batch transform not supported for phi-contiguous layout\n");
 		// shtns->howmany MUST be 1!
 		phi_inc=1;  theta_inc=NPHI;
-		in_place = 0;		// we need to do the fft out-of-place (some transposition is needed)
 		shtns->nspat = NPHI * NLAT;		// no padding, no batching.
 		shtns->nlat_padded = NLAT;
 	}
-	nfft = NPHI;
-	// TODO CHECK THIS: why phi_inc != NLAT requires out-of-place ??
-	if ((theta_inc != 1)||(phi_inc != NLAT))  in_place = 0;		// we need to do the fft out-of-place.
 
 	#if SHT_VERBOSE > 0
-	if (verbose) printf("        => using FFTW : Mmax=%d, Nphi=%d, Nlat=%d, Nbatch=%d  ",MMAX,NPHI,NLAT, howmany);
+	if (verbose) {
+		printf("        => using FFTW : Mmax=%d, Nphi=%d, Nlat=%d, Nbatch=%d  ",MMAX,NPHI,NLAT, howmany);
+		if (NPHI <= (SHT_NL_ORDER+1)*MMAX)	printf("     !! Warning : anti-aliasing condition Nphi > %d*Mmax is not met !\n", SHT_NL_ORDER+1);
+		if (NPHI != fft_int(NPHI,7))		printf("     !! Warning : Nphi is not optimal for FFTW !\n");
+	}
 	#endif
 
 // Allocate dummy Spatial Fields.
 	ShF = (cplx *) VMALLOC(shtns->nspat * sizeof(cplx));		// for complex-valued fields
 	Sh = (double *) VMALLOC(shtns->nspat * sizeof(cplx));
 
+	if (NLAT & 1) {		// odd nlat => c2r transforms
+		if (howmany != 1) shtns_runerr("batch transform not supported for odd nlat\n");
+		const int ncplx = NPHI/2 +1;
+		shtns->fftc = fftw_plan_many_dft_r2c(1, &nfft, NLAT, Sh, &nfft, phi_inc, theta_inc, ShF, &ncplx, NLAT, 1, FFTW_ESTIMATE);
+		shtns->ifftc = fftw_plan_many_dft_c2r(1, &nfft, NLAT, ShF, &ncplx, NLAT, 1, Sh, &nfft, phi_inc, theta_inc, FFTW_ESTIMATE);
+	}
 // complex fft for fly transform is a bit different.
 	if (layout & SHT_PHI_CONTIGUOUS) {		// out-of-place split dft
-		#if SHT_VERBOSE > 0
-		if (verbose) printf("(phi-contiguous layout: phi_inc=%d, theta_inc=%d)\n",phi_inc,theta_inc);
-		#endif
-		fftw_iodim dim, many;
-		shtns->fft_mode = FFT_PHI_CONTIG_SPLIT | FFT_OOP;
-		//default internal
-		dim.n = NPHI;    	dim.os = 1;			dim.is = NLAT;		// complex transpose
-		many.n = NLAT/2;	many.os = 2*NPHI;	many.is = 2;
-		shtns->ifftc = fftw_plan_guru_split_dft(1, &dim, 1, &many, ((double*)ShF)+1, (double*)ShF, Sh+NPHI, Sh, shtns->fftw_plan_mode);
-
-		// legacy analysis fft
-		//dim.n = NPHI;    	dim.is = 1;			dim.os = NLAT;
-		//many.n = NLAT/2;	many.is = 2*NPHI;	many.os = 2;
-		// new internal
-		dim.n = NPHI;    	dim.is = 1;			dim.os = 2;		// split complex, but without global transpose (faster).
-		many.n = NLAT/2;	many.is = 2*NPHI;	many.os = 2*NPHI;
-		shtns->fftc = fftw_plan_guru_split_dft(1, &dim, 1, &many,  Sh+NPHI, Sh, ((double*)ShF)+1, (double*)ShF, shtns->fftw_plan_mode);
-		shtns->k_stride_a = NPHI;		shtns->m_stride_a = 2;
-		
-	/*	if (shtns->nthreads > 1) {
-			fftw_plan_with_nthreads(1);
-			// FOR MKL only:
-			//fftw3_mkl.number_of_user_threads = shtns->nthreads;        // required to call the fft of mkl from multiple threads.
-			// try to divide NLAT/2 into threads.
-			int nblk = (NLAT/2) / shtns->nthreads;
-			printf("omp block size (split) = %d\n", nblk);
-			if (nblk * shtns->nthreads != NLAT/2) shtns_runerr("not divisible");
-
+		if ((NLAT & 1) == 0) {
+			#if SHT_VERBOSE > 0
+			if (verbose) printf("(phi-contiguous layout: phi_inc=%d, theta_inc=%d)\n",phi_inc,theta_inc);
+			#endif
+			fftw_iodim dim, many;
+			shtns->fft_mode = FFT_PHI_CONTIG_SPLIT | FFT_OOP;
 			dim.n = NPHI;    	dim.os = 1;			dim.is = NLAT;		// complex transpose
-			many.n = nblk;		many.os = 2*NPHI;	many.is = 2;
-			shtns->ifftc_block = fftw_plan_guru_split_dft(1, &dim, 1, &many, ((double*)ShF)+1, (double*)ShF, Sh+NPHI, Sh, shtns->fftw_plan_mode);
+			many.n = NLAT/2;	many.os = 2*NPHI;	many.is = 2;
+			shtns->ifftc = fftw_plan_guru_split_dft(1, &dim, 1, &many, ((double*)ShF)+1, (double*)ShF, Sh+NPHI, Sh, shtns->fftw_plan_mode);
 
+			// legacy analysis fft
+			//dim.n = NPHI;    	dim.is = 1;			dim.os = NLAT;
+			//many.n = NLAT/2;	many.is = 2*NPHI;	many.os = 2;
+			// new internal
 			dim.n = NPHI;    	dim.is = 1;			dim.os = 2;		// split complex, but without global transpose (faster).
-			many.n = nblk;		many.is = 2*NPHI;	many.os = 2*NPHI;
-			shtns->fftc_block = fftw_plan_guru_split_dft(1, &dim, 1, &many,  Sh+NPHI, Sh, ((double*)ShF)+1, (double*)ShF, shtns->fftw_plan_mode);
-			fftw_plan_with_nthreads(shtns->nthreads);
-		}	*/
+			many.n = NLAT/2;	many.is = 2*NPHI;	many.os = 2*NPHI;
+			shtns->fftc = fftw_plan_guru_split_dft(1, &dim, 1, &many,  Sh+NPHI, Sh, ((double*)ShF)+1, (double*)ShF, shtns->fftw_plan_mode);
+			shtns->k_stride_a = NPHI;		shtns->m_stride_a = 2;
+			shtns->nlat_padded = NLAT;
+			
+		/*	if (shtns->nthreads > 1) {
+				fftw_plan_with_nthreads(1);
+				// FOR MKL only:
+				//fftw3_mkl.number_of_user_threads = shtns->nthreads;        // required to call the fft of mkl from multiple threads.
+				// try to divide NLAT/2 into threads.
+				int nblk = (NLAT/2) / shtns->nthreads;
+				printf("omp block size (split) = %d\n", nblk);
+				if (nblk * shtns->nthreads != NLAT/2) shtns_runerr("not divisible");
+
+				dim.n = NPHI;    	dim.os = 1;			dim.is = NLAT;		// complex transpose
+				many.n = nblk;		many.os = 2*NPHI;	many.is = 2;
+				shtns->ifftc_block = fftw_plan_guru_split_dft(1, &dim, 1, &many, ((double*)ShF)+1, (double*)ShF, Sh+NPHI, Sh, shtns->fftw_plan_mode);
+
+				dim.n = NPHI;    	dim.is = 1;			dim.os = 2;		// split complex, but without global transpose (faster).
+				many.n = nblk;		many.is = 2*NPHI;	many.os = 2*NPHI;
+				shtns->fftc_block = fftw_plan_guru_split_dft(1, &dim, 1, &many,  Sh+NPHI, Sh, ((double*)ShF)+1, (double*)ShF, shtns->fftw_plan_mode);
+				fftw_plan_with_nthreads(shtns->nthreads);
+			}	*/
+		}
 
 		// for complex transform it is much simpler (out-of-place):
 		shtns->ifft_cplx = fftw_plan_many_dft(1, &nfft, NLAT, ShF, &nfft, NLAT, 1, (cplx*)Sh, &nfft, 1, NPHI, FFTW_BACKWARD, shtns->fftw_plan_mode);
 		shtns->fft_cplx =  fftw_plan_many_dft(1, &nfft, NLAT, ShF, &nfft, 1, NPHI, (cplx*)Sh, &nfft, NLAT, 1, FFTW_BACKWARD, shtns->fftw_plan_mode);
 	#if defined( HAVE_LIBCUFFT ) && !defined( VKFFT_BACKEND )
-	} else if ((!(layout & SHT_THETA_CONTIGUOUS)) && (nfft % 16 == 0) && (shtns->nlat_2 % 16 == 0) && (howmany==1)) {		// use the fastest layout compatible with cuFFT
+	} else if ((!(layout & SHT_THETA_CONTIGUOUS)) && (nfft % 16 == 0) && (shtns->nlat % 32 == 0) && (howmany==1)) {		// use the fastest layout compatible with cuFFT
 		#if SHT_VERBOSE > 0
 		if (verbose) printf("(best cuFFT layout: phi_inc=2, theta_inc=NA)\n");
 		#endif
@@ -459,25 +473,27 @@ static void planFFT(shtns_cfg shtns, int layout)
 		shtns->fftc = fftw_plan_many_dft(1, &nfft, NLAT/2, (cplx*) Sh, &nfft, 1, nfft, ShF, &nfft, NLAT/2, 1, FFTW_BACKWARD, shtns->fftw_plan_mode);
 	#endif
 	} else {	//if (layout & SHT_THETA_CONTIGUOUS) {		// use only in-place here, supposed to be faster.
-		#if SHT_VERBOSE > 0
-		if (verbose) printf("(theta-contiguous layout: phi_inc=%d, theta_inc=%d)\n",phi_inc,theta_inc);
-		#endif
-		shtns->fft_mode = FFT_THETA_CONTIG;
-		shtns->ifftc = fftw_plan_many_dft(1, &nfft, shtns->nlat_2 * howmany, ShF, &nfft, phi_inc/2, 1, ShF, &nfft, phi_inc/2, 1, FFTW_BACKWARD, shtns->fftw_plan_mode);
-		shtns->fftc = shtns->ifftc;		// same thing, with m>0 and m<0 exchanged.
+		if ((NLAT & 1)==0) {
+			#if SHT_VERBOSE > 0
+			if (verbose) printf("(theta-contiguous layout: phi_inc=%d, theta_inc=%d)\n",phi_inc,theta_inc);
+			#endif
+			shtns->fft_mode = FFT_THETA_CONTIG;
+			shtns->ifftc = fftw_plan_many_dft(1, &nfft, shtns->nlat_2 * howmany, ShF, &nfft, phi_inc/2, 1, ShF, &nfft, phi_inc/2, 1, FFTW_BACKWARD, shtns->fftw_plan_mode);
+			shtns->fftc = shtns->ifftc;		// same thing, with m>0 and m<0 exchanged.
 
-	/*	if (shtns->nthreads > 1) {
-			fftw_plan_with_nthreads(1);
-			// FOR MKL only:
-			//fftw3_mkl.number_of_user_threads = shtns->nthreads;        // required to call the fft of mkl from multiple threads.
-			// try to divide NLAT/2 into threads.
-			int nblk = (NLAT/2) / shtns->nthreads;
-			printf("omp block size = %d\n", nblk);
-			if (nblk * shtns->nthreads != NLAT/2) shtns_runerr("not divisible");
-			shtns->ifftc_block = fftw_plan_many_dft(1, &nfft, nblk, ShF, &nfft, NLAT/2, 1, ShF, &nfft, NLAT/2, 1, FFTW_BACKWARD, shtns->fftw_plan_mode);
-			shtns->fftc_block = shtns->ifftc_block;		// same thing, with m>0 and m<0 exchanged.
-			fftw_plan_with_nthreads(shtns->nthreads);
-		}	*/
+		/*	if (shtns->nthreads > 1) {
+				fftw_plan_with_nthreads(1);
+				// FOR MKL only:
+				//fftw3_mkl.number_of_user_threads = shtns->nthreads;        // required to call the fft of mkl from multiple threads.
+				// try to divide NLAT/2 into threads.
+				int nblk = (NLAT/2) / shtns->nthreads;
+				printf("omp block size = %d\n", nblk);
+				if (nblk * shtns->nthreads != NLAT/2) shtns_runerr("not divisible");
+				shtns->ifftc_block = fftw_plan_many_dft(1, &nfft, nblk, ShF, &nfft, NLAT/2, 1, ShF, &nfft, NLAT/2, 1, FFTW_BACKWARD, shtns->fftw_plan_mode);
+				shtns->fftc_block = shtns->ifftc_block;		// same thing, with m>0 and m<0 exchanged.
+				fftw_plan_with_nthreads(shtns->nthreads);
+			}	*/
+		}
 
 		// complex-values spatial fields (in-place):
 		shtns->ifft_cplx = fftw_plan_many_dft(1, &nfft, NLAT, ShF, &nfft, phi_inc, 1, ShF, &nfft, phi_inc, 1, FFTW_BACKWARD, shtns->fftw_plan_mode);
@@ -548,8 +564,8 @@ static void PolarOptimize(shtns_cfg shtns, double eps)
 static void grid_weights(shtns_cfg shtns, double latdir)
 {
 	long int it;
-	real iylm_fft_norm;
-	real xg[NLAT], wgl[NLAT];	// gauss points and weights.
+	double iylm_fft_norm;
+	double xg[NLAT], stg[NLAT], wg[NLAT];	// gauss points and weights.
 	const int overflow = 8*VSIZE2-1;
 	const unsigned char grid = shtns->grid;
 
@@ -565,7 +581,7 @@ static void grid_weights(shtns_cfg shtns, double latdir)
 			if (2*NLAT <= (SHT_NL_ORDER +1)*LMAX) printf("     !! Warning : Gauss-Legendre anti-aliasing condition 2*Nlat > %d*Lmax is not met.\n",SHT_NL_ORDER+1);
 		}
 		#endif
-		gauss_nodes(xg,wgl,NLAT);	// generate gauss nodes and weights : ct = ]1,-1[ = cos(theta)
+		gauss_nodes(xg,stg,wg,NLAT);	// generate gauss nodes and weights : ct = ]1,-1[ = cos(theta)
 	} else if (grid == GRID_REGULAR) {
 		#if SHT_VERBOSE > 0
 		if (verbose) {
@@ -573,7 +589,7 @@ static void grid_weights(shtns_cfg shtns, double latdir)
 			if (NLAT <= (SHT_NL_ORDER +1)*LMAX) printf("     !! Warning : Regular-Fejer anti-aliasing condition Nlat > %d*Lmax is not met.\n",SHT_NL_ORDER+1);
 		}
 		#endif
-		fejer1_nodes(xg,wgl,NLAT);
+		fejer1_nodes(xg,stg,wg,NLAT);
 	} else if (grid == GRID_POLES) {
 		#if SHT_VERBOSE > 0
 		if (verbose) {
@@ -581,21 +597,38 @@ static void grid_weights(shtns_cfg shtns, double latdir)
 			if (NLAT <= (SHT_NL_ORDER +1)*LMAX) printf("     !! Warning : Regular-Clenshaw-Curtis anti-aliasing condition Nlat > %d*Lmax is not met.\n",SHT_NL_ORDER+1);
 		}
 		#endif
-		clenshaw_curtis_nodes(xg,wgl,NLAT);
+		clenshaw_curtis_nodes(xg,stg,wg,NLAT);
 	} else shtns_runerr("unknown grid.");
+	if (NLAT&1) wg[NLAT/2] *= 0.5;		// odd NLAT : adjust weigth of middle point.
 	for (it=0; it<NLAT; it++) {
 		shtns->ct[it] = latdir * xg[it];
-		shtns->st[it] = SQRT((1.-xg[it])*(1.+xg[it]));
-		shtns->st_1[it] = 1.0/SQRT((1.-xg[it])*(1.+xg[it]));
+		shtns->st[it] = stg[it];
+		shtns->st_1[it] = 1.0/stg[it];
 	}
-	double s=0;
-	for (it=0; it<NLAT; it++) s += wgl[it];
-	if (fabs(s-2.0) > 1e-12) printf(" !! Warning: sum of weigths = 2 + %g (should be 2)", s-2.0);
+	if (shtns->st[0] == 0.0)  shtns->st_1[0] = 0.0;
+	if (shtns->st[NLAT-1] == 0.0)  shtns->st_1[NLAT-1] = 0.0;
+
+	{	// *** perform some sanity checks, by computing simple integrals ***
+		double s=0, x2=0, st2=0;
+		for (long i=0; i<NLAT_2; i++) {		// sum symmetric contributions together (have same weights, increasing with i)
+			int i2 = NLAT-1-i;
+			s += wg[i] + wg[i2];						// sum of weights == 2
+			x2 += wg[i]*xg[i]*xg[i] + wg[i2]*xg[i2]*xg[i2];		// integral of x2 == 2/3
+			st2 += wg[i]*stg[i]*stg[i] + wg[i2]*stg[i2]*stg[i2];		// integral fo sin2(theta) == 4/3
+		}
+		// compute deviation from exact value:
+		s = s - 2.0;
+		x2 = x2*1.5 - 1.;
+		st2 = st2*0.75 - 1.;
+		if (verbose>1) {
+			printf("          Sum of weights = 2 + %g (should be 2)\n", s);
+			printf("          Applying quadrature rule to 3/2.x^2 = 1 + %g (should be 1)\n", x2);
+			printf("          Applying quadrature rule to 3/4.sin2(theta) = 1 + %g (should be 1)\n", st2);
+		} else if (fabs(s)+fabs(x2)+fabs(st2) > 1e-14)	shtns_runerr("Bad quadrature accuracy.");
+	}
+
 	for (it=0; it<NLAT_2; it++)
-		shtns->wg[it] = wgl[it]*iylm_fft_norm;		// faster double-precision computations.
-	if (NLAT & 1) {		// odd NLAT : adjust weigth of middle point. (required for Gauss, untested for regular grids... TODO CHECK)
-		shtns->wg[NLAT_2-1] *= 0.5;
-	}
+		shtns->wg[it] = wg[it]*iylm_fft_norm;		// faster double-precision computations.
 	for (it=NLAT_2; it < NLAT_2 +overflow; it++) shtns->wg[it] = 0.0;		// padding for multi-way algorithm.
 
 #if SHT_VERBOSE > 1
@@ -637,7 +670,7 @@ double SHT_error(shtns_cfg shtns, int vector)
 	double t, tmax, n2,  err;
 	long int i, jj, nlm_cplx;
 	
-	srand( time(NULL) );	// init random numbers.
+	srand( 42 );	// init random numbers.
 	
 	Slm0 = (cplx *) VMALLOC(sizeof(cplx)* NLM * shtns->howmany);
 	Slm = (cplx *) VMALLOC(sizeof(cplx)* NLM * shtns->howmany);
@@ -879,14 +912,25 @@ done:
 	if (Slm) VFREE(Slm);	 	if (Sh)  VFREE(Sh);
 }
 
-void shtns_print_version() {
+
+const char* shtns_get_build_info() {
+	static char s[128];	// a reasonable buffer size
+	int n = snprintf(s, 127,
   #ifndef SHTNS4MAGIC
-	printf("[" PACKAGE_STRING "] built " __DATE__ ", " __TIME__ ", id: " _SHTNS_ID_ "\n");
+	"[SHTns " SHTNS_VER "] built "
   #else
-	printf("[" PACKAGE_STRING "] built for MagIC " __DATE__ ", " __TIME__  ", id: " _SHTNS_ID_ "\n");
+	"[SHTns " SHTNS_VER "] built for MagIC "
   #endif
+	__DATE__ ", " __TIME__  ", id: ");
+	if (strlen(SHTNS_GIT) > 0) n += snprintf(s+n, 127-n, SHTNS_GIT ",");
+	snprintf(s+n, 127-n, _SHTNS_ID_);
+	s[127]=0;
+	return s;
 }
 
+void shtns_print_version() {
+	printf("%s\n",shtns_get_build_info());
+}
 
 
 void fprint_ftable(FILE* fp, void* ftable[SHT_NVAR][SHT_NTYP])
@@ -951,7 +995,7 @@ int config_save(shtns_cfg shtns, int req_flags)
 
 	FILE *fcfg = fopen("shtns_cfg","a");
 	if (fcfg != NULL) {
-		fprintf(fcfg, "%s %s %d %d %d %d %d %d %d %d %d %d",PACKAGE_VERSION, _SHTNS_ID_, shtns->lmax, shtns->mmax, shtns->mres, shtns->nphi, shtns->nlat, shtns->grid, shtns->nthreads, req_flags, shtns->nlorder, -1);
+		fprintf(fcfg, "%s %s %d %d %d %d %d %d %d %d %d %d",SHTNS_VER, _SHTNS_ID_, shtns->lmax, shtns->mmax, shtns->mres, shtns->nphi, shtns->nlat, shtns->grid, shtns->nthreads, req_flags, shtns->nlorder, -1);
 		fprint_ftable(fcfg, shtns->ftable);
 		fprintf(fcfg,"\n");
 		fclose(fcfg);
@@ -1024,7 +1068,7 @@ int config_load(shtns_cfg shtns, int req_flags)
 }
 
 /// \internal returns 1 if val cannot fit in dest (unsigned)
-#define IS_TOO_LARGE(val, dest) (sizeof(dest) >= sizeof(val)) ? 0 : ( ( val >= (1<<(8*sizeof(dest))) ) ? 1 : 0 )
+#define IS_TOO_LARGE(val, dest) (sizeof(dest) >= sizeof(val)) ? 0 : ( ( val >= (1ULL<<(8*sizeof(dest))) ) ? 1 : 0 )
 
 /// \internal returns the size that must be allocated for an shtns_info.
 #define SIZEOF_SHTNS_INFO(mmax) ( sizeof(struct shtns_info) + (mmax+1)*( sizeof(unsigned short) ) )
@@ -1033,7 +1077,7 @@ int config_load(shtns_cfg shtns, int req_flags)
 
 /** \addtogroup init Initialization functions.
 */
-//@{
+///@{
 
 /*! This sets the description of spherical harmonic coefficients.
  * It tells SHTns how to interpret spherical harmonic coefficient arrays, and it sets usefull arrays.
@@ -1321,14 +1365,9 @@ int shtns_set_grid_auto(shtns_cfg shtns, enum shtns_type flags, double eps, int 
 	int analys = 1;
 	const int req_flags = flags;		// requested flags.
 
-	#if HAVE_LIBCUFFT
-		if (*nlat % 4) shtns_runerr("Nlat must be a multiple of 4 for GPUs\n");
-	#endif
-	if (*nlat & 1) shtns_runerr("Nlat must be even\n");
-	#if _GCC_VEC_
-		#ifdef SHTNS4MAGIC
-			if (*nlat % (VSIZE2*2)) shtns_runerr("Nlat must be an even multiple of vector size\n");
-		#endif
+	if (*nlat & 1) quick_init = 1;	// only one type of transform works with nlat odd. NEVER try others.
+	#ifdef SHTNS4MAGIC
+		if (*nlat % (VSIZE2*2)) shtns_runerr("Nlat must be an even multiple of vector size\n");
 	#endif
 	if (shtns->howmany != 1) {		// more constraints apply for batched transforms:
 		if (shtns->nlat & 1) shtns_runerr("Nlat must be even for a batched transform\n");
@@ -1356,6 +1395,9 @@ int shtns_set_grid_auto(shtns_cfg shtns, enum shtns_type flags, double eps, int 
 	}
 	#ifdef SHTNS4MAGIC
 		if (flags == sht_reg_poles) shtns_runerr("Grid cannot include poles with MagIC layout.");
+	#endif
+	#if HAVE_LIBCUFFT
+		if ((layout & SHT_ALLOW_GPU) && (*nlat % 4)) printf("!!! Warning !!! Nlat must be a multiple of 4 to run on GPU\n");
 	#endif
 
 	if (vector) {
@@ -1438,7 +1480,7 @@ int shtns_set_grid_auto(shtns_cfg shtns, enum shtns_type flags, double eps, int 
 
   #ifdef HAVE_LIBCUFFT
 	int gpu_ok = -1;
-	if (layout & SHT_ALLOW_GPU) {
+	if ((layout & SHT_ALLOW_GPU) && (NLAT % 4 == 0)) {
 		gpu_ok = cushtns_init_gpu(shtns);		// try to initialize cuda gpu
 		#if SHT_VERBOSE > 0
 		if ((verbose)&&(gpu_ok>=0)) printf("        + GPU #%d successfully initialized.\n", gpu_ok);
@@ -1480,7 +1522,7 @@ int shtns_set_grid_auto(shtns_cfg shtns, enum shtns_type flags, double eps, int 
 	if ((omp_threads > 1)&&(verbose>1)) printf(" nthreads = %d\n",shtns->nthreads);
   #endif
   #if SHT_VERBOSE > 0
-	if (verbose) printf("        => " PACKAGE_NAME " is ready.\n");
+	if (verbose) printf("        => SHTns is ready.\n");
   #endif
 	return(shtns->nspat);	// returns the number of doubles to be allocated for a spatial field.
 }
@@ -1591,7 +1633,7 @@ int shtns_gauss_wts(shtns_cfg shtns, double *wts)
 	return i;
 }
 
-//@}
+///@}
 
 
 #ifdef SHT_F77_API
@@ -1602,7 +1644,7 @@ int shtns_gauss_wts(shtns_cfg shtns, double *wts)
 * Call from fortran without the trailing '_'.
 * see the \link SHT_example.f Fortran example \endlink for a simple usage of SHTns from Fortran language.
 */
-//@{
+///@{
 
 /// Set verbosity level
 void shtns_verbose_(int *v)
@@ -1783,7 +1825,7 @@ void shtns_gauss_wts_(double *wts)
 /** \name Point evaluation of Spherical Harmonics
 Evaluate at a given point (\f$cos(\theta)\f$ and \f$\phi\f$) a spherical harmonic representation.
 */
-//@{
+///@{
 /// \see SH_to_point for argument description
 void shtns_sh_to_point_(double *spat, cplx *Qlm, double *cost, double *phi)
 {
@@ -1796,7 +1838,7 @@ void shtns_qst_to_point_(double *vr, double *vt, double *vp,
 {
 	SHqst_to_point(sht_data, Qlm, Slm, Tlm, *cost, *phi, vr, vt, vp);
 }
-//@}
+///@}
 
 void shtns_sh_zrotate_(cplx* Qlm, double* alpha, cplx* Rlm)
 {
@@ -1841,6 +1883,6 @@ void shtns_sh_cplx_yrotate90_(cplx *Qlm, cplx *Rlm)
 
 
 
-//@}
+///@}
 
 #endif
