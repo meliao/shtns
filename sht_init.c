@@ -672,13 +672,14 @@ double SHT_error(shtns_cfg shtns, int vector)
 	
 	srand( 42 );	// init random numbers.
 	
-	Slm0 = (cplx *) VMALLOC(sizeof(cplx)* NLM * shtns->howmany);
-	Slm = (cplx *) VMALLOC(sizeof(cplx)* NLM * shtns->howmany);
+	const size_t spec_sze = sizeof(cplx) * shtns->spec_dist * shtns->howmany;
+	Slm0 = (cplx *) VMALLOC(spec_sze);
+	Slm = (cplx *) VMALLOC(spec_sze);
 	Sh = (double *) VMALLOC( NSPAT_ALLOC(shtns) * sizeof(double) );
 	if ((Sh==0) || (Slm==0) || (Slm0==0)) shtns_runerr("not enough memory.");
 	if (vector) {
-		Tlm0 = (cplx *) VMALLOC(sizeof(cplx)* NLM * shtns->howmany);
-		Tlm = (cplx *) VMALLOC(sizeof(cplx)* NLM * shtns->howmany);
+		Tlm0 = (cplx *) VMALLOC(spec_sze);
+		Tlm = (cplx *) VMALLOC(spec_sze);
 		Th = (double *) VMALLOC( NSPAT_ALLOC(shtns) * sizeof(double) );
 		if ((Th==0) || (Tlm==0) || (Tlm0==0)) shtns_runerr("not enough memory.");
 	}
@@ -1128,6 +1129,7 @@ shtns_cfg shtns_create(int lmax, int mmax, int mres, enum shtns_norm norm)
 	// copy sizes.
 	shtns->mmax = mmax;		shtns->mres = mres;		shtns->lmax = lmax;
 	shtns->nlm = nlm_calc(lmax, mmax, mres);
+	shtns->spec_dist = shtns->nlm;	// default value.
 	shtns->nlm_cplx = 2*shtns->nlm - (lmax+1);	// = nlm_cplx_calc(lmax, mmax, mres);
 	shtns->nthreads = omp_threads;
 	if (omp_threads > mmax+1) shtns->nthreads = mmax+1;	// limit the number of threads to mmax+1
