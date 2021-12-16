@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2010-2018 Centre National de la Recherche Scientifique.
+ * Copyright (c) 2010-2021 Centre National de la Recherche Scientifique.
  * written by Nathanael Schaeffer (CNRS, ISTerre, Grenoble, France).
  * 
  * nathanael.schaeffer@univ-grenoble-alpes.fr
@@ -799,7 +799,7 @@ static void choose_best_sht(shtns_cfg shtns, int* nlp, int vector)
 	if (NLAT < VSIZE2*4) return;			// on-the-fly not possible for NLAT_2 < 2*NWAY (overflow).
 
 	size_t nspat = sizeof(double) * NSPAT_ALLOC(shtns);
-	size_t nspec = sizeof(cplx)* NLM * shtns->howmany;
+	size_t nspec = sizeof(cplx)* shtns->spec_dist * shtns->howmany;
 	if (nspec>nspat) nspat=nspec;
 	Sh = (double *) VMALLOC(nspat);		Slm = (cplx *) VMALLOC(nspec);
 	if ((Sh==0) || (Slm==0)) shtns_runerr("not enough memory.");
