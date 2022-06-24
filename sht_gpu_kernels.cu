@@ -693,7 +693,7 @@ void scal2sphtor_gpu(shtns_cfg shtns, cplx* d_Vlm, cplx* d_Wlm, cplx* d_Slm, cpl
 /// requirements : blockSize must be 1 in the y-direction and THREADS_PER_BLOCK in the x-direction.
 /// llim MUST BE <= 1800
 /// S can only be 0 (for scalar) or 1 (for spin 1 / vector)
-template<int BLOCKSIZE, int S, int NFIELDS, int NW, bool HI_LLIM, bool M0_ONLY=false, bool SH2ISH=false>
+template<int BLOCKSIZE, int S, int NFIELDS, int NW, bool HI_LLIM, bool M0_ONLY=false, bool ROBERT_FORM=false, bool SH2ISH=false>
 static __global__ void leg_m_kernel(
 	const double* __restrict__ al, const double* __restrict__ ct, const double* __restrict__ ql, double *q,
 	const int llim, const int nlat_2, const int lmax, const int mres, const int nphi, const int m_inc,
@@ -746,9 +746,9 @@ static __global__ void leg_m_kernel(
 		int l = 0;
 		#pragma unroll
 		for (int i=0; i<NW; i++) y0[i] = 1.0;
-		if (S==1) for (int i=0; i<NW; i++) y0[i] *= rsqrt(1.0 - cost[i]*cost[i]);	// for vectors, divide by sin(theta)
-			#pragma unroll
-			for (int i=0; i<NW; i++) y1[i] = (al[1]*ct2[i] + al[0])*y0[i];			
+		if (S==1 && !ROBERT_FORM) for (int i=0; i<NW; i++) y0[i] = rsqrt(1.0 - ct2[i]);	// for vectors, divide by sin(theta) -- except in Robert form
+		#pragma unroll
+		for (int i=0; i<NW; i++) y1[i] = (al[1]*ct2[i] + al[0])*y0[i];
 
 		al+=2;
 		if (BLOCKSIZE > WARPSZE) { __syncthreads(); } else { _syncwarp; }
@@ -858,6 +858,7 @@ static __global__ void leg_m_kernel(
 	if ((NW>1) || (BLOCKSIZE > WARPSZE) || (_any(m - llim*y1[0] <= max(80, llim>>7))))	// polar optimization (see Reinecke 2013), avoiding warp divergence
 	{
 		l = m - S;
+		if (S==1 && ROBERT_FORM) l = m;		// multiply vectors by sin(theta) with robert_form
 		int nsint = 0;
 		int ny = 0;
 		do {		// sin(theta)^(m-S)
@@ -1060,20 +1061,35 @@ static void leg_m(shtns_cfg shtns, const double *ql, double *q, const int llim, 
 		const int NW = 1;
 		const int blocksPerGrid = (nlat_2 + BLOCKSIZE*NW - 1) / (BLOCKSIZE*NW);
 		dim3 blocks(blocksPerGrid, mmax+1, shtns->howmany/4);
-		leg_m_kernel<BLOCKSIZE, S, 4, NW, HI_LLIM> <<<blocks, threads, 0, stream>>>
-			(d_alm, d_ct, (double*) ql, (double*) q, llim, nlat_2, lmax,mres, nphi, shtns->nlat_padded, shtns->nlm_stride, spat_dist);
+		if (S==1 && shtns->robert_form) {
+			leg_m_kernel<BLOCKSIZE, S, 4, NW, HI_LLIM, false, true> <<<blocks, threads, 0, stream>>>
+				(d_alm, d_ct, (double*) ql, (double*) q, llim, nlat_2, lmax,mres, nphi, shtns->nlat_padded, shtns->nlm_stride, spat_dist);
+		} else {
+			leg_m_kernel<BLOCKSIZE, S, 4, NW, HI_LLIM> <<<blocks, threads, 0, stream>>>
+				(d_alm, d_ct, (double*) ql, (double*) q, llim, nlat_2, lmax,mres, nphi, shtns->nlat_padded, shtns->nlm_stride, spat_dist);
+		}
 	} else if (shtns->howmany % 2 == 0) {	// multiple of 2
 		const int NW = (HI_LLIM) ? 1 : 2;
 		const int blocksPerGrid = (nlat_2 + BLOCKSIZE*NW - 1) / (BLOCKSIZE*NW);
 		dim3 blocks(blocksPerGrid, mmax+1, shtns->howmany/2);
-		leg_m_kernel<BLOCKSIZE, S, 2, NW, HI_LLIM> <<<blocks, threads, 0, stream>>>
-			(d_alm, d_ct, (double*) ql, (double*) q, llim, nlat_2, lmax,mres, nphi, shtns->nlat_padded, shtns->nlm_stride, spat_dist);
+		if (S==1 && shtns->robert_form) {
+			leg_m_kernel<BLOCKSIZE, S, 2, NW, HI_LLIM, false, true> <<<blocks, threads, 0, stream>>>
+				(d_alm, d_ct, (double*) ql, (double*) q, llim, nlat_2, lmax,mres, nphi, shtns->nlat_padded, shtns->nlm_stride, spat_dist);
+		} else {
+			leg_m_kernel<BLOCKSIZE, S, 2, NW, HI_LLIM> <<<blocks, threads, 0, stream>>>
+				(d_alm, d_ct, (double*) ql, (double*) q, llim, nlat_2, lmax,mres, nphi, shtns->nlat_padded, shtns->nlm_stride, spat_dist);
+		}
 	} else {
 		const int NW = (HI_LLIM) ? 1 : 2;
 		const int blocksPerGrid = (nlat_2 + BLOCKSIZE*NW - 1) / (BLOCKSIZE*NW);
 		dim3 blocks(blocksPerGrid, mmax+1, shtns->howmany);
-		leg_m_kernel<BLOCKSIZE, S, 1, NW, HI_LLIM> <<<blocks, threads, 0, stream>>>
-			(d_alm, d_ct, (double*) ql, (double*) q, llim, nlat_2, lmax,mres, nphi, shtns->nlat_padded, shtns->nlm_stride, spat_dist);
+		if (S==1 && shtns->robert_form) {
+			leg_m_kernel<BLOCKSIZE, S, 1, NW, HI_LLIM, false, true> <<<blocks, threads, 0, stream>>>
+				(d_alm, d_ct, (double*) ql, (double*) q, llim, nlat_2, lmax,mres, nphi, shtns->nlat_padded, shtns->nlm_stride, spat_dist);
+		} else {
+			leg_m_kernel<BLOCKSIZE, S, 1, NW, HI_LLIM> <<<blocks, threads, 0, stream>>>
+				(d_alm, d_ct, (double*) ql, (double*) q, llim, nlat_2, lmax,mres, nphi, shtns->nlat_padded, shtns->nlm_stride, spat_dist);
+		}
 	}
 }
 
@@ -1096,27 +1112,42 @@ static void leg_m0(shtns_cfg shtns, const double *ql, double *q, const int llim,
 	if (shtns->howmany % 4 == 0) {
 		dim3 threads(threadsPerBlock, 1, 1);
 		dim3 blocks(blocksPerGrid, 1, shtns->howmany/4);
-		leg_m_kernel<BLOCKSIZE, S, 4, NW, false, true> <<<blocks, threads, 0, stream>>>
-			(shtns->d_clm, d_ct, (double*) ql, (double*) q, llim, nlat_2, llim,1, 1, shtns->nlat_padded, shtns->nlm_stride, spat_dist, shtns->d_xlm);
+		if (S==1 && shtns->robert_form) {
+			leg_m_kernel<BLOCKSIZE, S, 4, NW, false, true, true> <<<blocks, threads, 0, stream>>>
+				(shtns->d_clm, d_ct, (double*) ql, (double*) q, llim, nlat_2, llim,1, 1, shtns->nlat_padded, shtns->nlm_stride, spat_dist, shtns->d_xlm);
+		} else {
+			leg_m_kernel<BLOCKSIZE, S, 4, NW, false, true> <<<blocks, threads, 0, stream>>>
+				(shtns->d_clm, d_ct, (double*) ql, (double*) q, llim, nlat_2, llim,1, 1, shtns->nlat_padded, shtns->nlm_stride, spat_dist, shtns->d_xlm);
+		}
 	} else if (shtns->howmany % 2 == 0) {
 		const int NW = 4;
 		const int blocksPerGrid = (nlat_2 + BLOCKSIZE*NW - 1) / (BLOCKSIZE*NW);
 		dim3 threads(threadsPerBlock, 1, 1);
 		dim3 blocks(blocksPerGrid, 1, shtns->howmany/2);
-		leg_m_kernel<BLOCKSIZE, S, 2, NW, false, true> <<<blocks, threads, 0, stream>>>
-			(shtns->d_clm, d_ct, (double*) ql, (double*) q, llim, nlat_2, llim,1, 1, shtns->nlat_padded, shtns->nlm_stride, spat_dist, shtns->d_xlm);
+		if (S==1 && shtns->robert_form) {
+			leg_m_kernel<BLOCKSIZE, S, 2, NW, false, true, true> <<<blocks, threads, 0, stream>>>
+				(shtns->d_clm, d_ct, (double*) ql, (double*) q, llim, nlat_2, llim,1, 1, shtns->nlat_padded, shtns->nlm_stride, spat_dist, shtns->d_xlm);
+		} else {
+			leg_m_kernel<BLOCKSIZE, S, 2, NW, false, true> <<<blocks, threads, 0, stream>>>
+				(shtns->d_clm, d_ct, (double*) ql, (double*) q, llim, nlat_2, llim,1, 1, shtns->nlat_padded, shtns->nlm_stride, spat_dist, shtns->d_xlm);
+		}
 	} else {
 		const int NW = 4;
 		const int blocksPerGrid = (nlat_2 + BLOCKSIZE*NW - 1) / (BLOCKSIZE*NW);
 		dim3 threads(threadsPerBlock, 1, 1);
 		dim3 blocks(blocksPerGrid, 1, shtns->howmany);
-		leg_m_kernel<BLOCKSIZE, S, 1, NW, false, true> <<<blocks, threads, 0, stream>>>
-			(shtns->d_clm, d_ct, (double*) ql, (double*) q, llim, nlat_2, llim,1, 1, shtns->nlat_padded, shtns->nlm_stride, spat_dist, shtns->d_xlm);
+		if (S==1 && shtns->robert_form) {
+			leg_m_kernel<BLOCKSIZE, S, 1, NW, false, true, true> <<<blocks, threads, 0, stream>>>
+				(shtns->d_clm, d_ct, (double*) ql, (double*) q, llim, nlat_2, llim,1, 1, shtns->nlat_padded, shtns->nlm_stride, spat_dist, shtns->d_xlm);
+		} else {
+			leg_m_kernel<BLOCKSIZE, S, 1, NW, false, true> <<<blocks, threads, 0, stream>>>
+				(shtns->d_clm, d_ct, (double*) ql, (double*) q, llim, nlat_2, llim,1, 1, shtns->nlat_padded, shtns->nlm_stride, spat_dist, shtns->d_xlm);
+		}
 	}
 }
 
 
-template<int BLOCKSIZE, int LSPAN, int S, int NFIELDS, bool HI_LLIM, bool M0_ONLY=false> __global__ void
+template<int BLOCKSIZE, int LSPAN, int S, int NFIELDS, bool HI_LLIM, bool M0_ONLY=false, bool ROBERT_FORM=false> __global__ void
 ileg_m_kernel(const double* __restrict__ al, const double* __restrict__ ct, const double* __restrict__ q, double *ql, const int llim, 
 	const int nlat_2, const int lmax, const int mres, const int nphi, const int m_inc, const double mpos_scale, const int q_dist=0, const int ql_dist=0)
 {
@@ -1139,6 +1170,7 @@ ileg_m_kernel(const double* __restrict__ al, const double* __restrict__ ct, cons
 	__shared__ double yl[LSPAN/2*l_inc - padding];		// yl is also used for even/odd computation. Ensure LSPAN >= 8 (or 4 for m=0)
 	double cost = (it < nlat_2) ? ct[it] : 0.0;
 	double y0, y1;
+	double st_1;
 
 	if (im == 0) {
 		// re-assign each thread an l (transpose)
@@ -1151,8 +1183,11 @@ ileg_m_kernel(const double* __restrict__ al, const double* __restrict__ ct, cons
 		for (int f=0; f<NFIELDS; f++) {
 			y0 = (it < nlat_2) ? q[it + (b*NFIELDS+f)*q_dist] : 0.0;				// north
 			y1 = (it < nlat_2) ? q[nlat_2*2-1 - it + (b*NFIELDS+f)*q_dist] : 0.0;	// south
-
-			yl[f*2*l_inc +j] = y0+y1;					// even
+			if (ROBERT_FORM) {
+				double st_1 = rsqrt(1.0 - cost*cost);		// 1/sin(theta)
+				y0 *= st_1;		y1 *= st_1;
+			}
+			yl[f*2*l_inc +j]     = y0+y1;			// even
 			yl[(f*2+1)*l_inc +j] = (y0-y1)*cost;	// odd
 		}
 		if (BLOCKSIZE > WARPSZE) {	__syncthreads(); } else { _syncwarp; }
@@ -1265,6 +1300,11 @@ ileg_m_kernel(const double* __restrict__ al, const double* __restrict__ ct, cons
 			double qoi = t1-qor;		qor += t1;		// bsi = -qoi[lane-1],   asi = qoi[lane+1];
 			t0 = shfl_xor(qei, 1);	// exchange between adjacent lanes.
 			t1 = shfl_xor(qoi, 1);
+			if (ROBERT_FORM) {
+				double st_1 = rsqrt(1.0 - y0);		// 1/sin(theta)
+				t0  *= st_1;	t1 *=  st_1;
+				qer *= st_1;	qor *= st_1;
+			}
 
 			if ((f>0) && (BLOCKSIZE > WARPSZE))		__syncthreads();	// _syncwarp not needed after shfl_xor
 
@@ -1414,14 +1454,24 @@ static void ileg_m(shtns_cfg shtns, const double* q, double *ql, const int llim,
 		const int NFIELDS = 2;
 		const int LSPAN_ = 16/NFIELDS;
 		dim3 blocks(blocksPerGrid, mmax+1, shtns->howmany/NFIELDS);
-		ileg_m_kernel<BLOCKSIZE, LSPAN_, S, NFIELDS, HI_LLIM> <<<blocks, threads, 0, stream>>>
-			(d_alm, d_ct, (double*) q, (double*) ql, llim, nlat_2, lmax,mres, nphi, shtns->nlat_padded, shtns->mpos_scale_analys, q_dist, ql_dist);
+		if (S==1 && shtns->robert_form) {
+			ileg_m_kernel<BLOCKSIZE, LSPAN_, S, NFIELDS, HI_LLIM, false, true> <<<blocks, threads, 0, stream>>>
+				(d_alm, d_ct, (double*) q, (double*) ql, llim, nlat_2, lmax,mres, nphi, shtns->nlat_padded, shtns->mpos_scale_analys, q_dist, ql_dist);
+		} else {
+			ileg_m_kernel<BLOCKSIZE, LSPAN_, S, NFIELDS, HI_LLIM> <<<blocks, threads, 0, stream>>>
+				(d_alm, d_ct, (double*) q, (double*) ql, llim, nlat_2, lmax,mres, nphi, shtns->nlat_padded, shtns->mpos_scale_analys, q_dist, ql_dist);
+		}
 	} else {	// odd number of transforms
 		const int NFIELDS = 1;
 		const int LSPAN_ = 16/NFIELDS;
 		dim3 blocks(blocksPerGrid, mmax+1, shtns->howmany/NFIELDS);
-		ileg_m_kernel<BLOCKSIZE, LSPAN_, S, NFIELDS, HI_LLIM> <<<blocks, threads, 0, stream>>>
-			(d_alm, d_ct, (double*) q, (double*) ql, llim, nlat_2, lmax,mres, nphi, shtns->nlat_padded, shtns->mpos_scale_analys, q_dist, ql_dist);
+		if (S==1 && shtns->robert_form) {
+			ileg_m_kernel<BLOCKSIZE, LSPAN_, S, NFIELDS, HI_LLIM, false, true> <<<blocks, threads, 0, stream>>>
+				(d_alm, d_ct, (double*) q, (double*) ql, llim, nlat_2, lmax,mres, nphi, shtns->nlat_padded, shtns->mpos_scale_analys, q_dist, ql_dist);
+		} else {
+			ileg_m_kernel<BLOCKSIZE, LSPAN_, S, NFIELDS, HI_LLIM> <<<blocks, threads, 0, stream>>>
+				(d_alm, d_ct, (double*) q, (double*) ql, llim, nlat_2, lmax,mres, nphi, shtns->nlat_padded, shtns->mpos_scale_analys, q_dist, ql_dist);
+		}
 	}
 }
 
@@ -1443,8 +1493,13 @@ static void ileg_m0(shtns_cfg shtns, const double* q, double *ql, const int llim
 	if (ql_dist == 0) ql_dist = shtns->nlm_stride;
 	dim3 blocks(blocksPerGrid, 1, shtns->howmany/NFIELDS);
 	dim3 threads(threadsPerBlock, 1, 1);
-	ileg_m_kernel<BLOCKSIZE, LSPAN_, S, NFIELDS, false, true> <<<blocks, threads, 0, stream>>>
-		(d_alm, d_ct, (double*) q, (double*) ql, llim, nlat_2, llim,0, 0, 0, shtns->mpos_scale_analys, q_dist, ql_dist);
+	if (S==1 && shtns->robert_form) {
+		ileg_m_kernel<BLOCKSIZE, LSPAN_, S, NFIELDS, false, true, true> <<<blocks, threads, 0, stream>>>
+			(d_alm, d_ct, (double*) q, (double*) ql, llim, nlat_2, llim,0, 0, 0, shtns->mpos_scale_analys, q_dist, ql_dist);
+	} else {
+		ileg_m_kernel<BLOCKSIZE, LSPAN_, S, NFIELDS, false, true> <<<blocks, threads, 0, stream>>>
+			(d_alm, d_ct, (double*) q, (double*) ql, llim, nlat_2, llim,0, 0, 0, shtns->mpos_scale_analys, q_dist, ql_dist);
+	}
 }
 
 
