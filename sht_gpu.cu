@@ -573,6 +573,17 @@ void cu_SHqst_to_spat(shtns_cfg shtns, cplx* d_Qlm, cplx* d_Slm, cplx* d_Tlm, do
 	cu_SHsphtor_to_spat(shtns, d_Slm, d_Tlm, d_Vt, d_Vp, llim);
 }
 
+extern "C"
+void cu_SHsph_to_spat(shtns_cfg shtns, cplx* d_Slm, double* d_Vt, double* d_Vp, int llim)
+{
+	cu_SHsphtor_to_spat(shtns, d_Slm, 0, d_Vt, d_Vp, llim);
+}
+
+extern "C"
+void cu_SHtor_to_spat(shtns_cfg shtns, cplx* d_Tlm, double* d_Vt, double* d_Vp, int llim)
+{
+	cu_SHsphtor_to_spat(shtns, 0, d_Tlm, d_Vt, d_Vp, llim);
+}
 
 extern "C"
 void cu_spat_to_SH(shtns_cfg shtns, double *d_Vr, cplx* d_Qlm, int llim)

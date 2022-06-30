@@ -34,24 +34,24 @@
       real(C_DOUBLE), intent(out) :: Vp(*)
       integer(C_INT), value :: ltr
     end subroutine cu_SHsphtor_to_spat
-    
-!!$    subroutine SHsph_to_spat_l(shtns,Slm,Vt,Vp,ltr) bind(C, name='SHsph_to_spat_l')
-!!$      import
-!!$      type(C_PTR), value :: shtns
-!!$      complex(C_DOUBLE_COMPLEX), intent(inout) :: Slm(*)
-!!$      real(C_DOUBLE), intent(out) :: Vt(*)
-!!$      real(C_DOUBLE), intent(out) :: Vp(*)
-!!$      integer(C_INT), value :: ltr
-!!$    end subroutine SHsph_to_spat_l
-    
-!!$    subroutine SHtor_to_spat_l(shtns,Tlm,Vt,Vp,ltr) bind(C, name='SHtor_to_spat_l')
-!!$      import
-!!$      type(C_PTR), value :: shtns
-!!$      complex(C_DOUBLE_COMPLEX), intent(inout) :: Tlm(*)
-!!$      real(C_DOUBLE), intent(out) :: Vt(*)
-!!$      real(C_DOUBLE), intent(out) :: Vp(*)
-!!$      integer(C_INT), value :: ltr
-!!$    end subroutine SHtor_to_spat_l
+
+    subroutine cu_SHsph_to_spat(shtns,Slm,Vt,Vp,ltr) bind(C, name='cu_SHsph_to_spat')
+      import
+      type(C_PTR), value :: shtns
+      complex(C_DOUBLE_COMPLEX), intent(inout) :: Slm(*)
+      real(C_DOUBLE), intent(out) :: Vt(*)
+      real(C_DOUBLE), intent(out) :: Vp(*)
+      integer(C_INT), value :: ltr
+    end subroutine cu_SHsph_to_spat
+
+    subroutine cu_SHtor_to_spat(shtns,Tlm,Vt,Vp,ltr) bind(C, name='cu_SHtor_to_spat')
+      import
+      type(C_PTR), value :: shtns
+      complex(C_DOUBLE_COMPLEX), intent(inout) :: Tlm(*)
+      real(C_DOUBLE), intent(out) :: Vt(*)
+      real(C_DOUBLE), intent(out) :: Vp(*)
+      integer(C_INT), value :: ltr
+    end subroutine cu_SHtor_to_spat
 
     subroutine cu_spat_to_SHsphtor(shtns,Vt,Vp,Slm,Tlm,ltr) bind(C, name='cu_spat_to_SHsphtor')
       import

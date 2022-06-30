@@ -84,11 +84,12 @@
       integer(C_INT), value :: nphi
     end subroutine shtns_set_grid_auto
 
-    subroutine shtns_set_batch(shtns, howmany, distance_between_spectral_arrays_in_complex_number_units) bind(C, name='shtns_set_batch')
+    subroutine shtns_set_batch(shtns, howmany, dist) bind(C, name='shtns_set_batch')
       import
       type(C_PTR), value :: shtns
       integer(C_INT), value :: howmany
-      integer(C_LONG), value :: distance_between_spectral_arrays_in_complex_number_units
+      integer(C_LONG), value :: dist
+!	'dist' is the distance between spectral arrays in complex number units.
     end subroutine shtns_set_batch
     
     type(C_PTR) function shtns_create_with_grid(shtns,mmax,nofft) bind(C, name='shtns_create_with_grid')

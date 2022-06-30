@@ -46,6 +46,10 @@ void cu_SH_to_spat_float(shtns_cfg shtns, cplx_f *Qlm, float *Vr, int ltr);
 void cu_spat_to_SHsphtor(shtns_cfg, double *Vt, double *Vp, cplx *Slm, cplx *Tlm, int ltr);
 /// Same as \ref SHsphtor_to_spat, but working on data residing on the GPU.
 void cu_SHsphtor_to_spat(shtns_cfg, cplx *Slm, cplx *Tlm, double *Vt, double *Vp, int ltr);
+/// Same as \ref SHsph_to_spat, but working on data residing on the GPU.
+void cu_SHsph_to_spat(shtns_cfg, cplx *Slm, double *Vt, double *Vp, int ltr);
+/// Same as \ref SHtor_to_spat, but working on data residing on the GPU.
+void cu_SHtor_to_spat(shtns_cfg, cplx *Tlm, double *Vt, double *Vp, int ltr);
 /// Same as \ref spat_to_SHqst, but working on data residing on the GPU.
 void cu_spat_to_SHqst(shtns_cfg, double *Vr, double *Vt, double *Vp, cplx *Qlm, cplx *Slm, cplx *Tlm, int ltr);
 /// Same as \ref SHqst_to_spat, but working on data residing on the GPU.
