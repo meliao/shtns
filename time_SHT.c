@@ -1015,17 +1015,18 @@ int main(int argc, char *argv[])
 		}
 		spat_to_SH(shtns, Sh, Slm);
 		double err = 0.0;
+		int lm_max = -1;
 		for (int lm=0; lm<NLM; lm++) {
 			double t = cabs(Slm[lm]);
-			if (lm==LiM(shtns,1,1)) t = cabs(Slm[lm] - a11);
-			if (lm==0) t = cabs(Slm[lm] - a00);
-			if (lm==1) t = cabs(Slm[lm] - a10);
-			if (err < t) err = t;
+			if (lm==LiM(shtns,1,1)) {	t = cabs(Slm[lm] - a11);	if (t>1e-12) printf(COLOR_ERR "l=1,m=1 error = %g" COLOR_END "\n", t);  }
+			if (lm==0) {  t = cabs(Slm[lm] - a00);	if (t>1e-12) printf(COLOR_ERR "l=0,m=0 error = %g" COLOR_END "\n", t);  }
+			if (lm==1) {  t = cabs(Slm[lm] - a10);	if (t>1e-12) printf(COLOR_ERR "l=1,m=0 error = %g" COLOR_END "\n", t);  }
+			if (err < t) {	err = t;	lm_max = lm;  }
 		}
-		printf("** Test forward transform (analysis) spat_to_SH() :: max err = %g   ", err);
+		printf("** Test forward transform (analysis) spat_to_SH() :: max err = %g   at lm=%d   ", err, lm_max);
 		if (err > 1e-12) {		printf(COLOR_ERR "**** ERROR ****" COLOR_END "\n");	error++;	}
 		else printf(COLOR_OK "OK" COLOR_END "\n");
-
+		write_vect("spec_analys_test.txt", (double*) Slm, 2*NLM);
 
 		for (int lm=0; lm<NLM; lm++)	Slm[lm] = 0.0;
 		Slm[0] = a00;
