@@ -755,7 +755,7 @@ static __global__ void leg_m_kernel(
 
 		while (l<=llim - BLOCKSIZE) {	// compute even and odd parts
 			#pragma unroll
-			for (int k = 0; k<BLOCKSIZE; k+=2) {
+			for (int k = 0; k<BLOCKSIZE; k+=4) {
 				#pragma unroll
 				for (int f=0; f<NFIELDS; f++) {
 					#pragma unroll
@@ -765,11 +765,17 @@ static __global__ void leg_m_kernel(
 					}
 				}
 				#pragma unroll
-				for (int i=0; i<NW; i++) {
-					double tmp = (ak[k+1]*ct2[i] + ak[k]) * y1[i] + y0[i];
-					y0[i] = y1[i];
-					y1[i] = tmp;
+				for (int i=0; i<NW; i++) y0[i] += (ak[k+1]*ct2[i] + ak[k]) * y1[i];
+				#pragma unroll
+				for (int f=0; f<NFIELDS; f++) {
+					#pragma unroll
+					for (int i=0; i<NW; i++) {
+						re[f][i] += y1[i] * qk[f][k+2];		// real
+						ro[f][i] += y1[i] * qk[f][k+3];		// real
+					}
 				}
+				#pragma unroll
+				for (int i=0; i<NW; i++) y1[i] += (ak[k+3]*ct2[i] + ak[k+2]) * y0[i];
 			}
 			al += BLOCKSIZE;
 			l  += BLOCKSIZE;
@@ -909,7 +915,7 @@ static __global__ void leg_m_kernel(
 					}
 				}
 				#pragma unroll
-				for (int i=0; i<NW; i++)	y0[i] = tmp[i] * y1[i] + y0[i];
+				for (int i=0; i<NW; i++)	y0[i] += tmp[i] * y1[i];
 				#pragma unroll
 				for (int i=0; i<NW; i++)	tmp[i] = ak[k+3]*ct2[i] + ak[k+2];
 				if ((!HI_LLIM) || (ny==0)) {
@@ -930,7 +936,7 @@ static __global__ void leg_m_kernel(
 					y1[0] *= 1.0/SHT_SCALE_FACTOR;
 				}
 				#pragma unroll
-				for (int i=0; i<NW; i++)	y1[i] = tmp[i] * y0[i] + y1[i];
+				for (int i=0; i<NW; i++)	y1[i] += tmp[i] * y0[i];
 			}
 			al += BLOCKSIZE;
 			l  += BLOCKSIZE;
