@@ -699,7 +699,7 @@ static __global__ void leg_m_kernel(
 	const int llim, const int nlat_2, const int lmax, const int mres, const int nphi, const int m_inc,
 	const int ql_dist=0, const int q_dist=0, const double* __restrict__ xlm = 0)
 {
-	const int it = BLOCKSIZE*NW * blockIdx.x + threadIdx.x;
+	const int it = (HI_LLIM) ? BLOCKSIZE*NW * blockIdx.x + NW*threadIdx.x : BLOCKSIZE*NW * blockIdx.x + threadIdx.x;
 	const int im = (M0_ONLY) ? 0 : blockIdx.z;
 	const int j = threadIdx.x;
 	const int b = blockIdx.y;		// position in batch
@@ -709,16 +709,14 @@ static __global__ void leg_m_kernel(
 	__shared__ double ak[BLOCKSIZE];		// size blockDim.x
 	__shared__ double qk[NFIELDS][(M0_ONLY) ? BLOCKSIZE : BLOCKSIZE*2];	// size 2*blockDim.x * NFIELDS
 
-	//static_assert( NFIELDS==1, "only NFIELDS=1 is supported" );		// WIP batch
-
-	static_assert( (!HI_LLIM) || ((NW==1) && (BLOCKSIZE == WARPSZE)), "high llim works with NW=1 and BLOCKSIZE=32" );
+	static_assert( (!HI_LLIM) || (( NW==1 || (NW&1)==0 ) && (BLOCKSIZE == WARPSZE)), "high llim works with NW=1 or NW even and BLOCKSIZE=WarpSize" );
 
 	double cost[NW];
 	double y0[NW];
 	double y1[NW];
 	#pragma unroll
 	for (int i=0; i<NW; i++) {
-		const int iit = it+i*BLOCKSIZE;
+		const int iit = (HI_LLIM) ? it+i : it+i*BLOCKSIZE;
 		cost[i] = (iit < nlat_2) ? ct[iit] : 0.0;
 	}
 	double ct2[NW];
@@ -818,10 +816,9 @@ static __global__ void leg_m_kernel(
 
 		#pragma unroll
 		for (int i=0; i<NW; i++) {
-			const int iit = it+i*BLOCKSIZE;
+			const int iit = (HI_LLIM) ? it+i : it+i*BLOCKSIZE;
 			if (iit < nlat_2) {
 				// store mangled for complex fft
-				const int iit = it+i*BLOCKSIZE;
 				#pragma unroll
 				for (int f=0; f<NFIELDS; f++) {
 						q[iit*k_inc + (b*NFIELDS+f)*q_dist] = re[f][i]+ro[f][i]*cost[i];
@@ -861,7 +858,8 @@ static __global__ void leg_m_kernel(
 			y0[i] = 1.0;
 		}
 
-	if ((NW>1) || (BLOCKSIZE > WARPSZE) || (_any(m - llim*y1[0] <= max(80, llim>>7))))	// polar optimization (see Reinecke 2013), avoiding warp divergence
+	if ((BLOCKSIZE > WARPSZE) || (HI_LLIM ? _any(m - llim*y1[NW-1] <= max(80, llim>>7)) : 
+											_any(m - 80 <= llim*y1[NW-1])))	// polar optimization (see Reinecke 2013), avoiding warp divergence
 	{
 		l = m - S;
 		if (S==1 && ROBERT_FORM) l = m;		// multiply vectors by sin(theta) with robert_form
@@ -873,8 +871,9 @@ static __global__ void leg_m_kernel(
 				for (int i=0; i<NW; i++) y0[i] *= y1[i];
 				if (HI_LLIM) {
 					ny += nsint;
-					if (y0[0] < (SHT_ACCURACY+1.0/SHT_SCALE_FACTOR)) {
-						y0[0] *= SHT_SCALE_FACTOR;
+					if (y0[NW-1] < (SHT_ACCURACY+1.0/SHT_SCALE_FACTOR)) {
+						#pragma unroll
+						for (int i=0; i<NW; i++) y0[i] *= SHT_SCALE_FACTOR;
 						ny--;
 					}
 				}
@@ -883,9 +882,10 @@ static __global__ void leg_m_kernel(
 			for (int i=0; i<NW; i++) y1[i] *= y1[i];
 			if (HI_LLIM) {
 				nsint += nsint;
-				if (y1[0] < 1.0/SHT_SCALE_FACTOR) {
+				if (y1[NW-1] < 1.0/SHT_SCALE_FACTOR) {
 					nsint--;
-					y1[0] *= SHT_SCALE_FACTOR;
+					#pragma unroll
+					for (int i=0; i<NW; i++) y1[i] *= SHT_SCALE_FACTOR;
 				}
 			}
 		} while(l >>= 1);
@@ -929,11 +929,14 @@ static __global__ void leg_m_kernel(
 							roi[f][i] += y1[i] * qk[f][2*k+7];	// imag
 						}
 					}
-				} else if (fabs(y0[0]) > SHT_ACCURACY*SHT_SCALE_FACTOR + 1.0)
+				} else if (fabs(y0[NW-1]) > SHT_ACCURACY*SHT_SCALE_FACTOR + 1.0)
 				{	// rescale when value is significant
 					++ny;
-					y0[0] *= 1.0/SHT_SCALE_FACTOR;
-					y1[0] *= 1.0/SHT_SCALE_FACTOR;
+					#pragma unroll
+					for (int i=0; i<NW; i++) {
+						y0[i] *= 1.0/SHT_SCALE_FACTOR;
+						y1[i] *= 1.0/SHT_SCALE_FACTOR;
+					}
 				}
 				#pragma unroll
 				for (int i=0; i<NW; i++)	y1[i] += tmp[i] * y0[i];
@@ -970,11 +973,14 @@ static __global__ void leg_m_kernel(
 						roi[f][i] += y0[i] * qk[f][2*k+3];	// imag
 					}
 				}
-			} else if (fabs(y1[0]) > SHT_ACCURACY*SHT_SCALE_FACTOR + 1.0)
+			} else if (fabs(y1[NW-1]) > SHT_ACCURACY*SHT_SCALE_FACTOR + 1.0)
 			{	// rescale when value is significant
 				++ny;
-				y0[0] *= 1.0/SHT_SCALE_FACTOR;
-				y1[0] *= 1.0/SHT_SCALE_FACTOR;
+				#pragma unroll
+				for (int i=0; i<NW; i++) {
+					y0[i] *= 1.0/SHT_SCALE_FACTOR;
+					y1[i] *= 1.0/SHT_SCALE_FACTOR;
+				}
 			}
 			#pragma unroll
 			for (int i=0; i<NW; i++) tmp[i] = tmp[i] * y1[i] + y0[i];
@@ -1010,24 +1016,35 @@ static __global__ void leg_m_kernel(
 		}
 
 		/// store mangled for complex fft
-		#pragma unroll
-		for (int i=0; i<NW; i++) {
+		if ((!HI_LLIM) || (NW==1)) {
 			#pragma unroll
-			for (int f=0; f<NFIELDS; f++)	rei[f][i] = shfl_xor(rei[f][i], 1);
-		}
-		#pragma unroll
-		for (int i=0; i<NW; i++) {
+			for (int i=0; i<NW; i++) {
+				#pragma unroll
+				for (int f=0; f<NFIELDS; f++)	rei[f][i] = shfl_xor(rei[f][i], 1);
+			}
 			#pragma unroll
-			for (int f=0; f<NFIELDS; f++)	roi[f][i] = shfl_xor(roi[f][i], 1);
+			for (int i=0; i<NW; i++) {
+				#pragma unroll
+				for (int f=0; f<NFIELDS; f++)	roi[f][i] = shfl_xor(roi[f][i], 1);
+			}
+		} else {
+			#pragma unroll
+			for (int i=0; i<NW; i+=2) {
+				#pragma unroll
+				for (int f=0; f<NFIELDS; f++)	{	double tmp = rei[f][i]; rei[f][i] = rei[f][i+1]; rei[f][i+1] = tmp; }
+				#pragma unroll
+				for (int f=0; f<NFIELDS; f++)	{	double tmp = roi[f][i]; roi[f][i] = roi[f][i+1]; roi[f][i+1] = tmp; }
+			}
 		}
 	}
 
 		double nr[NFIELDS][NW];
-		const double sgn = (j^1) - j;	// 1 - 2*(j&1);		// 1 for even j, -1 for odd j.
+		//const double sgn = (j^1) - j;	// 1 - 2*(j&1);		// 1 for even j, -1 for odd j.
 		#pragma unroll
 		for (int i=0; i<NW; i++) {
-			const int iit = it+i*BLOCKSIZE;
+			const int iit = (HI_LLIM) ? it+i : it+i*BLOCKSIZE;
 			if (iit < nlat_2) {
+				const double sgn = (iit^1) - iit;	// 1 - 2*(j&1);		// 1 for even j, -1 for odd j.
 				#pragma unroll
 				for (int f=0; f<NFIELDS; f++) {
 					nr[f][i] =  rer[f][i]+ror[f][i];
@@ -1075,7 +1092,7 @@ static void leg_m(shtns_cfg shtns, const double *ql, double *q, const int llim, 
 				(d_alm, d_ct, (double*) ql, (double*) q, llim, nlat_2, lmax,mres, nphi, shtns->nlat_padded, shtns->nlm_stride, spat_dist);
 		}
 	} else if (shtns->howmany % 2 == 0) {	// multiple of 2
-		const int NW = (HI_LLIM) ? 1 : 2;
+		const int NW = 2;
 		const int blocksPerGrid = (nlat_2 + BLOCKSIZE*NW - 1) / (BLOCKSIZE*NW);
 		dim3 blocks(blocksPerGrid, shtns->howmany/2, mmax+1);
 		if (S==1 && shtns->robert_form) {
@@ -1086,7 +1103,7 @@ static void leg_m(shtns_cfg shtns, const double *ql, double *q, const int llim, 
 				(d_alm, d_ct, (double*) ql, (double*) q, llim, nlat_2, lmax,mres, nphi, shtns->nlat_padded, shtns->nlm_stride, spat_dist);
 		}
 	} else {
-		const int NW = (HI_LLIM) ? 1 : 2;
+		const int NW = 2;
 		const int blocksPerGrid = (nlat_2 + BLOCKSIZE*NW - 1) / (BLOCKSIZE*NW);
 		dim3 blocks(blocksPerGrid, shtns->howmany, mmax+1);
 		if (S==1 && shtns->robert_form) {
