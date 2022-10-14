@@ -495,7 +495,7 @@ void cuda_SH_to_spat(shtns_cfg shtns, cplx* d_Qlm, double *d_Vr, const long int 
 	//if (spat_dist == 0) spat_dist = shtns->spat_stride;
 
 	cplx* d_qlm = d_Qlm;
-		if (S==0) {
+		if (S==0  &&  (SHT_ALLOW_SH2ISH_FUSE==0 || llim > SHT_L_RESCALE_FLY)) {
 			d_qlm = (cplx*) shtns->gpu_buf_in;
 			//for (int f=0; f<NFIELDS; f++)
 			//	sh2ishioka_gpu(shtns, d_Qlm + f * shtns->nlm_stride, d_qlm + f * shtns->nlm_stride, llim, mmax, S);
@@ -629,6 +629,7 @@ void SH_to_spat_gpu(shtns_cfg shtns, cplx *Qlm, double *Vr, const long int llim)
 
 	double *d_q   = shtns->gpu_buf_out;		// outer buffer for transfer (safe)
 	double *d_qlm = d_q;		// "in-place" operation possible with ishioka
+	if (SHT_ALLOW_SH2ISH_FUSE == 1  &&  llim <= SHT_L_RESCALE_FLY) d_qlm = shtns->gpu_buf_in; // include sh2ishioka into legendre kernel
 
 	if (llim < mmax*mres) {
 		mmax = llim / mres;	// truncate mmax too !

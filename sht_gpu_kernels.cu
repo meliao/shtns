@@ -26,6 +26,9 @@
 #define SHT_ACCURACY 1.0e-40
 #define SHT_SCALE_FACTOR 2.0370359763344860863e+90
 
+// when possible, allows to fuse sh2ishioka into leg_m_kernel, reducing memory traffic
+#define SHT_ALLOW_SH2ISH_FUSE 1
+
 #if (__CUDACC_VER_MAJOR__ < 8) || ( defined(__CUDA_ARCH__) && __CUDA_ARCH__ < 600 )
 __device__ double atomicAdd(double* address, double val)
 {
@@ -1078,6 +1081,8 @@ static void leg_m(shtns_cfg shtns, const double *ql, double *q, const int llim, 
 	const int BLOCKSIZE = 32;		// 32 allows to use polar optimization; 128 and NW=2 are sometimes better though.
 	const int threadsPerBlock = BLOCKSIZE;	// can be from 32 to 1024, we should try to measure the fastest !
 	if (spat_dist == 0) spat_dist = shtns->spat_stride;
+	const bool sh2ish_fuse = (SHT_ALLOW_SH2ISH_FUSE==1 && S==0 && !HI_LLIM);
+	const int nlm_stride = (sh2ish_fuse) ? shtns->spec_dist*2 : shtns->nlm_stride;
 	
 	dim3 threads(threadsPerBlock, 1, 1);
 	if (shtns->howmany % 4 == 0) {	// multiple of 4
@@ -1086,10 +1091,10 @@ static void leg_m(shtns_cfg shtns, const double *ql, double *q, const int llim, 
 		dim3 blocks(blocksPerGrid, shtns->howmany/4, mmax+1);
 		if (S==1 && shtns->robert_form) {
 			leg_m_kernel<BLOCKSIZE, S, 4, NW, HI_LLIM, false, true> <<<blocks, threads, 0, stream>>>
-				(d_alm, d_ct, (double*) ql, (double*) q, llim, nlat_2, lmax,mres, nphi, shtns->nlat_padded, shtns->nlm_stride, spat_dist);
+				(d_alm, d_ct, (double*) ql, (double*) q, llim, nlat_2, lmax,mres, nphi, shtns->nlat_padded, nlm_stride, spat_dist);
 		} else {
-			leg_m_kernel<BLOCKSIZE, S, 4, NW, HI_LLIM> <<<blocks, threads, 0, stream>>>
-				(d_alm, d_ct, (double*) ql, (double*) q, llim, nlat_2, lmax,mres, nphi, shtns->nlat_padded, shtns->nlm_stride, spat_dist);
+			leg_m_kernel<BLOCKSIZE, S, 4, NW, HI_LLIM, false, false, sh2ish_fuse> <<<blocks, threads, 0, stream>>>
+				(d_alm, d_ct, (double*) ql, (double*) q, llim, nlat_2, lmax,mres, nphi, shtns->nlat_padded, nlm_stride, spat_dist, sh2ish_fuse ? shtns->d_xlm : 0);
 		}
 	} else if (shtns->howmany % 2 == 0) {	// multiple of 2
 		const int NW = 2;
@@ -1097,10 +1102,10 @@ static void leg_m(shtns_cfg shtns, const double *ql, double *q, const int llim, 
 		dim3 blocks(blocksPerGrid, shtns->howmany/2, mmax+1);
 		if (S==1 && shtns->robert_form) {
 			leg_m_kernel<BLOCKSIZE, S, 2, NW, HI_LLIM, false, true> <<<blocks, threads, 0, stream>>>
-				(d_alm, d_ct, (double*) ql, (double*) q, llim, nlat_2, lmax,mres, nphi, shtns->nlat_padded, shtns->nlm_stride, spat_dist);
+				(d_alm, d_ct, (double*) ql, (double*) q, llim, nlat_2, lmax,mres, nphi, shtns->nlat_padded, nlm_stride, spat_dist);
 		} else {
-			leg_m_kernel<BLOCKSIZE, S, 2, NW, HI_LLIM> <<<blocks, threads, 0, stream>>>
-				(d_alm, d_ct, (double*) ql, (double*) q, llim, nlat_2, lmax,mres, nphi, shtns->nlat_padded, shtns->nlm_stride, spat_dist);
+			leg_m_kernel<BLOCKSIZE, S, 2, NW, HI_LLIM,  false, false, sh2ish_fuse> <<<blocks, threads, 0, stream>>>
+				(d_alm, d_ct, (double*) ql, (double*) q, llim, nlat_2, lmax,mres, nphi, shtns->nlat_padded, nlm_stride, spat_dist, sh2ish_fuse ? shtns->d_xlm : 0);
 		}
 	} else {
 		const int NW = 2;
@@ -1108,39 +1113,40 @@ static void leg_m(shtns_cfg shtns, const double *ql, double *q, const int llim, 
 		dim3 blocks(blocksPerGrid, shtns->howmany, mmax+1);
 		if (S==1 && shtns->robert_form) {
 			leg_m_kernel<BLOCKSIZE, S, 1, NW, HI_LLIM, false, true> <<<blocks, threads, 0, stream>>>
-				(d_alm, d_ct, (double*) ql, (double*) q, llim, nlat_2, lmax,mres, nphi, shtns->nlat_padded, shtns->nlm_stride, spat_dist);
+				(d_alm, d_ct, (double*) ql, (double*) q, llim, nlat_2, lmax,mres, nphi, shtns->nlat_padded, nlm_stride, spat_dist);
 		} else {
-			leg_m_kernel<BLOCKSIZE, S, 1, NW, HI_LLIM> <<<blocks, threads, 0, stream>>>
-				(d_alm, d_ct, (double*) ql, (double*) q, llim, nlat_2, lmax,mres, nphi, shtns->nlat_padded, shtns->nlm_stride, spat_dist);
+			leg_m_kernel<BLOCKSIZE, S, 1, NW, HI_LLIM, false, false, sh2ish_fuse> <<<blocks, threads, 0, stream>>>
+				(d_alm, d_ct, (double*) ql, (double*) q, llim, nlat_2, lmax,mres, nphi, shtns->nlat_padded, nlm_stride, spat_dist, sh2ish_fuse ? shtns->d_xlm : 0);
 		}
 	}
 }
 
-template<int S, int NFIELDS>
+template<int S, int NFIELDS, bool SH2ISH=false>
 static void leg_m0(shtns_cfg shtns, const double *ql, double *q, const int llim, long spat_dist = 0)
 {
 	const int nlat_2 = shtns->nlat_2;
 	double *d_ct = shtns->d_ct;
 	cudaStream_t stream = shtns->comp_stream;
+	const int nlm_stride = (SH2ISH) ? shtns->spec_dist*2 : shtns->nlm_stride;
 
 	static_assert( NFIELDS == 1, "batched transform requires NFIELDS=1");
 	if (spat_dist == 0) spat_dist = shtns->spat_stride;
 
-	const int BLOCKSIZE = 32;		// good value
-	const int NW = 4;
-	const int blocksPerGrid = (nlat_2 + BLOCKSIZE*NW - 1) / (BLOCKSIZE*NW);
+	const int BLOCKSIZE = WARPSZE;		// good value
 
 	// Launch the Legendre CUDA Kernel
 	const int threadsPerBlock = BLOCKSIZE;	// can be from 32 to 1024, we should try to measure the fastest !
 	if (shtns->howmany % 4 == 0) {
+		const int NW = 4;
+		const int blocksPerGrid = (nlat_2 + BLOCKSIZE*NW - 1) / (BLOCKSIZE*NW);
 		dim3 threads(threadsPerBlock, 1, 1);
 		dim3 blocks(blocksPerGrid, shtns->howmany/4, 1);
 		if (S==1 && shtns->robert_form) {
 			leg_m_kernel<BLOCKSIZE, S, 4, NW, false, true, true> <<<blocks, threads, 0, stream>>>
-				(shtns->d_clm, d_ct, (double*) ql, (double*) q, llim, nlat_2, llim,1, 1, shtns->nlat_padded, shtns->nlm_stride, spat_dist, shtns->d_xlm);
+				(shtns->d_clm, d_ct, (double*) ql, (double*) q, llim, nlat_2, llim,1, 1, shtns->nlat_padded, nlm_stride, spat_dist);
 		} else {
-			leg_m_kernel<BLOCKSIZE, S, 4, NW, false, true> <<<blocks, threads, 0, stream>>>
-				(shtns->d_clm, d_ct, (double*) ql, (double*) q, llim, nlat_2, llim,1, 1, shtns->nlat_padded, shtns->nlm_stride, spat_dist, shtns->d_xlm);
+			leg_m_kernel<BLOCKSIZE, S, 4, NW, false, true, false, SH2ISH> <<<blocks, threads, 0, stream>>>
+				(shtns->d_clm, d_ct, (double*) ql, (double*) q, llim, nlat_2, llim,1, 1, shtns->nlat_padded, nlm_stride, spat_dist, SH2ISH ? shtns->d_xlm : 0);
 		}
 	} else if (shtns->howmany % 2 == 0) {
 		const int NW = 4;
@@ -1149,10 +1155,10 @@ static void leg_m0(shtns_cfg shtns, const double *ql, double *q, const int llim,
 		dim3 blocks(blocksPerGrid, shtns->howmany/2, 1);
 		if (S==1 && shtns->robert_form) {
 			leg_m_kernel<BLOCKSIZE, S, 2, NW, false, true, true> <<<blocks, threads, 0, stream>>>
-				(shtns->d_clm, d_ct, (double*) ql, (double*) q, llim, nlat_2, llim,1, 1, shtns->nlat_padded, shtns->nlm_stride, spat_dist, shtns->d_xlm);
+				(shtns->d_clm, d_ct, (double*) ql, (double*) q, llim, nlat_2, llim,1, 1, shtns->nlat_padded, nlm_stride, spat_dist);
 		} else {
-			leg_m_kernel<BLOCKSIZE, S, 2, NW, false, true> <<<blocks, threads, 0, stream>>>
-				(shtns->d_clm, d_ct, (double*) ql, (double*) q, llim, nlat_2, llim,1, 1, shtns->nlat_padded, shtns->nlm_stride, spat_dist, shtns->d_xlm);
+			leg_m_kernel<BLOCKSIZE, S, 2, NW, false, true, false, SH2ISH> <<<blocks, threads, 0, stream>>>
+				(shtns->d_clm, d_ct, (double*) ql, (double*) q, llim, nlat_2, llim,1, 1, shtns->nlat_padded, nlm_stride, spat_dist, SH2ISH ? shtns->d_xlm : 0);
 		}
 	} else {
 		const int NW = 4;
@@ -1161,10 +1167,10 @@ static void leg_m0(shtns_cfg shtns, const double *ql, double *q, const int llim,
 		dim3 blocks(blocksPerGrid, shtns->howmany, 1);
 		if (S==1 && shtns->robert_form) {
 			leg_m_kernel<BLOCKSIZE, S, 1, NW, false, true, true> <<<blocks, threads, 0, stream>>>
-				(shtns->d_clm, d_ct, (double*) ql, (double*) q, llim, nlat_2, llim,1, 1, shtns->nlat_padded, shtns->nlm_stride, spat_dist, shtns->d_xlm);
+				(shtns->d_clm, d_ct, (double*) ql, (double*) q, llim, nlat_2, llim,1, 1, shtns->nlat_padded, nlm_stride, spat_dist);
 		} else {
-			leg_m_kernel<BLOCKSIZE, S, 1, NW, false, true> <<<blocks, threads, 0, stream>>>
-				(shtns->d_clm, d_ct, (double*) ql, (double*) q, llim, nlat_2, llim,1, 1, shtns->nlat_padded, shtns->nlm_stride, spat_dist, shtns->d_xlm);
+			leg_m_kernel<BLOCKSIZE, S, 1, NW, false, true, false, SH2ISH> <<<blocks, threads, 0, stream>>>
+				(shtns->d_clm, d_ct, (double*) ql, (double*) q, llim, nlat_2, llim,1, 1, shtns->nlat_padded, nlm_stride, spat_dist, SH2ISH ? shtns->d_xlm : 0);
 		}
 	}
 }
@@ -1534,7 +1540,8 @@ static void legendre(shtns_cfg shtns, const double *ql, double *q, const int lli
 {
 	if (spat_dist == 0) spat_dist = shtns->spat_stride;
 	if (mmax==0) {
-		leg_m0<S,NFIELDS>(shtns, ql, q, llim, spat_dist);
+		if (SHT_ALLOW_SH2ISH_FUSE==0 || llim > SHT_L_RESCALE_FLY)  leg_m0<S,NFIELDS>(shtns, ql, q, llim, spat_dist);
+		else leg_m0<S,NFIELDS, true>(shtns, ql, q, llim, spat_dist);
 	} else {
 		if (llim <= SHT_L_RESCALE_FLY) {
 			leg_m<S,NFIELDS>(shtns, ql, q, llim, mmax, spat_dist);
