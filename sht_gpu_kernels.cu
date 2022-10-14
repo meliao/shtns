@@ -276,7 +276,7 @@ sh2ishioka_kernel_alt(const double* __restrict__ xlm, const double* __restrict__
 	ql     += q_ofs;
 	ql_ish += q_ofs;
 	
-	if (im==0) { if (l<=lmax) ql_ish[2*l0+j  + b*ql_ish_dist] = ql[2*l0+j + b*ql_dist];	return; }	// DEBUG: copy
+	//if (im==0) { if (l<=lmax) ql_ish[2*l0+j  + b*ql_ish_dist] = ql[2*l0+j + b*ql_dist];	return; }	// DEBUG: copy
 
 	if ((l<=llim_m) && (j < blockDim.x-4)) {
 		double q = qish(xlm, ql + b*ql_dist, llim-m, 2*l0 + j);
@@ -840,12 +840,12 @@ static __global__ void leg_m_kernel(
 		if (m+j/2 <= llim) {
 			#pragma unroll
 			for (int f=0; f<NFIELDS; f++)	if (!SH2ISH) qk[f][j] = ql[2*m+j + (b*NFIELDS+f)*ql_dist];
-					else qk[f][j] = qish(xlm, ql+(b*NFIELDS+f)*ql_dist, llim, 2*m+j);
+					else qk[f][j] = qish(xlm, ql+2*m+(b*NFIELDS+f)*ql_dist, llim-m, j);
 		}
 			if (m+j/2+BLOCKSIZE/2 <= llim) {
 				#pragma unroll
 				for (int f=0; f<NFIELDS; f++)	if (!SH2ISH) qk[f][j+BLOCKSIZE] = ql[2*m+j+BLOCKSIZE + (b*NFIELDS+f)*ql_dist];
-					else qk[f][j+BLOCKSIZE] = qish(xlm, ql+(b*NFIELDS+f)*ql_dist, llim, 2*m+j+BLOCKSIZE);
+					else qk[f][j+BLOCKSIZE] = qish(xlm, ql+2*m+(b*NFIELDS+f)*ql_dist, llim-m, j+BLOCKSIZE);
 			}
 
 		#pragma unroll
@@ -947,12 +947,12 @@ static __global__ void leg_m_kernel(
 			if (l+j/2 <= llim) {
 				#pragma unroll
 				for (int f=0; f<NFIELDS; f++)	if (!SH2ISH) qk[f][j] = ql[2*l+j + (b*NFIELDS+f)*ql_dist];
-						else qk[f][j] = qish(xlm, ql+(b*NFIELDS+f)*ql_dist, llim, 2*l+j);
+						else qk[f][j] = qish(xlm, ql+2*m+(b*NFIELDS+f)*ql_dist, llim-m, 2*(l-m)+j);
 			}
 			if (l+j/2+BLOCKSIZE/2 <= llim) {
 				#pragma unroll
 				for (int f=0; f<NFIELDS; f++)	if (!SH2ISH) qk[f][BLOCKSIZE+j] = ql[2*l+BLOCKSIZE+j + (b*NFIELDS+f)*ql_dist];
-						else qk[f][j+BLOCKSIZE] = qish(xlm, ql+(b*NFIELDS+f)*ql_dist, llim, 2*l+j+BLOCKSIZE);
+						else qk[f][j+BLOCKSIZE] = qish(xlm, ql+2*m+(b*NFIELDS+f)*ql_dist, llim-m, 2*(l-m)+j+BLOCKSIZE);
 			}
 			if (l+j <= llim)	 ak[j] = al[j];
 			if (BLOCKSIZE > WARPSZE) { __syncthreads(); } else { _syncwarp; }
