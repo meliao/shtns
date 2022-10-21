@@ -1162,26 +1162,24 @@ ileg_m_kernel(const double* __restrict__ al, const double* __restrict__ ct, cons
 	const int im = (M0_ONLY) ? 0 : blockIdx.y;
 	const int b = blockIdx.z;
 	//const int m_inc = 2*nlat_2;
+	const int f0 = (NFIELDS==1) ? 0 : j / (BLOCKSIZE/NFIELDS);			// assign each thread a field f0
 
-	//static_assert( NFIELDS==1, "only NFIELDS=1 is supported for batch transform" );
 	static_assert((BLOCKSIZE % (((M0_ONLY)?1:2)*LSPAN*NFIELDS)) == 0, "BLOCKSIZE must be a multiple of 2*LSPAN*NFIELDS");
 	static_assert( ((WARPSZE >= BLOCKSIZE/LSPAN) ? (WARPSZE % (BLOCKSIZE/LSPAN)) : ((BLOCKSIZE/LSPAN) % WARPSZE)) == 0, "WARPSZE and BLOCKSIZE/LSPAN must be multiples");
 	static_assert( (!HI_LLIM) || (BLOCKSIZE == WARPSZE), "for high llim, BLOCKSIZE must be 32");
-	static_assert(LSPAN >= 8, "LSPAN must be >= 8");
 	static_assert((LSPAN % 4) == 0, "LSPAN must be a multiple of 4");
 
 	const int padding = 2;		// padding = 0 is very bad for performance (shared-memory bank conflicts).
 	const int l_inc = BLOCKSIZE+padding;
 	__shared__ double ak[LSPAN+2];	// cache
-	const int NROWS = (LSPAN>4*NFIELDS) ? LSPAN/2 : NFIELDS*2;
+	const int NROWS = (LSPAN>4*NFIELDS) ? ((LSPAN>8) ? LSPAN/2 : 4) : NFIELDS*2;
 	__shared__ double yl[NROWS*l_inc - padding];		// yl is also used for even/odd computation. Ensure LSPAN >= 8 (or 4 for m=0)
+
 	double cost = (it < nlat_2) ? ct[it] : 0.0;
 	double y0, y1;
-	double st_1;
 
 	if (im == 0) {
 		const int NW = NFIELDS*LSPAN;
-		const int f0 = (NFIELDS==1) ? 0 : j / (BLOCKSIZE/NFIELDS);			// assign each thread a field f0
 		// re-assign each thread an l (transposed view)
 		const int ll = (j % (BLOCKSIZE/NFIELDS)) / (BLOCKSIZE/NW);
 		double my_reo[NW];			// in registers
@@ -1228,7 +1226,7 @@ ileg_m_kernel(const double* __restrict__ al, const double* __restrict__ ct, cons
 				}
 			if (BLOCKSIZE > WARPSZE) {	__syncthreads(); } else { _syncwarp; }
 
-			const int NACC = (NW>=8) ? 4 : 1;		// number of independent accumulators per NFIELD. 4 is good for V100
+			const int NACC = 4;		// number of independent accumulators per NFIELD. 4 is good for V100
 			double qll[NACC];		// accumulators
 			// now re-assign each thread an l (transpose)
 			const int itl = (ll >> 1)*l_inc + j % (BLOCKSIZE/NW);
@@ -1268,9 +1266,11 @@ ileg_m_kernel(const double* __restrict__ al, const double* __restrict__ ct, cons
 			l+=LSPAN;
 		}
 	} else {	// im > 0
-		// re-assign each thread an l (transpose)
-		const int ll = j / (BLOCKSIZE/(2*LSPAN));		// 2*l + (real ? 0 : 1)
-		double my_reo[NFIELDS][2*LSPAN];			// in registers
+		const int NW = NFIELDS*LSPAN*(M0_ONLY ? 1:2);		// the test for M0_ONLY is to silence a warning
+		// re-assign each thread an l (transposed view)
+		const int ll = (j % (BLOCKSIZE/NFIELDS)) / (BLOCKSIZE/NW);		// actualy ll = 2*l + (imag ? 1 : 0)
+		double my_reo[NW];			// in registers
+
 		int m = im*mres;
 		int l = (im*(2*(lmax+1)-(m+mres)))>>1;
 
@@ -1280,11 +1280,11 @@ ileg_m_kernel(const double* __restrict__ al, const double* __restrict__ ct, cons
 		if (j < LSPAN+2) ak[j] = al[j];
 
 		// polar optimization (see Reinecke 2013)
-		if ( (BLOCKSIZE == WARPSZE) && _all(m - llim*y1 > max(80, llim>>7)) ) return;
+		if ( (BLOCKSIZE == WARPSZE) && _all(HI_LLIM ? m - llim*y1 > max(80, llim>>7) : m-80 > llim*y1 ) ) return;
 
 		ql += 2*(l + S*im);	// allow vector transforms where llim = lmax+1
 		const double sgn = j - (j^1);	//	2*(j&1) - 1;	// -/+
-		const int ofs = (ll&3)*l_inc + j % (BLOCKSIZE/(2*LSPAN)); 
+		const int ofs = (ll&3)*l_inc + j % (BLOCKSIZE/NW);
 		#pragma unroll
 		for (int f=0; f<NFIELDS; f++) {
 			double qer = (it < nlat_2) ? q[im*m_inc        + it            + (b*NFIELDS+f)*q_dist] : 0.0;	// north imag (ani)
@@ -1310,9 +1310,11 @@ ileg_m_kernel(const double* __restrict__ al, const double* __restrict__ ct, cons
 
 			if (BLOCKSIZE > WARPSZE) {	__syncthreads(); } else { _syncwarp; }
 			// transpose yl to my_reo (registers)
-			#pragma unroll
-			for (int k=0; k<2*LSPAN; k++) {
-				my_reo[f][k] = yl[ofs + k*(BLOCKSIZE/(2*LSPAN))];
+			if (f==f0) {
+				#pragma unroll
+				for (int k=0; k<NW; k++) {
+					my_reo[k] = yl[ofs + k*(BLOCKSIZE/NW)];
+				}
 			}
 		}
 
@@ -1371,49 +1373,39 @@ ileg_m_kernel(const double* __restrict__ al, const double* __restrict__ ct, cons
 
 			if ((!HI_LLIM) || (y_not_zero)) {		// when all y are zero, we can skip this.
 				// transposed work (at given l):
-				const int NACC = (NFIELDS == 1) ? 2 : 1;		// number of independent accumulators per NFIELD.
-				double qlri[NFIELDS*NACC];		// accumulators
-				const int itl = (ll>>2)*l_inc + j % (BLOCKSIZE/(2*LSPAN));
+				const int NACC = 2;		// number of independent accumulators (2 is the sweetspot for V100).
+				double qlri[NACC];		// accumulators
 
+				const int itl = (ll>>2)*l_inc + (j % (BLOCKSIZE/NW));
 				#pragma unroll
 				for (int a=0; a<NACC; a++) {	// NACC independent accumulators
-					#pragma unroll
-					for (int f=0; f<NFIELDS; f++)	qlri[f+a*NFIELDS]   = my_reo[f][a]   * yl[itl + a*(BLOCKSIZE/(2*LSPAN))];
+					qlri[a]   = my_reo[a]   * yl[itl + a*(BLOCKSIZE/NW)];
 				}
 				#pragma unroll
-				for (int k=NACC; k<2*LSPAN; k+=NACC) {		// accumulate in NACC separate accumulators
+				for (int k=NACC; k<NW; k+=NACC) {		// accumulate in NACC separate accumulators
 					#pragma unroll
 					for (int a=0; a<NACC; a++) {	// NACC independent accumulators
-						#pragma unroll
-						for (int f=0; f<NFIELDS; f++)	qlri[f+a*NFIELDS]   += my_reo[f][k+a]   * yl[itl + (k+a)*(BLOCKSIZE/(2*LSPAN))];
+						qlri[a]   += my_reo[k+a]   * yl[itl + (k+a)*(BLOCKSIZE/NW)];
 					}
 				}
 				if (NACC>1) {	// reduce the NACC independent accumulators
-				#pragma unroll
-				for (int a=0; a<NACC; a+=2) {
 					#pragma unroll
-					for (int f=0; f<NFIELDS; f++)	qlri[f+a*NFIELDS] += qlri[f+(a+1)*NFIELDS];
-				}
-				for (int a=2; a<NACC; a+=2) {
+					for (int a=0; a<NACC; a+=2) 	qlri[a] += qlri[a+1];
 					#pragma unroll
-					for (int f=0; f<NFIELDS; f++)	qlri[f] += qlri[f+a*NFIELDS];
-				}
+					for (int a=2; a<NACC; a+=2) 	qlri[0] += qlri[a];
 				}
 
-				static_assert(BLOCKSIZE/(2*LSPAN) <= WARPSZE, "Blocksize must not exceed 2*LSPAN*WARPSZE");
+				static_assert(BLOCKSIZE/NW <= WARPSZE, "Blocksize must not exceed 2*LSPAN*WARPSZE");
 					// reduce_add within same l is in same warp too:
 					#pragma unroll
-					for (int ofs = BLOCKSIZE/(LSPAN*4); ofs > 0; ofs>>=1) {
-						#pragma unroll
-						for (int f=0; f<NFIELDS; f++)	qlri[f] += shfl_down(qlri[f], ofs, BLOCKSIZE/(LSPAN*2));
+					for (int ofs = BLOCKSIZE/(NW*2); ofs > 0; ofs>>=1) {
+						qlri[0] += shfl_down(qlri[0], ofs, BLOCKSIZE/NW);
 					}
-					if ( ((j % (BLOCKSIZE/(2*LSPAN))) == 0) && ((l+(ll>>1))<=llim) ) {	// write result
+					if ( ((j % (BLOCKSIZE/NW)) == 0) && ((l+(ll>>1))<=llim) ) {	// write result
 						if ((!HI_LLIM) && (nlat_2 <= BLOCKSIZE)) {		// do we need atomic add or not ?
-							#pragma unroll
-							for (int f=0; f<NFIELDS; f++)	ql[2*l+ll + (b*NFIELDS+f)*ql_dist]   = qlri[f];
+							ql[2*l+ll + (b*NFIELDS+f0)*ql_dist]   = qlri[0];
 						} else {
-							#pragma unroll
-							for (int f=0; f<NFIELDS; f++)	atomicAdd(ql+2*l+ll + (b*NFIELDS+f)*ql_dist, qlri[f]);		// VERY slow atomic add on Kepler.
+							atomicAdd(ql+2*l+ll + (b*NFIELDS+f0)*ql_dist, qlri[0]);		// VERY slow atomic add on Kepler.
 						}
 					}
 			}
@@ -1436,7 +1428,7 @@ static void ileg_m(shtns_cfg shtns, const double* q, double *ql, const int llim,
 	double *d_ct = shtns->d_ct;
 	cudaStream_t stream = shtns->comp_stream;
 
-	const int BLOCKSIZE = 32;	// on V100, 32 is the best choice, by far.
+	const int BLOCKSIZE = WARPSZE;	// on V100, 32 is the best choice, by far.
 	const int threadsPerBlock = BLOCKSIZE;	// can be from 32 to 1024, we should try to measure the fastest !
 	const int blocksPerGrid = (nlat_2 + BLOCKSIZE - 1) / (BLOCKSIZE);
 
@@ -1445,7 +1437,18 @@ static void ileg_m(shtns_cfg shtns, const double* q, double *ql, const int llim,
 	if (llim < mmax*mres) mmax = llim / mres;	// truncate mmax too !
 
 	dim3 threads(threadsPerBlock, 1, 1);
-	if (shtns->howmany & 1 == 0) {	// even number of transforms
+	if ((shtns->howmany & 3) == 0) {	// number of transforms is a multiple of 4
+		const int NFIELDS = 4;
+		const int LSPAN_ = 16/NFIELDS;
+		dim3 blocks(blocksPerGrid, mmax+1, shtns->howmany/NFIELDS);
+		if (S==1 && shtns->robert_form) {
+			ileg_m_kernel<BLOCKSIZE, LSPAN_, S, NFIELDS, HI_LLIM, false, true> <<<blocks, threads, 0, stream>>>
+				(d_alm, d_ct, (double*) q, (double*) ql, llim, nlat_2, lmax,mres, nphi, shtns->nlat_padded, shtns->mpos_scale_analys, q_dist, ql_dist);
+		} else {
+			ileg_m_kernel<BLOCKSIZE, LSPAN_, S, NFIELDS, HI_LLIM> <<<blocks, threads, 0, stream>>>
+				(d_alm, d_ct, (double*) q, (double*) ql, llim, nlat_2, lmax,mres, nphi, shtns->nlat_padded, shtns->mpos_scale_analys, q_dist, ql_dist);
+		}
+	} else if ((shtns->howmany & 1) == 0) {	// even number of transforms
 		const int NFIELDS = 2;
 		const int LSPAN_ = 16/NFIELDS;
 		dim3 blocks(blocksPerGrid, mmax+1, shtns->howmany/NFIELDS);
