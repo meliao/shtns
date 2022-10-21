@@ -1172,8 +1172,8 @@ ileg_m_kernel(const double* __restrict__ al, const double* __restrict__ ct, cons
 	const int padding = 2;		// padding = 0 is very bad for performance (shared-memory bank conflicts).
 	const int l_inc = BLOCKSIZE+padding;
 	__shared__ double ak[LSPAN+2];	// cache
-	const int NROWS = (LSPAN>4*NFIELDS) ? ((LSPAN>8) ? LSPAN/2 : 4) : NFIELDS*2;
-	__shared__ double yl[NROWS*l_inc - padding];		// yl is also used for even/odd computation. Ensure LSPAN >= 8 (or 4 for m=0)
+	const int NROWS = M0_ONLY ? ( (LSPAN>4*NFIELDS) ? LSPAN/2 : 2*NFIELDS ) : ( (LSPAN>8*NFIELDS) ? LSPAN/2 : 4*NFIELDS );
+	__shared__ double yl[NROWS*l_inc - padding];		// yl is also used for even/odd computation.
 
 	double cost = (it < nlat_2) ? ct[it] : 0.0;
 	double y0, y1;
@@ -1236,7 +1236,6 @@ ileg_m_kernel(const double* __restrict__ al, const double* __restrict__ ct, cons
 			for (int k=NACC; k<NW; k+=NACC) {
 				#pragma unroll
 				for (int a=0; a<NACC; a++) 	qll[a] += my_reo[a+k] * yl[itl + (k+a)*(BLOCKSIZE/NW)];
-				//				qll[0] += my_reo[k] * yl[itl + k*(BLOCKSIZE/NW)];
 			}
 			if (NACC > 1) {		// reduce the NACC independent accumulators
 				#pragma unroll
@@ -1284,7 +1283,6 @@ ileg_m_kernel(const double* __restrict__ al, const double* __restrict__ ct, cons
 
 		ql += 2*(l + S*im);	// allow vector transforms where llim = lmax+1
 		const double sgn = j - (j^1);	//	2*(j&1) - 1;	// -/+
-		const int ofs = (ll&3)*l_inc + j % (BLOCKSIZE/NW);
 		#pragma unroll
 		for (int f=0; f<NFIELDS; f++) {
 			double qer = (it < nlat_2) ? q[im*m_inc        + it            + (b*NFIELDS+f)*q_dist] : 0.0;	// north imag (ani)
@@ -1301,22 +1299,19 @@ ileg_m_kernel(const double* __restrict__ al, const double* __restrict__ ct, cons
 				qer *= st_1;	qor *= st_1;
 			}
 
-			if ((f>0) && (BLOCKSIZE > WARPSZE))		__syncthreads();	// _syncwarp not needed after shfl_xor
-
-			yl[3*l_inc +j] = (sgn*cost)*(t0 + t1);	// roi, exchange even and odd lanes
-			yl[2*l_inc +j] = (qer - qor)*cost;		// ror
-			yl[l_inc +j]   = sgn*(t0 - t1);	// rei, exchange evend and odd lanes
-			yl[j] 		   = qer + qor;		// rer
-
-			if (BLOCKSIZE > WARPSZE) {	__syncthreads(); } else { _syncwarp; }
-			// transpose yl to my_reo (registers)
-			if (f==f0) {
-				#pragma unroll
-				for (int k=0; k<NW; k++) {
-					my_reo[k] = yl[ofs + k*(BLOCKSIZE/NW)];
-				}
-			}
+			yl[(f*4+3)*l_inc +j] = (sgn*cost)*(t0 + t1);	// roi, exchange even and odd lanes
+			yl[(f*4+2)*l_inc +j] = (qer - qor)*cost;		// ror
+			yl[(f*4+1)*l_inc +j]   = sgn*(t0 - t1);	// rei, exchange evend and odd lanes
+			yl[f*4*l_inc     +j] 		   = qer + qor;		// rer
 		}
+
+		const int ofs = (4*f0+(ll&3))*l_inc + j % (BLOCKSIZE/NW);
+		if (BLOCKSIZE > WARPSZE) {	__syncthreads(); } else { _syncwarp; }
+			// transpose yl to my_reo (registers)
+			#pragma unroll
+			for (int k=0; k<NW; k++) {
+				my_reo[k] = yl[ofs + k*(BLOCKSIZE/NW)];
+			}
 
 		cost = y0;		// cos(theta)^2
 		y0 = mpos_scale;	// y0
