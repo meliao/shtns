@@ -700,9 +700,9 @@ static __global__ void leg_m_kernel(
 	const int ql_dist=0, const int q_dist=0, const double* __restrict__ xlm = 0)
 {
 	const int it = BLOCKSIZE*NW * blockIdx.x + threadIdx.x;
-	const int im = (M0_ONLY) ? 0 : blockIdx.y;
+	const int im = (M0_ONLY) ? 0 : blockIdx.z;
 	const int j = threadIdx.x;
-	const int b = blockIdx.z;		// position in batch
+	const int b = blockIdx.y;		// position in batch
 	//const int m_inc = 2*nlat_2;
 	const int k_inc = 1;
 
@@ -1066,7 +1066,7 @@ static void leg_m(shtns_cfg shtns, const double *ql, double *q, const int llim, 
 	if (shtns->howmany % 4 == 0) {	// multiple of 4
 		const int NW = 1;
 		const int blocksPerGrid = (nlat_2 + BLOCKSIZE*NW - 1) / (BLOCKSIZE*NW);
-		dim3 blocks(blocksPerGrid, mmax+1, shtns->howmany/4);
+		dim3 blocks(blocksPerGrid, shtns->howmany/4, mmax+1);
 		if (S==1 && shtns->robert_form) {
 			leg_m_kernel<BLOCKSIZE, S, 4, NW, HI_LLIM, false, true> <<<blocks, threads, 0, stream>>>
 				(d_alm, d_ct, (double*) ql, (double*) q, llim, nlat_2, lmax,mres, nphi, shtns->nlat_padded, shtns->nlm_stride, spat_dist);
@@ -1077,7 +1077,7 @@ static void leg_m(shtns_cfg shtns, const double *ql, double *q, const int llim, 
 	} else if (shtns->howmany % 2 == 0) {	// multiple of 2
 		const int NW = (HI_LLIM) ? 1 : 2;
 		const int blocksPerGrid = (nlat_2 + BLOCKSIZE*NW - 1) / (BLOCKSIZE*NW);
-		dim3 blocks(blocksPerGrid, mmax+1, shtns->howmany/2);
+		dim3 blocks(blocksPerGrid, shtns->howmany/2, mmax+1);
 		if (S==1 && shtns->robert_form) {
 			leg_m_kernel<BLOCKSIZE, S, 2, NW, HI_LLIM, false, true> <<<blocks, threads, 0, stream>>>
 				(d_alm, d_ct, (double*) ql, (double*) q, llim, nlat_2, lmax,mres, nphi, shtns->nlat_padded, shtns->nlm_stride, spat_dist);
@@ -1088,7 +1088,7 @@ static void leg_m(shtns_cfg shtns, const double *ql, double *q, const int llim, 
 	} else {
 		const int NW = (HI_LLIM) ? 1 : 2;
 		const int blocksPerGrid = (nlat_2 + BLOCKSIZE*NW - 1) / (BLOCKSIZE*NW);
-		dim3 blocks(blocksPerGrid, mmax+1, shtns->howmany);
+		dim3 blocks(blocksPerGrid, shtns->howmany, mmax+1);
 		if (S==1 && shtns->robert_form) {
 			leg_m_kernel<BLOCKSIZE, S, 1, NW, HI_LLIM, false, true> <<<blocks, threads, 0, stream>>>
 				(d_alm, d_ct, (double*) ql, (double*) q, llim, nlat_2, lmax,mres, nphi, shtns->nlat_padded, shtns->nlm_stride, spat_dist);
@@ -1117,7 +1117,7 @@ static void leg_m0(shtns_cfg shtns, const double *ql, double *q, const int llim,
 	const int threadsPerBlock = BLOCKSIZE;	// can be from 32 to 1024, we should try to measure the fastest !
 	if (shtns->howmany % 4 == 0) {
 		dim3 threads(threadsPerBlock, 1, 1);
-		dim3 blocks(blocksPerGrid, 1, shtns->howmany/4);
+		dim3 blocks(blocksPerGrid, shtns->howmany/4, 1);
 		if (S==1 && shtns->robert_form) {
 			leg_m_kernel<BLOCKSIZE, S, 4, NW, false, true, true> <<<blocks, threads, 0, stream>>>
 				(shtns->d_clm, d_ct, (double*) ql, (double*) q, llim, nlat_2, llim,1, 1, shtns->nlat_padded, shtns->nlm_stride, spat_dist, shtns->d_xlm);
@@ -1129,7 +1129,7 @@ static void leg_m0(shtns_cfg shtns, const double *ql, double *q, const int llim,
 		const int NW = 4;
 		const int blocksPerGrid = (nlat_2 + BLOCKSIZE*NW - 1) / (BLOCKSIZE*NW);
 		dim3 threads(threadsPerBlock, 1, 1);
-		dim3 blocks(blocksPerGrid, 1, shtns->howmany/2);
+		dim3 blocks(blocksPerGrid, shtns->howmany/2, 1);
 		if (S==1 && shtns->robert_form) {
 			leg_m_kernel<BLOCKSIZE, S, 2, NW, false, true, true> <<<blocks, threads, 0, stream>>>
 				(shtns->d_clm, d_ct, (double*) ql, (double*) q, llim, nlat_2, llim,1, 1, shtns->nlat_padded, shtns->nlm_stride, spat_dist, shtns->d_xlm);
@@ -1141,7 +1141,7 @@ static void leg_m0(shtns_cfg shtns, const double *ql, double *q, const int llim,
 		const int NW = 4;
 		const int blocksPerGrid = (nlat_2 + BLOCKSIZE*NW - 1) / (BLOCKSIZE*NW);
 		dim3 threads(threadsPerBlock, 1, 1);
-		dim3 blocks(blocksPerGrid, 1, shtns->howmany);
+		dim3 blocks(blocksPerGrid, shtns->howmany, 1);
 		if (S==1 && shtns->robert_form) {
 			leg_m_kernel<BLOCKSIZE, S, 1, NW, false, true, true> <<<blocks, threads, 0, stream>>>
 				(shtns->d_clm, d_ct, (double*) ql, (double*) q, llim, nlat_2, llim,1, 1, shtns->nlat_padded, shtns->nlm_stride, spat_dist, shtns->d_xlm);
@@ -1159,8 +1159,8 @@ ileg_m_kernel(const double* __restrict__ al, const double* __restrict__ ct, cons
 {
 	const int it = BLOCKSIZE * blockIdx.x + threadIdx.x;
 	const int j = threadIdx.x;
-	const int im = (M0_ONLY) ? 0 : blockIdx.y;
-	const int b = blockIdx.z;
+	const int im = (M0_ONLY) ? 0 : blockIdx.z;
+	const int b = blockIdx.y;
 	//const int m_inc = 2*nlat_2;
 	const int f0 = (NFIELDS==1) ? 0 : j / (BLOCKSIZE/NFIELDS);			// assign each thread a field f0
 
@@ -1435,7 +1435,7 @@ static void ileg_m(shtns_cfg shtns, const double* q, double *ql, const int llim,
 	if ((shtns->howmany & 3) == 0) {	// number of transforms is a multiple of 4
 		const int NFIELDS = 4;
 		const int LSPAN_ = 16/NFIELDS;
-		dim3 blocks(blocksPerGrid, mmax+1, shtns->howmany/NFIELDS);
+		dim3 blocks(blocksPerGrid, shtns->howmany/NFIELDS, mmax+1);
 		if (S==1 && shtns->robert_form) {
 			ileg_m_kernel<BLOCKSIZE, LSPAN_, S, NFIELDS, HI_LLIM, false, true> <<<blocks, threads, 0, stream>>>
 				(d_alm, d_ct, (double*) q, (double*) ql, llim, nlat_2, lmax,mres, nphi, shtns->nlat_padded, shtns->mpos_scale_analys, q_dist, ql_dist);
@@ -1446,7 +1446,7 @@ static void ileg_m(shtns_cfg shtns, const double* q, double *ql, const int llim,
 	} else if ((shtns->howmany & 1) == 0) {	// even number of transforms
 		const int NFIELDS = 2;
 		const int LSPAN_ = 16/NFIELDS;
-		dim3 blocks(blocksPerGrid, mmax+1, shtns->howmany/NFIELDS);
+		dim3 blocks(blocksPerGrid, shtns->howmany/NFIELDS, mmax+1);
 		if (S==1 && shtns->robert_form) {
 			ileg_m_kernel<BLOCKSIZE, LSPAN_, S, NFIELDS, HI_LLIM, false, true> <<<blocks, threads, 0, stream>>>
 				(d_alm, d_ct, (double*) q, (double*) ql, llim, nlat_2, lmax,mres, nphi, shtns->nlat_padded, shtns->mpos_scale_analys, q_dist, ql_dist);
@@ -1457,7 +1457,7 @@ static void ileg_m(shtns_cfg shtns, const double* q, double *ql, const int llim,
 	} else {	// odd number of transforms
 		const int NFIELDS = 1;
 		const int LSPAN_ = 16/NFIELDS;
-		dim3 blocks(blocksPerGrid, mmax+1, shtns->howmany/NFIELDS);
+		dim3 blocks(blocksPerGrid, shtns->howmany/NFIELDS, mmax+1);
 		if (S==1 && shtns->robert_form) {
 			ileg_m_kernel<BLOCKSIZE, LSPAN_, S, NFIELDS, HI_LLIM, false, true> <<<blocks, threads, 0, stream>>>
 				(d_alm, d_ct, (double*) q, (double*) ql, llim, nlat_2, lmax,mres, nphi, shtns->nlat_padded, shtns->mpos_scale_analys, q_dist, ql_dist);
@@ -1484,7 +1484,7 @@ static void ileg_m0(shtns_cfg shtns, const double* q, double *ql, const int llim
 		const int LSPAN_ = 16;		// V100: best with LSPAN_=16
 		const int threadsPerBlock = BLOCKSIZE;
 		const int blocksPerGrid = (nlat_2 + BLOCKSIZE - 1) / (BLOCKSIZE);
-		dim3 blocks(blocksPerGrid, 1, shtns->howmany/NFIELDS);
+		dim3 blocks(blocksPerGrid, shtns->howmany/NFIELDS, 1);
 		dim3 threads(threadsPerBlock, 1, 1);
 		if (S==1 && shtns->robert_form) {
 			ileg_m_kernel<BLOCKSIZE, LSPAN_, S, NFIELDS, false, true, true> <<<blocks, threads, 0, stream>>>
@@ -1499,7 +1499,7 @@ static void ileg_m0(shtns_cfg shtns, const double* q, double *ql, const int llim
 		const int LSPAN_ = 32;		// V100: best with LSPAN_=32
 		const int threadsPerBlock = BLOCKSIZE;	// can be from 32 to 1024, we should try to measure the fastest !
 		const int blocksPerGrid = (nlat_2 + BLOCKSIZE - 1) / (BLOCKSIZE);
-		dim3 blocks(blocksPerGrid, 1, shtns->howmany/NFIELDS);
+		dim3 blocks(blocksPerGrid, shtns->howmany/NFIELDS, 1);
 		dim3 threads(threadsPerBlock, 1, 1);
 		if (S==1 && shtns->robert_form) {
 			ileg_m_kernel<BLOCKSIZE, LSPAN_, S, NFIELDS, false, true, true> <<<blocks, threads, 0, stream>>>
