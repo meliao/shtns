@@ -709,8 +709,11 @@ static __global__ void leg_m_kernel(
 	//const int m_inc = 2*nlat_2;
 	const int k_inc = 1;
 
-	__shared__ double ak[BLOCKSIZE];		// size blockDim.x
-	__shared__ double qk[NFIELDS][(M0_ONLY) ? BLOCKSIZE : BLOCKSIZE*2];	// size 2*blockDim.x * NFIELDS
+	const int LSPAN = 32;
+	static_assert(LSPAN <= BLOCKSIZE, "LSPAN must not exceed BLOCKSIZE");
+	static_assert(LSPAN % 4 == 0, "LSPAN must be a multiple of 4");
+	__shared__ double ak[LSPAN];		// size blockDim.x
+	__shared__ double qk[NFIELDS][(M0_ONLY) ? LSPAN : LSPAN*2];	// size 2*blockDim.x * NFIELDS
 
 	static_assert( (!HI_LLIM) || (( NW==1 || (NW&1)==0 ) && (BLOCKSIZE == WARPSZE)), "high llim works with NW=1 or NW even and BLOCKSIZE=WarpSize" );
 
@@ -727,8 +730,8 @@ static __global__ void leg_m_kernel(
 	for (int i=0; i<NW; i++) ct2[i] = cost[i]*cost[i];		// cos(theta)^2
 
 	if (im==0) {
-		ak[j] = al[j+2];
-		if (j<2*(llim+1)) {
+		if ((LSPAN==BLOCKSIZE || j<LSPAN) && (j<=llim)) {
+			ak[j] = al[j+2];
 			#pragma unroll
 			for (int f=0; f<NFIELDS; f++) 	{
 				if (!SH2ISH) qk[f][j] = ql[j + (b*NFIELDS+f)*ql_dist];		// keep only real part
@@ -754,9 +757,9 @@ static __global__ void leg_m_kernel(
 		al+=2;
 		if (BLOCKSIZE > WARPSZE) { __syncthreads(); } else { _syncwarp; }
 
-		while (l<=llim - BLOCKSIZE) {	// compute even and odd parts
+		while (l<=llim - LSPAN) {	// compute even and odd parts
 			#pragma unroll
-			for (int k = 0; k<BLOCKSIZE; k+=4) {
+			for (int k = 0; k<LSPAN; k+=4) {
 				#pragma unroll
 				for (int f=0; f<NFIELDS; f++) {
 					#pragma unroll
@@ -778,15 +781,15 @@ static __global__ void leg_m_kernel(
 				#pragma unroll
 				for (int i=0; i<NW; i++) y1[i] += (ak[k+3]*ct2[i] + ak[k+2]) * y0[i];
 			}
-			al += BLOCKSIZE;
-			l  += BLOCKSIZE;
+			al += LSPAN;
+			l  += LSPAN;
 			if (BLOCKSIZE > WARPSZE) { __syncthreads(); } else { _syncwarp; }
-			if (l+j <= llim) {
+			if ((l+j <= llim) && (BLOCKSIZE==LSPAN || j<LSPAN)) {
 				#pragma unroll
 				for (int f=0; f<NFIELDS; f++)	if (!SH2ISH) qk[f][j] = ql[l+j + (b*NFIELDS+f)*ql_dist];
 					else qk[f][j] = qish(xlm, ql+(b*NFIELDS+f)*ql_dist, llim, 2*(l+j));
+				ak[j] = al[j];
 			}
-			if (l+j <= llim)	 ak[j] = al[j];
 			if (BLOCKSIZE > WARPSZE) { __syncthreads(); } else { _syncwarp; }
 		}
 		int k=0;
@@ -834,18 +837,18 @@ static __global__ void leg_m_kernel(
 		int m = im*mres;
 		int l = (im*(2*(lmax+1)-(m+mres)))>>1;
 		if (SH2ISH)	xlm += 3*im*(2*(lmax+4) -m+mres)/4;
-			#pragma unroll
-			for (int i=0; i<NW; i++) 	y1[i] = sqrt(1.0 - ct2[i]);		// y1 = sin(theta)
-			al += l+m;
+		#pragma unroll
+		for (int i=0; i<NW; i++) 	y1[i] = sqrt(1.0 - ct2[i]);		// y1 = sin(theta)
+		al += l+m;
 		ql += 2*(l + S*im);	// allow vector transforms where llim = lmax+1
 
-		ak[j] = al[j+2];
-		if (m+j/2 <= llim) {
-			#pragma unroll
-			for (int f=0; f<NFIELDS; f++)	if (!SH2ISH) qk[f][j] = ql[2*m+j + (b*NFIELDS+f)*ql_dist];
-					else qk[f][j] = qish(xlm, ql+2*m+(b*NFIELDS+f)*ql_dist, llim-m, j);
-		}
-			if (m+j/2+BLOCKSIZE/2 <= llim) {
+		if ((LSPAN==BLOCKSIZE || j<LSPAN) && (m+j<=llim)) 	ak[j] = al[j+2];
+			if ((m+j/2 <= llim) && (2*LSPAN>=BLOCKSIZE || j<2*LSPAN)) {
+				#pragma unroll
+				for (int f=0; f<NFIELDS; f++)	if (!SH2ISH) qk[f][j] = ql[2*m+j + (b*NFIELDS+f)*ql_dist];
+						else qk[f][j] = qish(xlm, ql+2*m+(b*NFIELDS+f)*ql_dist, llim-m, j);
+			}
+			if ((BLOCKSIZE < 2*LSPAN) && (m+j/2+BLOCKSIZE/2 <= llim) && (2*BLOCKSIZE<=2*LSPAN || j+BLOCKSIZE < 2*LSPAN)) {
 				#pragma unroll
 				for (int f=0; f<NFIELDS; f++)	if (!SH2ISH) qk[f][j+BLOCKSIZE] = ql[2*m+j+BLOCKSIZE + (b*NFIELDS+f)*ql_dist];
 					else qk[f][j+BLOCKSIZE] = qish(xlm, ql+2*m+(b*NFIELDS+f)*ql_dist, llim-m, j+BLOCKSIZE);
@@ -899,9 +902,9 @@ static __global__ void leg_m_kernel(
 		if (BLOCKSIZE > WARPSZE) { __syncthreads(); } else { _syncwarp; }
 		l=m;		al+=2;
 
-		while (l<=llim - BLOCKSIZE) {	// compute even and odd parts
+		while (l<=llim - LSPAN) {	// compute even and odd parts
 			#pragma unroll
-			for (int k = 0; k<BLOCKSIZE; k+=4) {
+			for (int k = 0; k<LSPAN; k+=4) {
 				double tmp[NW];
 				#pragma unroll
 				for (int i=0; i<NW; i++)	tmp[i] = ak[k+1]*ct2[i] + ak[k];
@@ -944,20 +947,20 @@ static __global__ void leg_m_kernel(
 				#pragma unroll
 				for (int i=0; i<NW; i++)	y1[i] += tmp[i] * y0[i];
 			}
-			al += BLOCKSIZE;
-			l  += BLOCKSIZE;
+			al += LSPAN;
+			l  += LSPAN;
 			if (BLOCKSIZE > WARPSZE) { __syncthreads(); } else { _syncwarp; }
-			if (l+j/2 <= llim) {
+			if ((l+j/2 <= llim) && (BLOCKSIZE<=2*LSPAN || j<2*LSPAN)) {
 				#pragma unroll
 				for (int f=0; f<NFIELDS; f++)	if (!SH2ISH) qk[f][j] = ql[2*l+j + (b*NFIELDS+f)*ql_dist];
 						else qk[f][j] = qish(xlm, ql+2*m+(b*NFIELDS+f)*ql_dist, llim-m, 2*(l-m)+j);
 			}
-			if (l+j/2+BLOCKSIZE/2 <= llim) {
+			if ((BLOCKSIZE < 2*LSPAN) && (l+j/2+BLOCKSIZE/2 <= llim) && (2*BLOCKSIZE<=2*LSPAN || j+BLOCKSIZE < 2*LSPAN)) {
 				#pragma unroll
 				for (int f=0; f<NFIELDS; f++)	if (!SH2ISH) qk[f][BLOCKSIZE+j] = ql[2*l+BLOCKSIZE+j + (b*NFIELDS+f)*ql_dist];
 						else qk[f][j+BLOCKSIZE] = qish(xlm, ql+2*m+(b*NFIELDS+f)*ql_dist, llim-m, 2*(l-m)+j+BLOCKSIZE);
 			}
-			if (l+j <= llim)	 ak[j] = al[j];
+			if ((l+j <= llim) && (LSPAN==BLOCKSIZE || j<LSPAN))	 ak[j] = al[j];
 			if (BLOCKSIZE > WARPSZE) { __syncthreads(); } else { _syncwarp; }
 		}
 		int k=0;
@@ -1078,16 +1081,16 @@ static void leg_m(shtns_cfg shtns, const double *ql, double *q, const int llim, 
 	double *d_ct = shtns->d_ct;
 	cudaStream_t stream = shtns->comp_stream;
 
-	const int BLOCKSIZE = 32;		// 32 allows to use polar optimization; 128 and NW=2 are sometimes better though.
-	const int threadsPerBlock = BLOCKSIZE;	// can be from 32 to 1024, we should try to measure the fastest !
 	if (spat_dist == 0) spat_dist = shtns->spat_stride;
 	const bool sh2ish_fuse = (SHT_ALLOW_SH2ISH_FUSE==1 && S==0 && !HI_LLIM);
 	const int nlm_stride = (sh2ish_fuse) ? shtns->spec_dist*2 : shtns->nlm_stride;
 	
-	dim3 threads(threadsPerBlock, 1, 1);
 	if (shtns->howmany % 4 == 0) {	// multiple of 4
 		const int NW = 1;
+		const int BLOCKSIZE = HI_LLIM ? WARPSZE : WARPSZE*4;		// 32 allows to use polar optimization; 128 and NW=2 are sometimes better though.
+		const int threadsPerBlock = BLOCKSIZE;	// can be from 32 to 1024, we should try to measure the fastest !
 		const int blocksPerGrid = (nlat_2 + BLOCKSIZE*NW - 1) / (BLOCKSIZE*NW);
+		dim3 threads(threadsPerBlock, 1, 1);
 		dim3 blocks(blocksPerGrid, shtns->howmany/4, mmax+1);
 		if (S==1 && shtns->robert_form) {
 			leg_m_kernel<BLOCKSIZE, S, 4, NW, HI_LLIM, false, true> <<<blocks, threads, 0, stream>>>
@@ -1098,7 +1101,10 @@ static void leg_m(shtns_cfg shtns, const double *ql, double *q, const int llim, 
 		}
 	} else if (shtns->howmany % 2 == 0) {	// multiple of 2
 		const int NW = 2;
+		const int BLOCKSIZE = HI_LLIM ? WARPSZE : WARPSZE*2;		// 32 allows to use polar optimization; 128 and NW=2 are sometimes better though.
+		const int threadsPerBlock = BLOCKSIZE;	// can be from 32 to 1024, we should try to measure the fastest !
 		const int blocksPerGrid = (nlat_2 + BLOCKSIZE*NW - 1) / (BLOCKSIZE*NW);
+		dim3 threads(threadsPerBlock, 1, 1);
 		dim3 blocks(blocksPerGrid, shtns->howmany/2, mmax+1);
 		if (S==1 && shtns->robert_form) {
 			leg_m_kernel<BLOCKSIZE, S, 2, NW, HI_LLIM, false, true> <<<blocks, threads, 0, stream>>>
@@ -1109,7 +1115,10 @@ static void leg_m(shtns_cfg shtns, const double *ql, double *q, const int llim, 
 		}
 	} else {
 		const int NW = 2;
+		const int BLOCKSIZE = HI_LLIM ? WARPSZE : WARPSZE*2;		// 32 allows to use polar optimization; 128 and NW=2 are sometimes better though.
+		const int threadsPerBlock = BLOCKSIZE;	// can be from 32 to 1024, we should try to measure the fastest !
 		const int blocksPerGrid = (nlat_2 + BLOCKSIZE*NW - 1) / (BLOCKSIZE*NW);
+		dim3 threads(threadsPerBlock, 1, 1);
 		dim3 blocks(blocksPerGrid, shtns->howmany, mmax+1);
 		if (S==1 && shtns->robert_form) {
 			leg_m_kernel<BLOCKSIZE, S, 1, NW, HI_LLIM, false, true> <<<blocks, threads, 0, stream>>>
