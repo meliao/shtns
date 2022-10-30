@@ -38,7 +38,7 @@
 #define SHT_ISH_ALT 1
 
 #if (__CUDACC_VER_MAJOR__ < 8) || ( defined(__CUDA_ARCH__) && __CUDA_ARCH__ < 600 )
-__device__ double atomicAdd(double* address, double val)
+__device__ __forceinline__ double atomicAdd(double* address, double val)
 {
 	unsigned long long int* address_as_ull =
 							 (unsigned long long int*)address;
@@ -340,7 +340,7 @@ sh2ishioka_kernel(const double* __restrict__ xlm, const double* __restrict__ ql,
 
 /// performs: Ql[2*l] = qq[2*l]*xlm[3*l] + qq[2*l-2]*xlm[3*l+1];   Ql[2*l+1] = qq[2*l+1] * xlm[3*l+2];
 /// includes zero-out for unused modes.
-__device__ double qish_to_sh(const double* __restrict__ xlm, const double* __restrict__ ql_ish, const int llim_m, int ll, int im)
+__device__ __forceinline__ double qish_to_sh(const double* __restrict__ xlm, const double* __restrict__ ql_ish, const int llim_m, int ll, int im)
 {
 	const int l = ll >> 1;
 	const int x_ofs = 3*(ll >> 2);
@@ -619,84 +619,70 @@ ish2sphtor_kernel(const double* __restrict__ mx, const double* __restrict__ xlm,
 	const int j = threadIdx.x;
 	const int im = blockIdx.y;
 	const int b = blockIdx.z;
-	const int l0 = (blockDim.x-8) * blockIdx.x;		// some overlap needed
+	const int l0 = (blockDim.x-4) * blockIdx.x;		// some overlap needed
 
 	int l  = (l0 + j) >> 1;
 	const int m = im*mres;
-	const int q_ofs = im*(((lmax+1)*2) -m+mres) + l0;
-	const int x_ofs = 3*im*(2*(lmax+4) -m+mres)/4 + 3*(l0 >> 2);
+	const int q_ofs = im*(((lmax+1)*2) -m+mres);
 	const int llim_m_p1 = llim+1-m;
 
 	extern __shared__ double vl[];			// size blockDim.x
-	double* const wl = vl + blockDim.x;		// size blockDim.x
-	double* const M  = vl + 2*blockDim.x;	// size blockDim.x
+	double* const wl = vl + blockDim.x+2;		// size blockDim.x
 
-	double v = 0.0;		double w = 0.0;
-	if (l-2 <= llim_m_p1) {
-		if ((j<(blockDim.x>>2)*3+3) && (x_ofs+j-3 >= 0)) M[j] = xlm[x_ofs +j-3];
-		if (l-2 >= 0) {
-			if (im>0) {
-				v = vlm[q_ofs +2*im +j-4 + b*ql_ish_dist];		// vl[4] = vlm[0]
-				w = wlm[q_ofs +2*im +j-4 + b*ql_ish_dist];		// vl[4] = vlm[0]
-			} else if ((j&1)==0) {
-				v = vlm[((q_ofs +j-4)>>1) + b*ql_ish_dist];		// vl[4] = vlm[0]
-				w = wlm[((q_ofs +j-4)>>1) + b*ql_ish_dist];		// vl[4] = vlm[0]
-			}
-		}
-	}
-	vl[j] = v;
-	wl[j] = w;
-
-	__syncthreads();
-
-	if (j<blockDim.x-4) {
-		v = 0.0;
-		w = 0.0;
+	double v = 0.0;
+	double w = 0.0;
+	{
 		if (l<=llim_m_p1) {
-			int ix = 3*(j>>2)+3;		// 3*l/2.
-			v = vl[j+4] * M[ix + (j&2)];	// ix for l-m even, ix+2 for l-m odd
-			w = wl[j+4] * M[ix + (j&2)];	// ix for l-m even, ix+2 for l-m odd
-			if ((j&2)==0) {		// for l-m even
-				v += vl[j] * M[ix-2];			// contribution of l-2
-				w += wl[j] * M[ix-2];			// contribution of l-2
+			const int x_ofs = 3*im*(2*(lmax+4) -m+mres)/4;
+			double x = xlm[x_ofs + 3*(l>>1) + (j&2)];
+			double x2 = (l>=2) ? xlm[x_ofs + 3*(l>>1) -2] : 0.0;
+			if (im!=0) {
+				const int i = q_ofs + 2*im + b*ql_ish_dist + l0+(j^1);		// xchg real and imag
+				v = vlm[i] * x;
+				w = wlm[i] * x;
+				if (((j&2)==0) && (l>0)) {	// l-m even and l-m>2
+					v += vlm[i-4] * x2;		// contribution of l-2
+					w += wlm[i-4] * x2;
+				}
+			} else if (j&1) {
+				const int i = q_ofs + b*ql_ish_dist + l;
+				v = vlm[i] * x;
+				w = wlm[i] * x;
+				if (((j&2)==0) && (l>0)) {	// l-m even and l-m>2
+					v += vlm[i-2] * x2;		// contribution of l-2
+					w += wlm[i-2] * x2;
+				}
 			}
 		}
+		vl[(j^1)+2] = v;
+		wl[(j^1)+2] = w;
 	}
+	if (l==0) {  vl[j] = 0.0;	wl[j] = 0.0; }
 
-	__syncthreads();
-	
-	if (j<blockDim.x-4) {
-		if (l<=lmax+1-m) {
-			vl[j+4] = v;	// vlm[q_ofs + 2*im +j]
-			wl[j+4] = w;
-		} else {
-			vl[j+4] = 0.0;		wl[j+4] = 0.0;
-		}
-	}
-
-	if ( (l > 0) && (l <= llim_m_p1) ) {
-		M[j] = mx[q_ofs+j-2];
-	} else M[j] = 0.0;
 
 	l += m;
+	double ml,mu, ll_1;
+	if ((l <= llim) && (l>0)) {
+		ll_1 = 1.0 / (l*(l+1));
+		ml = mx[q_ofs + l0 + 2*(j>>1)-1]; //M[2*(j>>1)+1];
+		mu = mx[q_ofs + l0 + 2*(j>>1)];   //M[2*(j>>1)+2];
+	}
 
 	__syncthreads();
 
-	if ((j<blockDim.x-6) &&  (j >= ((blockIdx.x == 0) ? 0 : 2))) {
-		v = 0.0;	w = 0.0;
+	if ((j<blockDim.x-2) &&  (j >= ((blockIdx.x == 0) ? 0 : 2))) {
+		double v2 = 0.0;
+		double w2 = 0.0;
 		if ((l <= llim) && (l>0)) {
 			const double mimag = m * ((j^1) -j);
-			double ll_1 = 1.0 / (l*(l+1));
-			double ml = M[2*(j>>1)+1];
-			double mu = M[2*(j>>1)+2];
-			v = mimag*wl[(j+4)^1]  -  (ml*vl[j+2] + mu*vl[j+6]);
-			w = mimag*vl[(j+4)^1]  +  (ml*wl[j+2] + mu*wl[j+6]);
-			v *= ll_1;
-			w *= ll_1;
+			v2 = mimag*w  -  (ml*vl[j] + mu*vl[j+4]);
+			w2 = mimag*v  +  (ml*wl[j] + mu*wl[j+4]);
+			v2 *= ll_1;
+			w2 *= ll_1;
 		}
 		if (l <= lmax) {	// fill with zeros up to lmax (and l=0 too).
-			slm[q_ofs+j + b*ql_dist] = v;
-			tlm[q_ofs+j + b*ql_dist] = w;
+			slm[q_ofs+l0+j + b*ql_dist] = v2;
+			tlm[q_ofs+l0+j + b*ql_dist] = w2;
 		}
 	}
 }
@@ -757,9 +743,9 @@ void scal2sphtor_gpu(shtns_cfg shtns, cplx* d_Vlm, cplx* d_Wlm, cplx* d_Slm, cpl
 {
 	size_t blksze = ((shtns->lmax+3)*2+WARPSZE-1)/WARPSZE * WARPSZE;
 	if (blksze > MAX_THREADS_PER_BLOCK) blksze = MAX_THREADS_PER_BLOCK;
-	dim3 blocks((2*(shtns->lmax+3)+blksze-9)/(blksze-8), shtns->mmax+1, shtns->howmany);
+	dim3 blocks((2*(shtns->lmax+3)+blksze-5)/(blksze-4), shtns->mmax+1, shtns->howmany);
 	dim3 threads(blksze, 1, 1);
-	ish2sphtor_kernel <<< blocks, threads, blksze*3*sizeof(double), shtns->comp_stream >>>
+	ish2sphtor_kernel <<< blocks, threads, (blksze+2)*2*sizeof(double), shtns->comp_stream >>>
 		(shtns->d_mx_van, shtns->d_xlm, (double*) d_Vlm, (double*) d_Wlm, (double*)d_Slm, (double*)d_Tlm, llim, shtns->lmax, shtns->mres, shtns->nlm_stride, shtns->spec_dist*2);
 	CUDA_ERROR_CHECK;
 }
