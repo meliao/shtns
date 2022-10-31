@@ -52,11 +52,6 @@
 
 #include "sht_private.h"
 
-/// Maximum number of threads per block that should be used.
-#define MAX_THREADS_PER_BLOCK 512
-/// The warp size is always 32 on cuda devices (up to Ampere at least)
-#define WARPSZE 32
-
 #ifndef SHTNS_ISHIOKA
 #error "GPU transform requires SHTNS_ISHIOKA"
 #endif

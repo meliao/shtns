@@ -17,6 +17,12 @@
 
 // Various CUDA kernels for SHTns
 
+
+/// Maximum number of threads per block that should be used.
+#define MAX_THREADS_PER_BLOCK 256
+/// The warp size is always 32 on cuda devices (up to Ampere at least)
+#define WARPSZE 32
+
 // adjustment for cuda
 #undef SHT_L_RESCALE_FLY
 #undef SHT_ACCURACY
@@ -738,7 +744,7 @@ void ishioka2sh_gpu(shtns_cfg shtns, cplx* d_Qlm_ish, cplx* d_Qlm, int llim, int
 
 void sphtor2scal_gpu(shtns_cfg shtns, cplx* d_Slm, cplx* d_Tlm, cplx* d_Vlm, cplx* d_Wlm, int llim, int mmax)
 {
-	size_t blksze = ((shtns->lmax+3)*2+WARPSZE-9)/(WARPSZE-8) * WARPSZE;
+	size_t blksze = ((shtns->lmax+3)*2+WARPSZE-1)/WARPSZE * WARPSZE;
 	if (blksze > MAX_THREADS_PER_BLOCK) blksze = MAX_THREADS_PER_BLOCK;
 	dim3 blocks((2*(shtns->lmax+3)+blksze-9)/(blksze-8), mmax+1, shtns->howmany);
 	dim3 threads(blksze, 1, 1);
@@ -749,7 +755,7 @@ void sphtor2scal_gpu(shtns_cfg shtns, cplx* d_Slm, cplx* d_Tlm, cplx* d_Vlm, cpl
 
 void scal2sphtor_gpu(shtns_cfg shtns, cplx* d_Vlm, cplx* d_Wlm, cplx* d_Slm, cplx* d_Tlm, int llim)
 {
-	size_t blksze = ((shtns->lmax+3)*2+WARPSZE-9)/(WARPSZE-8) * WARPSZE;
+	size_t blksze = ((shtns->lmax+3)*2+WARPSZE-1)/WARPSZE * WARPSZE;
 	if (blksze > MAX_THREADS_PER_BLOCK) blksze = MAX_THREADS_PER_BLOCK;
 	dim3 blocks((2*(shtns->lmax+3)+blksze-9)/(blksze-8), shtns->mmax+1, shtns->howmany);
 	dim3 threads(blksze, 1, 1);
