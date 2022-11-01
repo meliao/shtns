@@ -494,56 +494,52 @@ sphtor2ish_kernel(const double* __restrict__ mx, const double* __restrict__ xlm,
 	extern __shared__ double sl[];			// size blockDim.x
 	double* const tl = sl + blockDim.x;		// size blockDim.x
 	double* const M  = sl + 2*blockDim.x;	// size blockDim.x
-	
+
 	const int m = im*mres;
-	const int llim_m_p1 = llim+1-m;
+	const int llim_m = llim-m;
 	const int ofs = im*(((lmax+1)<<1) -m + mres) + ll;
 	ll >>= 1;
 
-	if ( (ll >= 0) && (ll < llim_m_p1) ) {
-		M[j] = mx[ofs];
-		sl[j] = (slm) ? slm[ofs + b*ql_dist] : 0.0;
-		tl[j] = (tlm) ? tlm[ofs + b*ql_dist] : 0.0;
-	} else {
-		M[j] = 0.0;
-		sl[j] = 0.0;
-		tl[j] = 0.0;
-	}
-
-	__syncthreads();
-
 	double v = 0.0;
 	double w = 0.0;
-	const double mimag = m * (j - (j^1));
-	if ((j<blockDim.x-4) && (ll < llim_m_p1)) {
-		double ml = M[2*(j>>1)+1];
-		double mu = M[2*(j>>1)+2];
-		v = mimag*tl[(j+2)^1]  +  (ml*sl[j] + mu*sl[j+4]);
-		w = mimag*sl[(j+2)^1]  -  (ml*tl[j] + mu*tl[j+4]);
+	double mm = 0.0;
+	if ( (ll >= 0) && (ll <= llim_m) ) {
+		mm = mx[ofs];
+		if (slm) v = slm[ofs + b*ql_dist];
+		if (tlm) w = tlm[ofs + b*ql_dist];
 	}
-
-	const int j2 = (j>>1)+(j&1);
+	M[j] = mm;
+	sl[j] = v;
+	tl[j] = w;
 
 	__syncthreads();
 
+	const double mimag = m * (j - (j^1));
+	if ((j<blockDim.x-4) && (ll <= llim_m)) {
+		double ml = M[j|1];
+		double mu = M[(j|1)+1];
+		v = mimag*tl[(j^1)+2]  +  (ml*v + mu*sl[j+4]);
+		w = mimag*sl[(j^1)+2]  -  (ml*w + mu*tl[j+4]);
+	}
+
+	__syncthreads();
+
+	const int j2 = j - (j>>1);	//(j>>1)+(j&1);
 	if ((j&2)==0) {
 		sl[j2] = v;
 		tl[j2] = w;
 	}
-	if (ll >= llim_m_p1) return;	// nothing else to do.
 
-	const int x_ofs = (3*im*(2*(lmax+4) -m+mres)>>2) + 3*(l0 >> 2);
-	if (j<(blockDim.x>>2)*3) M[j] = xlm[x_ofs +j];
+	const int x_ofs = (3*im*(2*(lmax+4) -m+mres)>>2) + 3*((l0+j) >> 2);
 
 	__syncthreads();
 
-	if (j < blockDim.x-8) {
-		int ix = 3*(j>>2);		// 3*l/2.
-		double x0 = M[ix + (j&2)];	// ix for l-m even, ix+2 for l-m odd
+	if ((j < blockDim.x-8) && (ll <= llim_m)) {
+		double x0 = xlm[x_ofs + (j&2)];   //M[ix + (j&2)];	// ix for l-m even, ix+2 for l-m odd
 		v *= x0;
 		w *= x0;
 		if ((j&2)==0) {		// for l-m even
-			double x2 = M[ix+1];			// contribution of l+2
+			double x2 = xlm[x_ofs +1];   //M[ix+1];			// contribution of l+2
 			v += x2 * sl[j2+2];
 			w += x2 * tl[j2+2];
 		}
