@@ -257,16 +257,11 @@ transpose_cplx_skip(cudaStream_t stream, const double* in, double* out, const in
 
 __device__ double qish(const double* __restrict__ xlm, const double* __restrict__ ql, const int llim_m, int ll)
 {
-	const int l = ll >> 1;
-	const int x_ofs = 3*(ll >> 2);
-
-	double q = 0.0;
-	if (l <= llim_m) {
-		q = ql[ll] * xlm[x_ofs + (ll&2)];
-		if (((ll&2)==0) && (l+2 <=llim_m)) {	// l-m even
-			q += ql[ll+4] * xlm[x_ofs + 1];		// contribution of l+2
-		}
-	}
+	double q = ql[ll];
+	const int x_ofs = 3*(ll >> 2) + (ll&2);
+	q *= xlm[x_ofs];
+	if (((ll&2)==0) && (ll+2 <2*llim_m))	// l-m even
+		q += ql[ll+4] * xlm[x_ofs + 1];		// contribution of l+2
 	return q;
 }
 
@@ -340,22 +335,23 @@ sh2ishioka_kernel(const double* __restrict__ xlm, const double* __restrict__ ql,
 
 /// performs: Ql[2*l] = qq[2*l]*xlm[3*l] + qq[2*l-2]*xlm[3*l+1];   Ql[2*l+1] = qq[2*l+1] * xlm[3*l+2];
 /// includes zero-out for unused modes.
-__device__ __forceinline__ double qish_to_sh(const double* __restrict__ xlm, const double* __restrict__ ql_ish, const int llim_m, int ll, int im)
+template<bool M0>
+__device__ __forceinline__ double qish_to_sh(const double* __restrict__ xlm, const double* __restrict__ ql_ish, const int llim_m, int ll)
 {
-	const int l = ll >> 1;
-	const int x_ofs = 3*(ll >> 2);
-
 	double q = 0.0;
+	const int x_ofs = 3*(ll >> 2) + (ll&2);
+	const int l = ll >> 1;
 	if (l <= llim_m) {
-		if (im!=0) {
-			q = ql_ish[ll] * xlm[x_ofs + (ll&2)];
-			if (((ll&2)==0) && (l-2 >= 0)) {	// l-m even
+		double x = xlm[x_ofs];
+		if (!M0) {
+			q = ql_ish[ll] * x;
+			if (((ll&2)==0) && (x_ofs > 0)) {	// l-m even
 				q += ql_ish[ll-4] * xlm[x_ofs - 2];		// contribution of l-2
 			}
-		} else if ((ll&1) == 0) {	// m=0, real only
-			q = ql_ish[ll>>1] * xlm[x_ofs + (ll&2)];
-			if (((ll&2)==0) && (l-2 >= 0)) {	// l-m even
-				q += ql_ish[(ll>>1)-2] * xlm[x_ofs - 2];		// contribution of l-2
+		} else {	// m=0, real only
+			if ((ll&1)==0) q = ql_ish[l] * x;	// only real part (ll&1 == 0)
+			if (((ll&3)==0) && (x_ofs > 0)) {	// l-m even && real part (ll&3 == 0)
+				q += ql_ish[l-2] * xlm[x_ofs - 2];		// contribution of l-2
 			}
 		}
 	}
@@ -376,9 +372,11 @@ ishioka2sh_kernel_alt(const double* __restrict__ xlm, const double* __restrict__
 	const int q_ofs = im*(((lmax+1+S)*2) -m+mres);
 
 	double q = 0.0;
-	if (im <= mmax) {
+	if (im==0) {
+		q = qish_to_sh<true>(xlm, ql_ish + b*ql_ish_dist, llim-m, ll);
+	} else if (im <= mmax) {
 		const int x_ofs = 3*im*(2*(lmax+4) -m+mres)/4;
-		q = qish_to_sh(xlm + x_ofs, ql_ish + q_ofs + b*ql_ish_dist, llim-m, ll, im);
+		q = qish_to_sh<false>(xlm + x_ofs, ql_ish + q_ofs + b*ql_ish_dist, llim-m, ll);
 	}
 	if ((ll>>1) <= lmax+S-m)
 		ql[q_ofs + ll + b*ql_dist] = q;	// coalesced store (including zero-out for llim<l<=lmax) AND zero-out for m>mmax
