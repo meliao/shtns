@@ -184,9 +184,15 @@ struct shtns_info {		// MUST start with "int nlm;"
 	size_t nlm_stride, spat_stride;
 	cudaStream_t xfer_stream, comp_stream;		// the cuda streams
 	cufftHandle cufft_plan;						// the cufft Handle
-	cufftHandle cufft_plan_float;						// the cufft Handle single precision
+	cufftHandle cufft_plan_float;				// the cufft Handle single precision
 	float* d_alm_f;
 	float* d_ct_f;
+	CUfunction gpu_kernels[4];		// 4 kernels (scalar & vector, synth & analys)
+	unsigned short gridDim_x[2];
+	unsigned short gridDim_y[2];
+	unsigned short nwarp[2];
+	char allow_sh2ish_fuse;
+	CUmodule gpu_module;			// not sure this is needed
 	#endif
 	#ifdef VKFFT_BACKEND
 		VkFFTApplication vkfft_plan;

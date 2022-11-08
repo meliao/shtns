@@ -260,6 +260,149 @@ static int init_cuda_buffer_fft(shtns_cfg shtns)
 	return err_count;
 }
 
+int init_cuda_program(shtns_cfg shtns)
+{
+	int hi_llim = 0;
+	int nwarp_s=8;		// maximum number of warps for good performance
+	int nwarp_a=1;		// 1 WARP is by far the best choice here, at least on V100
+	int nw_s=2;		int nf_s=1;			int nf_a=1;
+	// adjust values (heuristics)
+	if (shtns->howmany % 4 == 0) 	  {	nf_s=4;	nw_s=1;		nf_a=4;	}
+	else if (shtns->howmany % 2 == 0) {	nf_s=2;	nw_s=2; 	nf_a=2;	}
+	else if (shtns->howmany % 3 == 0) { nf_s=3; nw_s=1; 	nf_a=1;	}
+	int lspan_a = 16/nf_a;		// V100: 16/nf_a works best (mmax>0)
+
+	if (shtns->mmax == 0) {
+		nw_s = 4;	nwarp_s = 1;
+		if (nf_a == 4) nf_a = 2;
+		if (nf_a == 1) nwarp_a = 2;
+		lspan_a = 32/nf_a;		// V100: 32/nf_a works best (mmax==0)
+	} else if (shtns->lmax > SHT_L_RESCALE_FLY) {
+		nwarp_s = nwarp_a = 1;
+		hi_llim = 1;		// only if mmax>0
+	}
+
+	// try to find optimal block size
+	int nwarp_target;
+	nwarp_target = (shtns->nlat_2 + nw_s*WARPSZE-1)/(nw_s*WARPSZE);		// number of warps needed for nlat_2 points
+	//if (nwarp_target == 1) 	// we could try to reduce nw_s to find a better solution
+	if (nwarp_s > nwarp_target) nwarp_s = nwarp_target;
+	//if (nwarp_s < nwarp_target) 		// we could try to find an even partition
+
+	nwarp_target = (shtns->nlat_2 + WARPSZE-1)/WARPSZE;		// number of warps needed for nlat_2 points
+	if (nwarp_a > nwarp_target) nwarp_a = nwarp_target;
+	
+	// also store into plan the kernel launch parameters:
+	shtns->nwarp[0] = nwarp_s;		shtns->nwarp[1] = nwarp_a;
+	shtns->gridDim_x[0] = (shtns->nlat_2 + nw_s*nwarp_s*WARPSZE-1)/(nw_s*nwarp_s*WARPSZE);
+	shtns->gridDim_x[1] = (shtns->nlat_2 + nwarp_a*WARPSZE-1)/(nwarp_a*WARPSZE);
+	shtns->gridDim_y[0] = shtns->howmany / nf_s;
+	shtns->gridDim_y[1] = shtns->howmany / nf_a;
+	printf("launch params: nblocks=(%d, %d)\n", shtns->gridDim_x[0], shtns->gridDim_x[1]);
+	shtns->allow_sh2ish_fuse = (SHT_ALLOW_SH2ISH_FUSE==1 && shtns->gridDim_x[0] <= 2 && !hi_llim) ? 1 : 0;		// can we fuse sh2ish and leg_m_kernel ?
+
+	char* const src = (char*) malloc(100*1024);	// 100 KB
+	// define what we need
+	char* s = src;
+	s += sprintf(s, "#define WARPSZE %d\n", WARPSZE);
+	s += sprintf(s, "#define LMAX %d\n", shtns->lmax);
+	s += sprintf(s, "#define MRES %d\n", shtns->mres);
+	s += sprintf(s, "#define HI_LLIM %d\n", hi_llim);
+	s += sprintf(s, "#define M0_ONLY %d\n", (shtns->mmax == 0) ? 1 : 0);
+	s += sprintf(s, "#define ROBERT_FORM %d\n", shtns->robert_form);
+	s += sprintf(s, "#define SH2ISH %d\n", shtns->allow_sh2ish_fuse);
+	s += sprintf(s, "#define BLKSZE_S %d\n", nwarp_s*WARPSZE);
+	s += sprintf(s, "#define BLKSZE_A %d\n", nwarp_a*WARPSZE);
+	s += sprintf(s, "#define NF_S %d\n", nf_s);
+	s += sprintf(s, "#define NF_A %d\n", nf_a);
+	s += sprintf(s, "#define LSPAN_A %d\n", lspan_a);
+	s += sprintf(s, "#define NW_S %d\n", nw_s);
+	s += sprintf(s, "#define MPOS_SCALE %g\n", shtns->mpos_scale_analys);
+	printf(src);
+
+	/* TODO: embed file in source code instead of reading it */
+	FILE *fp;
+	fp = fopen("SHT/cuda_legendre.gen.cu", "r");
+	int k = fread(s, 1, 99*1024-(s-src), fp);
+	s[k]=0;	// zero-terminated
+	fclose(fp);
+	//printf(src);
+
+	nvrtcProgram prog;
+	nvrtcResult rtc_res = nvrtcCreateProgram(&prog, src, "shtns.cu", 0, NULL, NULL);
+	if (rtc_res != NVRTC_SUCCESS) {
+		printf("\nERROR nvrtcCreateProgram failed with error '%s'\n", nvrtcGetErrorString(rtc_res));
+		return 1;	// fail
+	}
+	const char *ker_inst[] = {"leg_m_kernel<0>", "leg_m_kernel<1>", "ileg_m_kernel<0>", "ileg_m_kernel<1>"};
+	for (int k=0; k<4; k++) {
+		rtc_res = nvrtcAddNameExpression(prog,  ker_inst[k]);
+		if (rtc_res != NVRTC_SUCCESS) {
+			printf("ERROR nvrtcAddNameExpression(\"%s\") failed with error '%s'\n", ker_inst[k], nvrtcGetErrorString(rtc_res));
+			return 1;	// fail
+		}
+	}
+
+	// Compile
+	const char *opts[] = {"-std=c++11", "-arch=compute_70", "-lineinfo"};
+	printf("compiling cuda kernels (lmax=%d, nlat=%d, nbatch=%d)\n", shtns->lmax, shtns->nlat, shtns->howmany);
+	rtc_res = nvrtcCompileProgram(prog, 3, opts);
+	if (rtc_res != NVRTC_SUCCESS) {
+		printf("\nERROR nvrtcCompileProgram failed with error '%s'\n", nvrtcGetErrorString(rtc_res));
+		size_t sze = 0;
+		nvrtcGetProgramLogSize (prog, &sze);
+		char* log = (char*) malloc(sze);
+		nvrtcGetProgramLog (prog, log);
+		if (sze > 0) printf(log);
+		free(log);
+		return 1;	// fail
+	}
+
+	// Obtain PTX of the program.
+	size_t sze;
+	rtc_res = nvrtcGetPTXSize(prog, &sze);
+	if (rtc_res != NVRTC_SUCCESS) {
+		printf("\nERROR nvrtcGetPTXSize failed with error '%s'\n", nvrtcGetErrorString(rtc_res));
+		return 1;
+	}
+	char *ptx = (char*) malloc(sze);
+	rtc_res = nvrtcGetPTX(prog, ptx);
+	if (rtc_res != NVRTC_SUCCESS) {
+		printf("\nERROR nvrtcGetPTX failed with error '%s'\n", nvrtcGetErrorString(rtc_res));
+		return 1;
+	}
+
+	// Load the generated PTX module
+	CUmodule module;
+	CUresult cu_res = cuModuleLoadDataEx(&module, ptx, 0, 0, 0);
+	if (cu_res != CUDA_SUCCESS) {
+		printf("\nERROR cuModuleLoadDataEx failed with error %d\n", cu_res);
+		return 1;
+	}
+
+	// get the kernel pointers
+	for (int k=0; k<4; k++) {
+		const char *name;
+		rtc_res = nvrtcGetLoweredName(prog, ker_inst[k], &name);
+		if (rtc_res != NVRTC_SUCCESS) {
+			printf("\nERROR nvrtcGetLoweredName(%s) failed with error '%s'\n", ker_inst[k], nvrtcGetErrorString(rtc_res));
+			return 1;
+		}
+		CUfunction kernel;
+		cu_res = cuModuleGetFunction(&kernel, module, name);
+		if (cu_res != CUDA_SUCCESS) {
+			printf("\nERROR cuModuleGetFunction(%s -> %s) failed with error %d\n", ker_inst[k], name, cu_res);
+			return 1;
+		}
+		shtns->gpu_kernels[k] = kernel;
+	}
+	shtns->gpu_module = module;
+
+	nvrtcDestroyProgram(&prog);		// no longer needed.
+	free(src);
+	return 0;	// success
+}
+
 
 extern "C"
 void cushtns_release_gpu(shtns_cfg shtns)
@@ -349,6 +492,7 @@ int cushtns_init_gpu(shtns_cfg shtns)
 	shtns->d_mx_van = d_mx_van;
 
 	err_count += init_cuda_buffer_fft(shtns);
+	init_cuda_program(shtns);
 
 	if (err_count != 0) {
 		cushtns_release_gpu(shtns);
@@ -479,7 +623,58 @@ void spat_to_fourier_gpu(shtns_cfg shtns, double* q, const int mmax)
 
 /************************
  * TRANSFORMS ON DEVICE *
- ************************/ 
+ ************************/
+
+
+static void legendre(shtns_cfg shtns, const int S, const double *ql, double *q, const int llim, const int mmax, long spat_dist = 0)
+{
+	int mres = shtns->mres;
+	int nlat_2 = shtns->nlat_2;
+	int nphi = shtns->nphi;
+	double *d_alm = shtns->d_clm;
+	double *d_ct = shtns->d_ct;
+	cudaStream_t stream = shtns->comp_stream;
+	if (spat_dist == 0) spat_dist = shtns->spat_stride;
+
+	const bool sh2ish_fuse = (SHT_ALLOW_SH2ISH_FUSE==1 && S==0 && shtns->allow_sh2ish_fuse);
+	int nlm_stride = (sh2ish_fuse) ? shtns->spec_dist*2 : shtns->nlm_stride;
+
+	int llim_ = llim;
+	void* params[11] = {&d_alm, &d_ct, &ql, &q, &llim_, &nlat_2, &nphi, &shtns->nlat_padded, &nlm_stride, &spat_dist, &shtns->d_xlm};
+	cuLaunchKernel(shtns->gpu_kernels[S], 
+			shtns->gridDim_x[0], shtns->gridDim_y[0], mmax+1,		// grid dim
+			shtns->nwarp[0]*WARPSZE, 1, 1,					// block dim
+			0, stream,								 // shared memory, stream
+			params, 0);		// kernel params
+}
+
+
+/// Perform SH transform on data that is already on the GPU. d_Qlm and d_Vr are pointers to GPU memory (obtained by cudaMalloc() for instance)
+template<int NFIELDS>
+static void ilegendre(shtns_cfg shtns, const int S, const double *q, double* ql, const int llim, long spat_dist = 0)
+{
+	int mmax = shtns->mmax;
+	int mres = shtns->mres;
+	int nlat_2 = shtns->nlat_2;
+	int nphi = shtns->nphi;
+	double *d_alm = shtns->d_clm;
+	double *d_ct = shtns->d_ct;
+	cudaStream_t stream = shtns->comp_stream;
+
+	int ql_dist = shtns->nlm_stride;
+	if (spat_dist == 0) spat_dist = shtns->spat_stride;
+	cudaMemsetAsync(ql, 0, sizeof(double) * NFIELDS * shtns->nlm_stride * shtns->howmany, shtns->comp_stream);		// set to zero before we start.
+	
+	if (llim < mmax*mres) mmax = llim / mres;	// truncate mmax too !
+
+	int llim_ = llim;
+	void* params[10] = {&d_alm, &d_ct, &q, &ql, &llim_, &nlat_2, &nphi, &shtns->nlat_padded, &spat_dist, &ql_dist};
+	cuLaunchKernel(shtns->gpu_kernels[2+S], 		// analysis kernels
+			shtns->gridDim_x[1], shtns->gridDim_y[1], mmax+1,		// grid dim
+			shtns->nwarp[1]*WARPSZE, 1, 1,					// block dim
+			0, stream,								 // shared memory, stream
+			params, 0);		// kernel params
+}
 
 
 /// Perform SH transform on data that is already on the GPU. d_Qlm and d_Vr are pointers to GPU memory (obtained by cudaMalloc() for instance)
@@ -490,14 +685,15 @@ void cuda_SH_to_spat(shtns_cfg shtns, cplx* d_Qlm, double *d_Vr, const long int 
 	//if (spat_dist == 0) spat_dist = shtns->spat_stride;
 
 	cplx* d_qlm = d_Qlm;
-		if (S==0  &&  (SHT_ALLOW_SH2ISH_FUSE==0 || llim > SHT_L_RESCALE_FLY)) {
+
+		if (S==0  &&  (SHT_ALLOW_SH2ISH_FUSE==0 || shtns->allow_sh2ish_fuse == 0)) {
 			d_qlm = (cplx*) shtns->gpu_buf_in;
 			//for (int f=0; f<NFIELDS; f++)
 			//	sh2ishioka_gpu(shtns, d_Qlm + f * shtns->nlm_stride, d_qlm + f * shtns->nlm_stride, llim, mmax, S);
 			sh2ishioka_gpu(shtns, d_Qlm, d_qlm, llim, mmax, S);
 		} else
 	if (d_Vr == (double*) d_Qlm) { printf("ERROR: cuda_SH_to_spat must have distinct in and out fields");	exit(1); }
-	legendre<S,NFIELDS>(shtns, (double*) d_qlm, d_Vr, llim, mmax, shtns->nlat);
+	legendre(shtns, S, (double*) d_qlm, d_Vr, llim, mmax, shtns->nlat);
 	for (int f=0; f<NFIELDS; f++)  fourier_to_spat_gpu(shtns, d_Vr + f*spat_dist, mmax);	// in-place
 }
 
@@ -516,7 +712,7 @@ void cuda_spat_to_SH(shtns_cfg shtns, double *d_Vr, cplx* d_Qlm, const long int 
 
 		if (S==0) {
 			cplx* d_Qlm_ish = (cplx*) shtns->gpu_buf_in;
-			ilegendre<S, NFIELDS>(shtns, d_Vr, (double*) d_Qlm_ish, llim, shtns->nlat);
+			ilegendre<NFIELDS>(shtns, S, d_Vr, (double*) d_Qlm_ish, llim, shtns->nlat);
 			ishioka2sh_gpu(shtns, d_Qlm_ish, d_Qlm, llim, mmax, S);
 			//for (int f=0; f<NFIELDS; f++)
 			//	ishioka2sh_gpu(shtns, d_Qlm_ish + f * shtns->nlm_stride, d_Qlm + f * shtns->nlm_stride, llim, mmax, S);
@@ -524,7 +720,7 @@ void cuda_spat_to_SH(shtns_cfg shtns, double *d_Vr, cplx* d_Qlm, const long int 
 		 } else
 	{
 		if (d_Vr == (double*) d_Qlm) { printf("ERROR: cuda_spat_to_SH must have distinct in and out fields");	exit(1); }
-		ilegendre<S, NFIELDS>(shtns, d_Vr, (double*) d_Qlm, llim, shtns->nlat);
+		ilegendre<NFIELDS>(shtns, S, d_Vr, (double*) d_Qlm, llim, shtns->nlat);
 	}
 }
 
@@ -624,7 +820,7 @@ void SH_to_spat_gpu(shtns_cfg shtns, cplx *Qlm, double *Vr, const long int llim)
 
 	double *d_q   = shtns->gpu_buf_out;		// outer buffer for transfer (safe)
 	double *d_qlm = d_q;		// "in-place" operation possible with ishioka
-	if (SHT_ALLOW_SH2ISH_FUSE == 1  &&  llim <= SHT_L_RESCALE_FLY) d_qlm = shtns->gpu_buf_in; // include sh2ishioka into legendre kernel
+	if (SHT_ALLOW_SH2ISH_FUSE == 1  &&  shtns->allow_sh2ish_fuse == 1) d_qlm = shtns->gpu_buf_in; // include sh2ishioka into legendre kernel
 
 	if (llim < mmax*mres) {
 		mmax = llim / mres;	// truncate mmax too !
