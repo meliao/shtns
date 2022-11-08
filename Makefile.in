@@ -60,6 +60,8 @@ SHT/SH_to_spat_kernel.c : SHT/kernel_SH_to_spat.gen.c
 	$(MAKE) SH_to_spat_kernel.c -C SHT SFX=kernel SED=$(SED)
 SHT/spat_to_SH_kernel.c : SHT/kernel_spat_to_SH.gen.c
 	$(MAKE) spat_to_SH_kernel.c -C SHT SFX=kernel SED=$(SED)
+SHT/cuda_legendre.inc : SHT/cuda_legendre.gen.cu
+	$(MAKE) cuda_legendre.inc -C SHT SED=$(SED)
 
 # objects :
 sht_init.o : sht_init.c Makefile sht_legendre.c sht_func.c sht_com.c $(hfiles)
@@ -75,7 +77,7 @@ sht_kernels_s.o : sht_kernels_s.c Makefile $(hfiles) SHT/SH_to_spat_kernel.c
 	$(shtcc) -c $< -o $@
 sht_kernels_a.o : sht_kernels_a.c Makefile $(hfiles) SHT/spat_to_SH_kernel.c
 	$(shtcc) -c $< -o $@
-sht_gpu.o : sht_gpu.cu sht_gpu_kernels.cu Makefile $(hfiles)
+sht_gpu.o : sht_gpu.cu sht_gpu_kernels.cu Makefile $(hfiles) SHT/cuda_legendre.inc
 	nvcc -c sht_gpu.cu -lineinfo -Xptxas=-v @nvcc_flags@
 
 # programs & Examples

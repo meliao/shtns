@@ -60,6 +60,11 @@
 
 enum cushtns_flags { CUSHT_OFF=0, CUSHT_ON=1, CUSHT_OWN_XFER_STREAM=4};
 
+/// include a compilable version of cuda_legendre.gen.cu (zero-terminated) :
+const char *src_leg =
+	#include "SHT/cuda_legendre.inc"
+;
+
 /* TOOL FUNCTIONS */
 
 extern "C"
@@ -301,7 +306,8 @@ int init_cuda_program(shtns_cfg shtns)
 	printf("launch params: nblocks=(%d, %d)\n", shtns->gridDim_x[0], shtns->gridDim_x[1]);
 	shtns->allow_sh2ish_fuse = (SHT_ALLOW_SH2ISH_FUSE==1 && shtns->gridDim_x[0] <= 2 && !hi_llim) ? 1 : 0;		// can we fuse sh2ish and leg_m_kernel ?
 
-	char* const src = (char*) malloc(100*1024);	// 100 KB
+	const int sze_src = 100*1024;	// 100 KB
+	char* const src = (char*) malloc(sze_src);
 	// define what we need
 	char* s = src;
 	s += sprintf(s, "#define WARPSZE %d\n", WARPSZE);
@@ -320,12 +326,13 @@ int init_cuda_program(shtns_cfg shtns)
 	s += sprintf(s, "#define MPOS_SCALE %g\n", shtns->mpos_scale_analys);
 	printf(src);
 
-	/* TODO: embed file in source code instead of reading it */
-	FILE *fp;
-	fp = fopen("SHT/cuda_legendre.gen.cu", "r");
-	int k = fread(s, 1, 99*1024-(s-src), fp);
-	s[k]=0;	// zero-terminated
-	fclose(fp);
+	// first look for file to read (allows quick changes without recompiling), otherwise use embedded kernel source.
+	FILE *fp = fopen("SHT/cuda_legendre.gen.cu", "r");
+	if (fp) {
+		int k = fread(s, 1, sze_src-10-(s-src), fp);
+		s[k]=0;	// zero-terminated
+		fclose(fp);
+	} else 	snprintf(s, sze_src-10-(s-src), "%s", src_leg);		// copy embedded kernel source
 	//printf(src);
 
 	nvrtcProgram prog;
