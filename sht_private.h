@@ -188,10 +188,9 @@ struct shtns_info {		// MUST start with "int nlm;"
 	float* d_alm_f;
 	float* d_ct_f;
 	CUfunction gpu_kernels[4];		// 4 kernels (scalar & vector, synth & analys)
-	unsigned short gridDim_x[2];
+	unsigned short gridDim_x[3];	// third value is for synthesis when nwarp[3] > 0
 	unsigned short gridDim_y[2];
-	unsigned short nwarp[2];
-	char allow_sh2ish_fuse;
+	unsigned char nwarp[3];			// third value is for scalar synthesis with sh2ish_fuse, or set to 0 to disable sh2ish
 	CUmodule gpu_module;			// not sure this is needed
 	#endif
 	#ifdef VKFFT_BACKEND

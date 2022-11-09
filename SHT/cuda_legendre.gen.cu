@@ -18,21 +18,23 @@
 // CUDA kernels for SHTns that require run-time compiling using nvrtc
 // at compilation, the following must be defined
 // WARPSZE : the warpsize (32 for nvidia, 64 for amd)
+// LMAX : max degree of spherical harmonics. used for address calculation
+// MRES : order multiplicity (often 1). used for address calculation.
 // HI_LLIM : 0 for small values of lmax, 1 for large (rescaling needed)
 // M0_ONLY : 0 for all m's, 1 for axisymmetric
 // ROBERT_FORM : 0 for regular transform, 1 for the Robert form transform (applies to S=1 only)
-// SH2ISH : 0 for separate ishioka pre-computation, 1 for in-kernel pre-computation (for synthesis only, and S=0 only)
-
 // BLKSZE_S : blocksize for synthesis (leg_m_kernel)
 // BLKSZE_A : blocksize for analysis (ileg_m_kernel)
+// BLKSZE_SH2ISH : 0 for separate ishioka pre-computation, or blocksize for in-kernel pre-computation -- for scalar (S=0) synthesis only.
 // NF_S : number of fields treated together for synthesis
 // NF_A : number of fields treated together for analysis
 // LSPAN_A : number of SH degrees treated together (analysis)
 // NW_S : number of spatial points per thread (synthesis)
+// MPOS_SCALE : scale factor for analysis (used once)
 
 // TODO: some parameters can be made compile-time constants!
-// 		nlat_2, lmax, mres, nphi, m_inc, mpos_scale
-//	priority: mres (often=1), lmax (simplify adress calculations), and mpos_scale (0.5 or 1), nlat_2 (allows to select atomicAdd or not at compile time, adress calculations)
+// 		nlat_2, nphi, m_inc, mpos_scale
+//	priority: nlat_2 (allows to select atomicAdd or not at compile time, adress calculations)
 
 #define SHT_ACCURACY 1.0e-40
 #define SHT_SCALE_FACTOR 2.0370359763344860863e+90
@@ -71,7 +73,7 @@ __device__ __forceinline__ double atomicAdd(double* address, double val)
 #endif
 
 
-#if SH2ISH == 1
+#if BLKSZE_SH2ISH > 0
 __device__ double qish(const double* __restrict__ xlm, const double* __restrict__ ql, const int llim_m, int ll)
 {
 	double q = ql[ll];
@@ -90,13 +92,13 @@ void leg_m_kernel(
 	const double* __restrict__ al, const double* __restrict__ ct, const double* __restrict__ ql, double *q,
 	const int llim, const int nlat_2, const int nphi, const int m_inc,
 	const int ql_dist, const int q_dist
-#if SH2ISH == 1
+#if BLKSZE_SH2ISH > 0
 	,const double* __restrict__ xlm
 #endif
 )
 
 {
-	const int BLOCKSIZE=BLKSZE_S;
+	const int BLOCKSIZE = (BLKSZE_SH2ISH>0 && S==0) ? BLKSZE_SH2ISH : BLKSZE_S;
 	const int NW=NW_S;
 	const int NFIELDS=NF_S;
 	const int it = (HI_LLIM) ? BLOCKSIZE*NW * blockIdx.x + NW*threadIdx.x : BLOCKSIZE*NW * blockIdx.x + threadIdx.x;
@@ -131,7 +133,7 @@ void leg_m_kernel(
 			ak[j] = al[j+2];
 			#pragma unroll
 			for (int f=0; f<NFIELDS; f++) 	{
-				#if SH2ISH==1
+				#if BLKSZE_SH2ISH > 0
 					if (S==0)	qk[f][j] = qish(xlm, ql+(b*NFIELDS+f)*ql_dist, llim, 2*j);
 					else
 				#endif
@@ -187,7 +189,7 @@ void leg_m_kernel(
 			if ((l+j <= llim) && (BLOCKSIZE==LSPAN || j<LSPAN)) {
 				#pragma unroll
 				for (int f=0; f<NFIELDS; f++) {
-					#if SH2ISH==1
+					#if BLKSZE_SH2ISH > 0
 					if (S==0)	qk[f][j] = qish(xlm, ql+(b*NFIELDS+f)*ql_dist, llim, 2*(l+j));
 					else
 					#endif
@@ -243,7 +245,7 @@ void leg_m_kernel(
 		double rer[NFIELDS][NW], ror[NFIELDS][NW], rei[NFIELDS][NW], roi[NFIELDS][NW];
 		int m = im*MRES;
 		int l = (im*(2*(LMAX+1)-MRES-m))>>1;
-		#if SH2ISH==1
+		#if BLKSZE_SH2ISH > 0
 			if (S==0)	xlm += 3*im*(2*(LMAX+4)+MRES-m)/4;
 		#endif
 		#pragma unroll
@@ -255,7 +257,7 @@ void leg_m_kernel(
 			if ((m+j/2 <= llim) && (2*LSPAN>=BLOCKSIZE || j<2*LSPAN)) {
 				#pragma unroll
 				for (int f=0; f<NFIELDS; f++) {
-					#if SH2ISH==1
+					#if BLKSZE_SH2ISH > 0
 					if (S==0)		qk[f][j] = qish(xlm, ql+2*m+(b*NFIELDS+f)*ql_dist, llim-m, j);
 					else
 					#endif
@@ -265,7 +267,7 @@ void leg_m_kernel(
 			if ((BLOCKSIZE < 2*LSPAN) && (m+j/2+BLOCKSIZE/2 <= llim) && (2*BLOCKSIZE<=2*LSPAN || j+BLOCKSIZE < 2*LSPAN)) {
 				#pragma unroll
 				for (int f=0; f<NFIELDS; f++) {
-					#if SH2ISH==1
+					#if BLKSZE_SH2ISH > 0
 					if (S==0)	qk[f][j+BLOCKSIZE] = qish(xlm, ql+2*m+(b*NFIELDS+f)*ql_dist, llim-m, j+BLOCKSIZE);
 					else
 					#endif
@@ -371,7 +373,7 @@ void leg_m_kernel(
 			if ((l+j/2 <= llim) && (BLOCKSIZE<=2*LSPAN || j<2*LSPAN)) {
 				#pragma unroll
 				for (int f=0; f<NFIELDS; f++) {
-					#if SH2ISH==1
+					#if BLKSZE_SH2ISH > 0
 					if (S==0)	qk[f][j] = qish(xlm, ql+2*m+(b*NFIELDS+f)*ql_dist, llim-m, 2*(l-m)+j);
 					else
 					#endif
@@ -381,7 +383,7 @@ void leg_m_kernel(
 			if ((BLOCKSIZE < 2*LSPAN) && (l+j/2+BLOCKSIZE/2 <= llim) && (2*BLOCKSIZE<=2*LSPAN || j+BLOCKSIZE < 2*LSPAN)) {
 				#pragma unroll
 				for (int f=0; f<NFIELDS; f++) {
-					#if SH2ISH==1
+					#if BLKSZE_SH2ISH > 0
 					if (S==0)	qk[f][j+BLOCKSIZE] = qish(xlm, ql+2*m+(b*NFIELDS+f)*ql_dist, llim-m, 2*(l-m)+j+BLOCKSIZE);
 					else
 					#endif

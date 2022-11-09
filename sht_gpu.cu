@@ -265,10 +265,27 @@ static int init_cuda_buffer_fft(shtns_cfg shtns)
 	return err_count;
 }
 
+/// use some apriori metric to choose a good blocksize. An optimal one would require to measure.
+static int optimize_nwarp(int* nwarp, int n_target, int nw, float loss_max, const bool div_by_2=false)
+{
+	float loss;
+	int n = (div_by_2) ? *nwarp*2 : *nwarp+1;
+	int nb = 0;
+	do {
+		n = (div_by_2) ? n/2 : n-1;
+		nb = (n_target + n*nw-1)/(n*nw);	// number of block (should be minimum)
+		loss = nb*n*nw / (float) n_target;
+		printf("%d %d %f\n", n, nb, loss);
+	} while (n>1 && loss>loss_max);		// either we found a good value, with less than 15% overhead due to large block size, or we reach n=1
+	*nwarp = n;
+	return nb;
+}
+
 int init_cuda_program(shtns_cfg shtns)
 {
+	const int nwarp_target = (shtns->nlat_2 + WARPSZE-1)/WARPSZE;		// number of 'warps' needed for nlat_2 points
 	int hi_llim = 0;
-	int nwarp_s=8;		// maximum number of warps for good performance
+	int nwarp_s=1;		// 1 WARP is the best choice on V100 for vector or when sh2ish is disabled
 	int nwarp_a=1;		// 1 WARP is by far the best choice here, at least on V100
 	int nw_s=2;		int nf_s=1;			int nf_a=1;
 	// adjust values (heuristics)
@@ -277,34 +294,50 @@ int init_cuda_program(shtns_cfg shtns)
 	else if (shtns->howmany % 3 == 0) { nf_s=3; nw_s=1; 	nf_a=1;	}
 	int lspan_a = 16/nf_a;		// V100: 16/nf_a works best (mmax>0)
 
+	bool sh2ish_fuse = SHT_ALLOW_SH2ISH_FUSE;
 	if (shtns->mmax == 0) {
 		nw_s = 4;	nwarp_s = 1;
+		if (nf_s == 4) nf_s = 2;
+		if (nf_s == 3) nf_s = 1;
 		if (nf_a == 4) nf_a = 2;
 		if (nf_a == 1) nwarp_a = 2;
 		lspan_a = 32/nf_a;		// V100: 32/nf_a works best (mmax==0)
+		sh2ish_fuse = false;	// don't fuse mmax=0
 	} else if (shtns->lmax > SHT_L_RESCALE_FLY) {
 		nwarp_s = nwarp_a = 1;
 		hi_llim = 1;		// only if mmax>0
+		sh2ish_fuse = false;	// don't fuse hi_llim
 	}
 
-	// try to find optimal block size
-	int nwarp_target;
-	nwarp_target = (shtns->nlat_2 + nw_s*WARPSZE-1)/(nw_s*WARPSZE);		// number of warps needed for nlat_2 points
-	//if (nwarp_target == 1) 	// we could try to reduce nw_s to find a better solution
-	if (nwarp_s > nwarp_target) nwarp_s = nwarp_target;
-	//if (nwarp_s < nwarp_target) 		// we could try to find an even partition
+	// for analysis, simple:
+	printf("optimze analysis:\n");
+	optimize_nwarp(&nwarp_a, nwarp_target, 1, 1.14f);
+	// for regular scalar synthesis (not fused) and vector synthesis
+	printf("optimze vector synthesis:\n");
+	optimize_nwarp(&nwarp_s, nwarp_target, nw_s, 1.14f);
+	if (nw_s > 1  &&  nwarp_s == 1)	{
+		printf("optimze NW synthesis:\n");
+		optimize_nwarp(&nw_s, nwarp_target, nwarp_s, 1.3f, true);		// maybe we should reduce nw_s ? (must keep an even value)
+	}
 
-	nwarp_target = (shtns->nlat_2 + WARPSZE-1)/WARPSZE;		// number of warps needed for nlat_2 points
-	if (nwarp_a > nwarp_target) nwarp_a = nwarp_target;
-	
+	int nwarp_s0=0;		int nblocks_s0=0;
+	if (sh2ish_fuse) {
+		// for scalar synthesis we should try to fuse sh2ish and leg_m_kernel for better performance.
+		// this requires a larger blocksize (nwarp_s), up to MAX_THREADS_PER_BLOCK.
+		nwarp_s0 = 8;		// start with maximum number of warps per block
+		printf("optimze scalar synthesis:\n");
+		nblocks_s0 = optimize_nwarp(&nwarp_s0, nwarp_target, nw_s, 1.14f);
+		if (nblocks_s0 > 2) sh2ish_fuse = false;	// disable sh2ish_fuse, very likely slower or only marginally faster
+	}
+
 	// also store into plan the kernel launch parameters:
-	shtns->nwarp[0] = nwarp_s;		shtns->nwarp[1] = nwarp_a;
+	shtns->nwarp[0] = nwarp_s;		shtns->nwarp[1] = nwarp_a;		shtns->nwarp[2] = sh2ish_fuse ? nwarp_s0 : 0;
 	shtns->gridDim_x[0] = (shtns->nlat_2 + nw_s*nwarp_s*WARPSZE-1)/(nw_s*nwarp_s*WARPSZE);
 	shtns->gridDim_x[1] = (shtns->nlat_2 + nwarp_a*WARPSZE-1)/(nwarp_a*WARPSZE);
+	shtns->gridDim_x[2] = sh2ish_fuse ? nblocks_s0 : 0;
 	shtns->gridDim_y[0] = shtns->howmany / nf_s;
 	shtns->gridDim_y[1] = shtns->howmany / nf_a;
-	printf("launch params: nblocks=(%d, %d)\n", shtns->gridDim_x[0], shtns->gridDim_x[1]);
-	shtns->allow_sh2ish_fuse = (SHT_ALLOW_SH2ISH_FUSE==1 && shtns->gridDim_x[0] <= 2 && !hi_llim) ? 1 : 0;		// can we fuse sh2ish and leg_m_kernel ?
+	printf("launch params: nblocks=(%d, %d, %d)\n", shtns->gridDim_x[0], shtns->gridDim_x[1], shtns->gridDim_x[2]);
 
 	const int sze_src = 100*1024;	// 100 KB
 	char* const src = (char*) malloc(sze_src);
@@ -316,9 +349,9 @@ int init_cuda_program(shtns_cfg shtns)
 	s += sprintf(s, "#define HI_LLIM %d\n", hi_llim);
 	s += sprintf(s, "#define M0_ONLY %d\n", (shtns->mmax == 0) ? 1 : 0);
 	s += sprintf(s, "#define ROBERT_FORM %d\n", shtns->robert_form);
-	s += sprintf(s, "#define SH2ISH %d\n", shtns->allow_sh2ish_fuse);
 	s += sprintf(s, "#define BLKSZE_S %d\n", nwarp_s*WARPSZE);
 	s += sprintf(s, "#define BLKSZE_A %d\n", nwarp_a*WARPSZE);
+	s += sprintf(s, "#define BLKSZE_SH2ISH %d\n", shtns->nwarp[2] * WARPSZE);	// 0 in case sh2ish is disabled
 	s += sprintf(s, "#define NF_S %d\n", nf_s);
 	s += sprintf(s, "#define NF_A %d\n", nf_a);
 	s += sprintf(s, "#define LSPAN_A %d\n", lspan_a);
@@ -499,7 +532,7 @@ int cushtns_init_gpu(shtns_cfg shtns)
 	shtns->d_mx_van = d_mx_van;
 
 	err_count += init_cuda_buffer_fft(shtns);
-	init_cuda_program(shtns);
+	err_count += init_cuda_program(shtns);
 
 	if (err_count != 0) {
 		cushtns_release_gpu(shtns);
@@ -635,7 +668,6 @@ void spat_to_fourier_gpu(shtns_cfg shtns, double* q, const int mmax)
 
 static void legendre(shtns_cfg shtns, const int S, const double *ql, double *q, const int llim, const int mmax, long spat_dist = 0)
 {
-	int mres = shtns->mres;
 	int nlat_2 = shtns->nlat_2;
 	int nphi = shtns->nphi;
 	double *d_alm = shtns->d_clm;
@@ -643,14 +675,15 @@ static void legendre(shtns_cfg shtns, const int S, const double *ql, double *q, 
 	cudaStream_t stream = shtns->comp_stream;
 	if (spat_dist == 0) spat_dist = shtns->spat_stride;
 
-	const bool sh2ish_fuse = (SHT_ALLOW_SH2ISH_FUSE==1 && S==0 && shtns->allow_sh2ish_fuse);
+	const bool sh2ish_fuse = (SHT_ALLOW_SH2ISH_FUSE==1 && S==0 && shtns->nwarp[2]>0);
 	int nlm_stride = (sh2ish_fuse) ? shtns->spec_dist*2 : shtns->nlm_stride;
+	int par_idx = (sh2ish_fuse) ? 2 : 0;
 
 	int llim_ = llim;
 	void* params[11] = {&d_alm, &d_ct, &ql, &q, &llim_, &nlat_2, &nphi, &shtns->nlat_padded, &nlm_stride, &spat_dist, &shtns->d_xlm};
 	cuLaunchKernel(shtns->gpu_kernels[S], 
-			shtns->gridDim_x[0], shtns->gridDim_y[0], mmax+1,		// grid dim
-			shtns->nwarp[0]*WARPSZE, 1, 1,					// block dim
+			shtns->gridDim_x[par_idx], shtns->gridDim_y[0], mmax+1,		// grid dim
+			shtns->nwarp[par_idx]*WARPSZE, 1, 1,					// block dim
 			0, stream,								 // shared memory, stream
 			params, 0);		// kernel params
 }
@@ -693,7 +726,7 @@ void cuda_SH_to_spat(shtns_cfg shtns, cplx* d_Qlm, double *d_Vr, const long int 
 
 	cplx* d_qlm = d_Qlm;
 
-		if (S==0  &&  (SHT_ALLOW_SH2ISH_FUSE==0 || shtns->allow_sh2ish_fuse == 0)) {
+		if (S==0  &&  (SHT_ALLOW_SH2ISH_FUSE==0 || shtns->nwarp[2]==0)) {
 			d_qlm = (cplx*) shtns->gpu_buf_in;
 			//for (int f=0; f<NFIELDS; f++)
 			//	sh2ishioka_gpu(shtns, d_Qlm + f * shtns->nlm_stride, d_qlm + f * shtns->nlm_stride, llim, mmax, S);
@@ -827,7 +860,7 @@ void SH_to_spat_gpu(shtns_cfg shtns, cplx *Qlm, double *Vr, const long int llim)
 
 	double *d_q   = shtns->gpu_buf_out;		// outer buffer for transfer (safe)
 	double *d_qlm = d_q;		// "in-place" operation possible with ishioka
-	if (SHT_ALLOW_SH2ISH_FUSE == 1  &&  shtns->allow_sh2ish_fuse == 1) d_qlm = shtns->gpu_buf_in; // include sh2ishioka into legendre kernel
+	if (SHT_ALLOW_SH2ISH_FUSE == 1  &&  shtns->nwarp[2]>0) d_qlm = shtns->gpu_buf_in; // include sh2ishioka into legendre kernel
 
 	if (llim < mmax*mres) {
 		mmax = llim / mres;	// truncate mmax too !
