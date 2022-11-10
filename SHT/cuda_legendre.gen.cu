@@ -243,7 +243,7 @@ void leg_m_kernel(
 #if M0_ONLY==0
 	else { 	// m>0
 		double rer[NFIELDS][NW], ror[NFIELDS][NW], rei[NFIELDS][NW], roi[NFIELDS][NW];
-		int m = im*MRES;
+		const int m = im*MRES;
 		int l = (im*(2*(LMAX+1)-MRES-m))>>1;
 		#if BLKSZE_SH2ISH > 0
 			if (S==0)	xlm += 3*im*(2*(LMAX+4)+MRES-m)/4;
@@ -289,8 +289,12 @@ void leg_m_kernel(
 	{
 		l = m - S;
 		if (S==1 && ROBERT_FORM) l = m;		// multiply vectors by sin(theta) with robert_form
+		#if HI_LLIM==1
 		int nsint = 0;
 		int ny = 0;
+		#else
+		const int ny = 0;
+		#endif
 		do {		// sin(theta)^(m-S)
 			if (l&1) {
 				#pragma unroll
@@ -306,14 +310,14 @@ void leg_m_kernel(
 			}
 			#pragma unroll
 			for (int i=0; i<NW; i++) y1[i] *= y1[i];
-			if (HI_LLIM) {
+			#if HI_LLIM==1
 				nsint += nsint;
 				if (y1[NW-1] < 1.0/SHT_SCALE_FACTOR) {
 					nsint--;
 					#pragma unroll
 					for (int i=0; i<NW; i++) y1[i] *= SHT_SCALE_FACTOR;
 				}
-			}
+			#endif
 		} while(l >>= 1);
 
 		#pragma unroll
@@ -355,7 +359,9 @@ void leg_m_kernel(
 							roi[f][i] += y1[i] * qk[f][2*k+7];	// imag
 						}
 					}
-				} else if (fabs(y0[NW-1]) > SHT_ACCURACY*SHT_SCALE_FACTOR + 1.0)
+				}
+				#if HI_LLIM==1
+				else if (fabs(y0[NW-1]) > SHT_ACCURACY*SHT_SCALE_FACTOR + 1.0)
 				{	// rescale when value is significant
 					++ny;
 					#pragma unroll
@@ -364,6 +370,7 @@ void leg_m_kernel(
 						y1[i] *= 1.0/SHT_SCALE_FACTOR;
 					}
 				}
+				#endif
 				#pragma unroll
 				for (int i=0; i<NW; i++)	y1[i] += tmp[i] * y0[i];
 			}
@@ -409,7 +416,9 @@ void leg_m_kernel(
 						roi[f][i] += y0[i] * qk[f][2*k+3];	// imag
 					}
 				}
-			} else if (fabs(y1[NW-1]) > SHT_ACCURACY*SHT_SCALE_FACTOR + 1.0)
+			}
+			#if HI_LLIM==1
+			else if (fabs(y1[NW-1]) > SHT_ACCURACY*SHT_SCALE_FACTOR + 1.0)
 			{	// rescale when value is significant
 				++ny;
 				#pragma unroll
@@ -418,6 +427,7 @@ void leg_m_kernel(
 					y1[i] *= 1.0/SHT_SCALE_FACTOR;
 				}
 			}
+			#endif
 			#pragma unroll
 			for (int i=0; i<NW; i++) tmp[i] = tmp[i] * y1[i] + y0[i];
 			#pragma unroll
@@ -619,12 +629,12 @@ void ileg_m_kernel(const double* __restrict__ al, const double* __restrict__ ct,
 	}
 #if M0_ONLY==0
 	else {	// im > 0
-		const int NW = NFIELDS*LSPAN*(M0_ONLY ? 1:2);		// the test for M0_ONLY is to silence a warning
+		const int NW = NFIELDS*LSPAN*2;
 		// re-assign each thread an l (transposed view)
 		const int ll = (j % (BLOCKSIZE/NFIELDS)) / (BLOCKSIZE/NW);		// actualy ll = 2*l + (imag ? 1 : 0)
 		double my_reo[NW];			// in registers
 
-		int m = im*MRES;
+		const int m = im*MRES;
 		int l = (im*(2*(LMAX+1)-MRES-m))>>1;
 
 		y0 = cost * cost;			// cos(theta)^2
@@ -670,8 +680,12 @@ void ileg_m_kernel(const double* __restrict__ al, const double* __restrict__ ct,
 		cost = y0;		// cos(theta)^2
 		y0 = MPOS_SCALE;	// y0
 		l = m - S;
+		#if HI_LLIM==1
 		int ny = 0;
 		int nsint = 0;
+		#else
+		const int ny = 0;
+		#endif
 		do {		// sin(theta)^(m-S)
 			if (l&1) {
 				y0 *= y1;
@@ -684,13 +698,13 @@ void ileg_m_kernel(const double* __restrict__ al, const double* __restrict__ ct,
 				#endif
 			}
 			y1 *= y1;
-			if (HI_LLIM) {
+			#if HI_LLIM==1
 				nsint += nsint;
 				if (y1 < 1.0/SHT_SCALE_FACTOR) {
 					nsint--;
 					y1 *= SHT_SCALE_FACTOR;
 				}
-			}
+			#endif
 		} while(l >>= 1);
 		if (it < nlat_2)     y0 *= ct[it + nlat_2];		// include quadrature weights.
 		y1 = (ak[1]*cost + ak[0]) * y0;
@@ -702,7 +716,8 @@ void ileg_m_kernel(const double* __restrict__ al, const double* __restrict__ ct,
 			for (int k=0; k<LSPAN/2; k+=2) {		// compute a block of the matrix, write it in shared mem.
 				double c0 = ak[2*k+3]*cost + ak[2*k+2];
 				double c1 = ak[2*k+5]*cost + ak[2*k+4];
-				if ((HI_LLIM) && (ny < 0)) {
+				#if HI_LLIM==1
+				if (ny < 0) {
 					if (fabs(y0) > SHT_ACCURACY*SHT_SCALE_FACTOR + 1.0)
 					{	// rescale when value is significant
 						++ny;
@@ -710,6 +725,7 @@ void ileg_m_kernel(const double* __restrict__ al, const double* __restrict__ ct,
 						y1 *= 1.0/SHT_SCALE_FACTOR;
 					}
 				}
+				#endif
 				al += 4;
 				yl[k*l_inc +j]     = (HI_LLIM && (ny<0)) ? 0.0 : y0;		// l and l+1
 				yl[(k+1)*l_inc +j] = (HI_LLIM && (ny<0)) ? 0.0 : y1;		// l+2 and l+3
