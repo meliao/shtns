@@ -31,6 +31,7 @@
 // LSPAN_A : number of SH degrees treated together (analysis)
 // NW_S : number of spatial points per thread (synthesis)
 // MPOS_SCALE : scale factor for analysis (used once)
+// NO_ATOMIC_ACC : if defined, ileg_m_kernel() does not accumulate using atomicAdd (which is ok only if nlat_2 <= BLKSZE_A).
 
 // TODO: some parameters can be made compile-time constants!
 // 		nlat_2, nphi, m_inc, mpos_scale
@@ -594,6 +595,7 @@ void ileg_m_kernel(const double* __restrict__ al, const double* __restrict__ ct,
 			const int itl = (ll >> 1)*l_inc + j % (BLOCKSIZE/NW);
 			#pragma unroll
 			for (int a=0; a<NACC; a++) 	qll[a] = my_reo[a] * yl[itl + a*(BLOCKSIZE/NW)];	// first element of sum
+			const int ql_ofs = (l+ll) + (b*NFIELDS+f0)*ql_dist;		// compute destination ofset in parallel with reduce!
 			#pragma unroll
 			for (int k=NACC; k<NW; k+=NACC) {
 				#pragma unroll
@@ -616,11 +618,12 @@ void ileg_m_kernel(const double* __restrict__ al, const double* __restrict__ ct,
 					qll[0] += shfl_down(qll[0], ofs, BLOCKSIZE/NW);
 				}
 				if ( ((j % (BLOCKSIZE/NW)) == 0) && ((l+ll)<=llim) ) {	// write result
-					if ((!HI_LLIM) && (nlat_2 <= BLOCKSIZE)) {		// do we need atomic add or not ?
-						ql[(l+ll) + (b*NFIELDS+f0)*ql_dist] = qll[0];
-					} else {
-						atomicAdd(ql+(l+ll) + (b*NFIELDS+f0)*ql_dist, qll[0]);		// VERY slow atomic add on Kepler.
-					}
+					#ifdef NO_ATOMIC_ACC
+						// no atomicAdd needed if (nlat_2 <= BLOCKSIZE), which can be decided before compilation
+						ql[ql_ofs] = qll[0];
+					#else
+						atomicAdd(ql+ql_ofs, qll[0]);		// VERY slow atomic add on Kepler.
+					#endif
 				}
 
 			if (j<LSPAN) ak[j+2] = al[j];
@@ -746,6 +749,7 @@ void ileg_m_kernel(const double* __restrict__ al, const double* __restrict__ ct,
 				for (int a=0; a<NACC; a++) {	// NACC independent accumulators
 					qlri[a]   = my_reo[a]   * yl[itl + a*(BLOCKSIZE/NW)];
 				}
+				const int ql_ofs = 2*l+ll + (b*NFIELDS+f0)*ql_dist;		// compute destination ofset in parallel with reduce!
 				#pragma unroll
 				for (int k=NACC; k<NW; k+=NACC) {		// accumulate in NACC separate accumulators
 					#pragma unroll
@@ -767,11 +771,12 @@ void ileg_m_kernel(const double* __restrict__ al, const double* __restrict__ ct,
 						qlri[0] += shfl_down(qlri[0], ofs, BLOCKSIZE/NW);
 					}
 					if ( ((j % (BLOCKSIZE/NW)) == 0) && ((l+(ll>>1))<=llim) ) {	// write result
-						if ((!HI_LLIM) && (nlat_2 <= BLOCKSIZE)) {		// do we need atomic add or not ?
-							ql[2*l+ll + (b*NFIELDS+f0)*ql_dist]   = qlri[0];
-						} else {
-							atomicAdd(ql+2*l+ll + (b*NFIELDS+f0)*ql_dist, qlri[0]);		// VERY slow atomic add on Kepler.
-						}
+						#ifdef NO_ATOMIC_ACC
+							// no atomicAdd needed if (nlat_2 <= BLOCKSIZE), which can be decided before compilation
+							ql[ql_ofs]   = qlri[0];
+						#else
+							atomicAdd(ql+ql_ofs, qlri[0]);
+						#endif
 					}
 			}
 

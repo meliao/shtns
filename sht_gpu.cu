@@ -357,6 +357,7 @@ int init_cuda_program(shtns_cfg shtns)
 	s += sprintf(s, "#define LSPAN_A %d\n", lspan_a);
 	s += sprintf(s, "#define NW_S %d\n", nw_s);
 	s += sprintf(s, "#define MPOS_SCALE %g\n", shtns->mpos_scale_analys);
+	if (shtns->nlat_2 <= nwarp_a*WARPSZE)	s += sprintf(s, "#define NO_ATOMIC_ACC 1\n");	// no atomicAdd needed
 	printf(src);
 
 	// first look for file to read (allows quick changes without recompiling), otherwise use embedded kernel source.
