@@ -230,7 +230,9 @@ static int init_cuda_buffer_fft(shtns_cfg shtns)
 		res = cufftSetStream(shtns->cufft_plan, shtns->comp_stream);	// select stream for cufft
 		size_t worksize = 0;
 		cufftGetSize(shtns->cufft_plan, &worksize);
-		printf("cufft work-area size: %ld \t nlat*nphi = %ld\n", worksize/8, shtns->nlat * shtns->nphi);
+		#if SHT_VERBOSE > 1
+			printf("cufft work-area size: %ld \t nlat*nphi = %ld\n", worksize/8, shtns->nlat * shtns->nphi);
+		#endif
 	}
 
 	// Allocate working arrays for SHT on GPU:
@@ -275,7 +277,7 @@ static int optimize_nwarp(int* nwarp, int n_target, int nw, float loss_max, cons
 		n = (div_by_2) ? n/2 : n-1;
 		nb = (n_target + n*nw-1)/(n*nw);	// number of block (should be minimum)
 		loss = nb*n*nw / (float) n_target;
-		printf("%d %d %f\n", n, nb, loss);
+		if (SHT_VERBOSE > 1) printf("%d %d %f\n", n, nb, loss);
 	} while (n>1 && loss>loss_max);		// either we found a good value, with less than 15% overhead due to large block size, or we reach n=1
 	*nwarp = n;
 	return nb;
@@ -311,13 +313,13 @@ int init_cuda_program(shtns_cfg shtns)
 	}
 
 	// for analysis, simple:
-	printf("optimze analysis:\n");
+	if (SHT_VERBOSE > 1) printf("optimize analysis:\n");
 	optimize_nwarp(&nwarp_a, nwarp_target, 1, 1.14f);
 	// for regular scalar synthesis (not fused) and vector synthesis
-	printf("optimze vector synthesis:\n");
+	if (SHT_VERBOSE > 1) printf("optimize vector synthesis:\n");
 	optimize_nwarp(&nwarp_s, nwarp_target, nw_s, 1.14f);
 	if (nw_s > 1  &&  nwarp_s == 1)	{
-		printf("optimze NW synthesis:\n");
+		if (SHT_VERBOSE > 1) printf("optimize NW synthesis:\n");
 		optimize_nwarp(&nw_s, nwarp_target, nwarp_s, 1.3f, true);		// maybe we should reduce nw_s ? (must keep an even value)
 	}
 
@@ -326,7 +328,7 @@ int init_cuda_program(shtns_cfg shtns)
 		// for scalar synthesis we should try to fuse sh2ish and leg_m_kernel for better performance.
 		// this requires a larger blocksize (nwarp_s), up to MAX_THREADS_PER_BLOCK.
 		nwarp_s0 = 8;		// start with maximum number of warps per block
-		printf("optimze scalar synthesis:\n");
+		if (SHT_VERBOSE > 1) printf("optimize scalar synthesis:\n");
 		nblocks_s0 = optimize_nwarp(&nwarp_s0, nwarp_target, nw_s, 1.14f);
 		if (nblocks_s0 > 2) sh2ish_fuse = false;	// disable sh2ish_fuse, very likely slower or only marginally faster
 	}
@@ -338,7 +340,9 @@ int init_cuda_program(shtns_cfg shtns)
 	shtns->gridDim_x[2] = sh2ish_fuse ? nblocks_s0 : 0;
 	shtns->gridDim_y[0] = shtns->howmany / nf_s;
 	shtns->gridDim_y[1] = shtns->howmany / nf_a;
-	printf("launch params: nblocks=(%d, %d, %d)\n", shtns->gridDim_x[0], shtns->gridDim_x[1], shtns->gridDim_x[2]);
+	#if SHT_VERBOSE > 1
+		printf("launch params: nblocks=(%d, %d, %d)\n", shtns->gridDim_x[0], shtns->gridDim_x[1], shtns->gridDim_x[2]);
+	#endif
 
 	const int sze_src = 100*1024;	// 100 KB
 	char* const src = (char*) malloc(sze_src);
@@ -359,7 +363,9 @@ int init_cuda_program(shtns_cfg shtns)
 	s += sprintf(s, "#define NW_S %d\n", nw_s);
 	s += sprintf(s, "#define MPOS_SCALE %g\n", shtns->mpos_scale_analys);
 	if (shtns->nlat_2 <= nwarp_a*WARPSZE)	s += sprintf(s, "#define NO_ATOMIC_ACC 1\n");	// no atomicAdd needed
-	printf(src);
+	#if SHT_VERBOSE > 1
+		printf(src);		// displays the defines for debug purposes
+	#endif
 
 	// first look for file to read (allows quick changes without recompiling), otherwise use embedded kernel source.
 	FILE *fp = fopen("SHT/cuda_legendre.gen.cu", "r");
@@ -386,17 +392,21 @@ int init_cuda_program(shtns_cfg shtns)
 	}
 
 	// Compile
-	const char *opts[] = {"-std=c++11", "-arch=compute_70", "-lineinfo"};
-	printf("compiling cuda kernels (lmax=%d, nlat=%d, nbatch=%d)\n", shtns->lmax, shtns->nlat, shtns->howmany);
-	rtc_res = nvrtcCompileProgram(prog, 3, opts);
-	if (rtc_res != NVRTC_SUCCESS) {
-		printf("\nERROR nvrtcCompileProgram failed with error '%s'\n", nvrtcGetErrorString(rtc_res));
+	const char *opts[] = {"-std=c++11", "-arch=sm_70", "-lineinfo", "--ptxas-options",  "-v"};
+	#if SHT_VERBOSE > 1
+		printf("compiling cuda kernels (lmax=%d, nlat=%d, nbatch=%d)\n", shtns->lmax, shtns->nlat, shtns->howmany);
+	#endif
+	rtc_res = nvrtcCompileProgram(prog, 5, opts);
+	if ((rtc_res != NVRTC_SUCCESS) || (SHT_VERBOSE > 1)) {		// show compile log in case of failure, or if verbose (debug) output required
 		size_t sze = 0;
 		nvrtcGetProgramLogSize (prog, &sze);
 		char* log = (char*) malloc(sze);
 		nvrtcGetProgramLog (prog, log);
 		if (sze > 0) printf(log);
 		free(log);
+	}
+	if (rtc_res != NVRTC_SUCCESS) {
+		printf("\nERROR nvrtcCompileProgram failed with error '%s'\n", nvrtcGetErrorString(rtc_res));
 		return 1;	// fail
 	}
 
