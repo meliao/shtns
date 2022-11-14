@@ -450,61 +450,43 @@ void leg_m_kernel(
 			}
 		}
 
-		// correct odd part, before fft mangling
 		#pragma unroll
 		for (int f=0; f<NFIELDS; f++) {
 			#pragma unroll
-			for (int i=0; i<NW; i++)	roi[f][i] *= cost[i];		// do roi first, used in shuffle below
-		}
-		#pragma unroll
-		for (int f=0; f<NFIELDS; f++) {
-			#pragma unroll
-			for (int i=0; i<NW; i++)	ror[f][i] *= cost[i];
+			for (int i=0; i<NW; i++) {
+				double t  = rer[f][i]+ror[f][i]*cost[i];
+				rer[f][i] = rer[f][i]-ror[f][i]*cost[i];
+				ror[f][i] = rei[f][i]-roi[f][i]*cost[i];
+				rei[f][i] = rei[f][i]+roi[f][i]*cost[i];
+				roi[f][i] = t;
+			}
 		}
 
 		/// store mangled for complex fft
 		if ((!HI_LLIM) || (NW==1)) {
 			#pragma unroll
-			for (int i=0; i<NW; i++) {
+			for (int f=0; f<NFIELDS; f++) {
 				#pragma unroll
-				for (int f=0; f<NFIELDS; f++)	rei[f][i] = shfl_xor(rei[f][i], 1);
-			}
-			#pragma unroll
-			for (int i=0; i<NW; i++) {
-				#pragma unroll
-				for (int f=0; f<NFIELDS; f++)	roi[f][i] = shfl_xor(roi[f][i], 1);
-			}
-		} else {
-			#pragma unroll
-			for (int i=0; i<NW; i+=2) {
-				#pragma unroll
-				for (int f=0; f<NFIELDS; f++)	{	double tmp = rei[f][i]; rei[f][i] = rei[f][i+1]; rei[f][i+1] = tmp; }
-				#pragma unroll
-				for (int f=0; f<NFIELDS; f++)	{	double tmp = roi[f][i]; roi[f][i] = roi[f][i+1]; roi[f][i+1] = tmp; }
+				for (int i=0; i<NW; i++) {
+					ror[f][i] = shfl_xor(ror[f][i], 1);
+					rei[f][i] = shfl_xor(rei[f][i], 1);
+				}
 			}
 		}
 	}
 
-		double nr[NFIELDS][NW];
-		//const double sgn = (j^1) - j;	// 1 - 2*(j&1);		// 1 for even j, -1 for odd j.
 		#pragma unroll
 		for (int i=0; i<NW; i++) {
+			const double sgn = (HI_LLIM && NW>1) ? (i^1)-i : (j^1)-j; 	//(iit^1) - iit;	// 1 - 2*(j&1);		// 1 for even j, -1 for odd j.
 			const int iit = (HI_LLIM) ? it+i : it+i*BLOCKSIZE;
+			const int i2 = (HI_LLIM && NW>1) ? i^1 : i;
 			if (iit < nlat_2) {
-				const double sgn = (iit^1) - iit;	// 1 - 2*(j&1);		// 1 for even j, -1 for odd j.
 				#pragma unroll
 				for (int f=0; f<NFIELDS; f++) {
-					nr[f][i] =  rer[f][i]+ror[f][i];
-					rer[f][i] = rer[f][i]-ror[f][i];
-					ror[f][i] = rei[f][i]+roi[f][i];
-					rei[f][i] = rei[f][i]-roi[f][i];
-				}
-				#pragma unroll
-				for (int f=0; f<NFIELDS; f++) {
-					q[im*m_inc + iit*k_inc + (b*NFIELDS+f)*q_dist]                     = nr[f][i]  - ror[f][i]*sgn;
-					q[(nphi-im)*m_inc + iit*k_inc + (b*NFIELDS+f)*q_dist]              = nr[f][i]  + ror[f][i]*sgn;
-					q[im*m_inc + (nlat_2*2-1-iit)*k_inc + (b*NFIELDS+f)*q_dist]        = rer[f][i] + rei[f][i]*sgn;
-					q[(nphi-im)*m_inc + (nlat_2*2-1-iit)*k_inc + (b*NFIELDS+f)*q_dist] = rer[f][i] - rei[f][i]*sgn;
+					q[im*m_inc        + iit*k_inc              + (b*NFIELDS+f)*q_dist] = roi[f][i] - rei[f][i2]*sgn;
+					q[(nphi-im)*m_inc + iit*k_inc              + (b*NFIELDS+f)*q_dist] = roi[f][i] + rei[f][i2]*sgn;
+					q[im*m_inc        + (nlat_2*2-1-iit)*k_inc + (b*NFIELDS+f)*q_dist] = rer[f][i] + ror[f][i2]*sgn;
+					q[(nphi-im)*m_inc + (nlat_2*2-1-iit)*k_inc + (b*NFIELDS+f)*q_dist] = rer[f][i] - ror[f][i2]*sgn;
 				}
 			}
 		}
