@@ -515,8 +515,8 @@ int cushtns_init_gpu(shtns_cfg shtns)
 		err = cudaMalloc((void **)&d_mx_van, (2*nlm+MAX_THREADS_PER_BLOCK-1)*sizeof(double));
 		if (err != cudaSuccess) err_count ++;
 	}
-	// Allocate the device input vector cos(theta) and gauss weights
-	err = cudaMalloc((void **)&d_ct, 2*nlat_2*sizeof(double));
+	// Allocate the device input vector cos(theta) and gauss weights, sin(theta) and 1/sin(theta)
+	err = cudaMalloc((void **)&d_ct, 4*nlat_2*sizeof(double));
 	if (err != cudaSuccess) err_count ++;
 
 	if (err_count == 0) {
@@ -535,6 +535,10 @@ int cushtns_init_gpu(shtns_cfg shtns)
 		err = cudaMemcpy(d_ct, shtns->ct, nlat_2*sizeof(double), cudaMemcpyHostToDevice);
 		if (err != cudaSuccess)  err_count ++;
 		err = cudaMemcpy(d_ct + nlat_2, shtns->wg, nlat_2*sizeof(double), cudaMemcpyHostToDevice);
+		if (err != cudaSuccess)  err_count ++;
+		err = cudaMemcpy(d_ct + 2*nlat_2, shtns->st, nlat_2*sizeof(double), cudaMemcpyHostToDevice);
+		if (err != cudaSuccess)  err_count ++;
+		err = cudaMemcpy(d_ct + 3*nlat_2, shtns->st_1, nlat_2*sizeof(double), cudaMemcpyHostToDevice);
 		if (err != cudaSuccess)  err_count ++;
 	}
 
