@@ -291,6 +291,7 @@ int init_cuda_program(shtns_cfg shtns)
 	if (shtns->nlat_2 <= 512) nwarp_s = 4;	// ... except when polar optimization is not important, then larger blocks are good
 	int nwarp_a=1;		// 1 WARP is by far the best choice here, at least on V100
 	int nw_s=2;		int nf_s=1;			int nf_a=1;
+	if (nwarp_target % 3 == 0) nw_s=3;	// if we need a multiple of 3, nw_s=3 is likely a bit better
 	// adjust values (heuristics)
 	if (shtns->howmany % 4 == 0) 	  {	nf_s=4;	nw_s=1;		nf_a=4;	}
 	else if (shtns->howmany % 2 == 0) {	nf_s=2;	nw_s=2; 	nf_a=2;	}
@@ -310,6 +311,7 @@ int init_cuda_program(shtns_cfg shtns)
 		nwarp_s = nwarp_a = 1;
 		hi_llim = 1;		// only if mmax>0
 		sh2ish_fuse = false;	// don't fuse hi_llim
+		if (nw_s > 2) nw_s=2;	// nw_s = 1 or 2 only
 	}
 
 	// for analysis, simple:
@@ -320,7 +322,7 @@ int init_cuda_program(shtns_cfg shtns)
 	optimize_nwarp(&nwarp_s, nwarp_target, nw_s, 1.14f);
 	if (nw_s > 1  &&  nwarp_s == 1)	{
 		if (SHT_VERBOSE > 1) printf("optimize NW synthesis:\n");
-		optimize_nwarp(&nw_s, nwarp_target, nwarp_s, 1.3f, true);		// maybe we should reduce nw_s ? (must keep an even value)
+		optimize_nwarp(&nw_s, nwarp_target, nwarp_s, 1.3f);		// maybe we should reduce nw_s ?
 	}
 
 	int nwarp_s0=0;		int nblocks_s0=0;
