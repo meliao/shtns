@@ -115,7 +115,7 @@ void leg_m_kernel(
 	__shared__ double ak[LSPAN];
 	__shared__ double qk[NFIELDS][(M0_ONLY) ? LSPAN : LSPAN*2];
 
-	static_assert( (!HI_LLIM) || (( NW==1 || (NW&1)==0 ) && (BLOCKSIZE == WARPSZE)), "high llim works with NW=1 or NW even and BLOCKSIZE=WarpSize" );
+	static_assert( (!HI_LLIM) || ( NW==1 || (NW&1)==0 ), "high llim works with NW=1 or NW even" );
 
 	double cost[NW];
 	double y0[NW];
@@ -282,12 +282,19 @@ void leg_m_kernel(
 				ror[f][i] = 0.0;		roi[f][i] = 0.0;
 				rer[f][i] = 0.0;		rei[f][i] = 0.0;
 			}
-			y0[i] = 1.0;
 		}
 
-	if ((BLOCKSIZE > WARPSZE) || (HI_LLIM ? _any(m - llim*y1[NW-1] <= max(80, llim>>7)) : 
-											_any(m - 80 <= llim*y1[NW-1])))	// polar optimization (see Reinecke 2013), avoiding warp divergence
+	if (BLOCKSIZE > WARPSZE) {
+		__shared__ double st_max;
+		if (j == BLOCKSIZE-1) st_max = y1[NW-1];	// one thread writes its value (the largest one)
+		__syncthreads();
+		y0[0] = st_max;	// everyone reads that value
+	} else	y0[0] = shfl(y1[NW-1], WARPSZE-1);	// get largest value in block/warp + sync warp
+	// at this point, block is in sync (consistent view of shared memory).
+	if ((LMAX > 10350) ? (m - llim*y0[0] <= max(80, llim>>7)) : (m - 80 <= llim*y0[0]))	// polar optimization (see Reinecke 2013), avoiding warp divergence
 	{
+		#pragma unroll
+		for (int i=0; i<NW; i++)	y0[i] = 1.0;
 		l = m - S;
 		if (S==1 && ROBERT_FORM) l = m;		// multiply vectors by sin(theta) with robert_form
 		#if HI_LLIM==1
@@ -324,9 +331,7 @@ void leg_m_kernel(
 		#pragma unroll
 		for (int i=0; i<NW; i++) y1[i] = (al[1]*ct2[i] + al[0])*y0[i];
 
-		if (BLOCKSIZE > WARPSZE) { __syncthreads(); } else { _syncwarp; }
 		l=m;		al+=2;
-
 		while (l<=llim - LSPAN) {	// compute even and odd parts
 			#pragma unroll
 			for (int k = 0; k<LSPAN; k+=4) {
@@ -454,11 +459,11 @@ void leg_m_kernel(
 		for (int f=0; f<NFIELDS; f++) {
 			#pragma unroll
 			for (int i=0; i<NW; i++) {
-				double t  = rer[f][i]+ror[f][i]*cost[i];
+				y0[i]     = rer[f][i]+ror[f][i]*cost[i];	// recycle y0 as temporary value
 				rer[f][i] = rer[f][i]-ror[f][i]*cost[i];
 				ror[f][i] = rei[f][i]-roi[f][i]*cost[i];
 				rei[f][i] = rei[f][i]+roi[f][i]*cost[i];
-				roi[f][i] = t;
+				roi[f][i] = y0[i];
 			}
 		}
 
@@ -628,7 +633,13 @@ void ileg_m_kernel(const double* __restrict__ al, const double* __restrict__ ct,
 		if (j < LSPAN+2) ak[j] = al[j];
 
 		// polar optimization (see Reinecke 2013)
-		if ( (BLOCKSIZE == WARPSZE) && _all(HI_LLIM ? m - llim*y1 > max(80, llim>>7) : m-80 > llim*y1 ) ) return;
+		if (BLOCKSIZE > WARPSZE) {
+			if (j == BLOCKSIZE-1) yl[BLOCKSIZE] = y1;	// one thread writes its value (the largest one); yl[BLOCKSIZE] is unused otherwise => no race condition with later writes
+			__syncthreads();
+			my_reo[0] = yl[BLOCKSIZE];	// everyone reads that value
+		} else	my_reo[0] = shfl(y1, WARPSZE-1);	// get largest value in block/warp
+		// at this point block is in sync.
+		if ((LMAX > 10350) ? (m - llim*my_reo[0] > max(80, llim>>7)) : (m-80 > llim*my_reo[0])) return;
 
 		ql += 2*(l + S*im);	// allow vector transforms where llim = lmax+1
 		const double sgn = j - (j^1);	//	2*(j&1) - 1;	// -/+

@@ -287,8 +287,7 @@ int init_cuda_program(shtns_cfg shtns)
 {
 	const int nwarp_target = (shtns->nlat_2 + WARPSZE-1)/WARPSZE;		// number of 'warps' needed for nlat_2 points
 	int hi_llim = 0;
-	int nwarp_s=1;		// 1 WARP is the best choice on V100 for vector or when sh2ish is disabled ...
-	if (shtns->nlat_2 <= 512) nwarp_s = 4;	// ... except when polar optimization is not important, then larger blocks are good
+	int nwarp_s=4;		// 1 to 4 warps is a good choice on V100 for vector or when sh2ish is disabled. Usually, 4 is a bit better.
 	int nwarp_a=1;		// 1 WARP is by far the best choice here, at least on V100
 	int nw_s=2;		int nf_s=1;			int nf_a=1;
 	if (nwarp_target % 3 == 0) nw_s=3;	// if we need a multiple of 3, nw_s=3 is likely a bit better
