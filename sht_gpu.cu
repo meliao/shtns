@@ -283,7 +283,7 @@ static int optimize_nwarp(int* nwarp, int n_target, int nw, float loss_max, cons
 	return nb;
 }
 
-int init_cuda_program(shtns_cfg shtns)
+int init_cuda_program(shtns_cfg shtns, const int gpu_arch_target)
 {
 	const int nwarp_target = (shtns->nlat_2 + WARPSZE-1)/WARPSZE;		// number of 'warps' needed for nlat_2 points
 	int hi_llim = 0;
@@ -393,9 +393,11 @@ int init_cuda_program(shtns_cfg shtns)
 	}
 
 	// Compile
-	const char *opts[] = {"-std=c++11", "-arch=sm_70", "-lineinfo", "--ptxas-options",  "-v"};
+	char arch[16];
+	snprintf(arch, 16, "-arch=sm_%d", gpu_arch_target);		// compile for the current gpu
+	const char *opts[] = {"-std=c++11", "-lineinfo", "--ptxas-options","-v", arch};
 	#if SHT_VERBOSE > 1
-		printf("compiling cuda kernels (lmax=%d, nlat=%d, nbatch=%d)\n", shtns->lmax, shtns->nlat, shtns->howmany);
+		printf("compiling cuda kernels (lmax=%d, nlat=%d, nbatch=%d) for %s\n", shtns->lmax, shtns->nlat, shtns->howmany, arch);
 	#endif
 	rtc_res = nvrtcCompileProgram(prog, 5, opts);
 	if ((rtc_res != NVRTC_SUCCESS) || (SHT_VERBOSE > 1)) {		// show compile log in case of failure, or if verbose (debug) output required
@@ -495,8 +497,9 @@ int cushtns_init_gpu(shtns_cfg shtns)
 	#if SHT_VERBOSE > 0
 	printf("  cuda GPU #%d \"%s\" found (warp size = %d, compute capabilities = %d.%d).\n", device_id, prop.name, prop.warpSize, prop.major, prop.minor);
 	#endif
-	if (prop.warpSize != WARPSZE) return -1;		// failure, SHTns requires a warpSize of 32.
+	if (prop.warpSize != WARPSZE) return -1;		// failure, warpsize must be known at compile time (does it?).
 	if (prop.major < 3) return -1;			// failure, SHTns requires compute cap. >= 3 (warp shuffle instructions)
+	const int gpu_arch_target = prop.major*10 + prop.minor;		// the gpu_arch we will compile for!
 
 	// Allocate the device input vector alm
 	err = cudaMalloc((void **)&d_alm, (2*nlm+MAX_THREADS_PER_BLOCK-1)*sizeof(double));	// allow some overflow.
@@ -549,7 +552,7 @@ int cushtns_init_gpu(shtns_cfg shtns)
 	shtns->d_mx_van = d_mx_van;
 
 	err_count += init_cuda_buffer_fft(shtns);
-	err_count += init_cuda_program(shtns);
+	err_count += init_cuda_program(shtns, gpu_arch_target);
 
 	if (err_count != 0) {
 		cushtns_release_gpu(shtns);
