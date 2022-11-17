@@ -307,7 +307,7 @@ int init_cuda_program(shtns_cfg shtns, const int gpu_arch_target)
 		lspan_a = 32/nf_a;		// V100: 32/nf_a works best (mmax==0)
 		sh2ish_fuse = false;	// don't fuse mmax=0
 	} else if (shtns->lmax > SHT_L_RESCALE_FLY) {
-		nwarp_s = nwarp_a = 1;
+		nwarp_a = 1;
 		hi_llim = 1;		// only if mmax>0
 		sh2ish_fuse = false;	// don't fuse hi_llim
 		if (nw_s > 2) nw_s=2;	// nw_s = 1 or 2 only
@@ -363,7 +363,7 @@ int init_cuda_program(shtns_cfg shtns, const int gpu_arch_target)
 	s += sprintf(s, "#define LSPAN_A %d\n", lspan_a);
 	s += sprintf(s, "#define NW_S %d\n", nw_s);
 	s += sprintf(s, "#define MPOS_SCALE %g\n", shtns->mpos_scale_analys);
-	if (shtns->nlat_2 <= nwarp_a*WARPSZE)	s += sprintf(s, "#define NO_ATOMIC_ACC 1\n");	// no atomicAdd needed
+	s += sprintf(s, "#define NLAT_2 %d\n", shtns->nlat_2);
 	#if SHT_VERBOSE > 1
 		printf(src);		// displays the defines for debug purposes
 	#endif
@@ -395,11 +395,11 @@ int init_cuda_program(shtns_cfg shtns, const int gpu_arch_target)
 	// Compile
 	char arch[16];
 	snprintf(arch, 16, "-arch=sm_%d", gpu_arch_target);		// compile for the current gpu
-	const char *opts[] = {"-std=c++11", "-lineinfo", "--ptxas-options","-v", arch};
+	const char *opts[] = {"-std=c++11", "-ftz=true", "-lineinfo", "--ptxas-options","-v", arch};
 	#if SHT_VERBOSE > 1
 		printf("compiling cuda kernels (lmax=%d, nlat=%d, nbatch=%d) for %s\n", shtns->lmax, shtns->nlat, shtns->howmany, arch);
 	#endif
-	rtc_res = nvrtcCompileProgram(prog, 5, opts);
+	rtc_res = nvrtcCompileProgram(prog, 6, opts);
 	if ((rtc_res != NVRTC_SUCCESS) || (SHT_VERBOSE > 1)) {		// show compile log in case of failure, or if verbose (debug) output required
 		size_t sze = 0;
 		nvrtcGetProgramLogSize (prog, &sze);

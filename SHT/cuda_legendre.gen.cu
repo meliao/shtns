@@ -31,11 +31,10 @@
 // LSPAN_A : number of SH degrees treated together (analysis)
 // NW_S : number of spatial points per thread (synthesis)
 // MPOS_SCALE : scale factor for analysis (used once)
-// NO_ATOMIC_ACC : if defined, ileg_m_kernel() does not accumulate using atomicAdd (which is ok only if nlat_2 <= BLKSZE_A).
+// NLAT_2 : half the number of latidunal points, should be equal to the nlat_2 kernel parameter
 
 // TODO: some parameters can be made compile-time constants!
 // 		nlat_2, nphi, m_inc, mpos_scale
-//	priority: nlat_2 (allows to select atomicAdd or not at compile time, adress calculations)
 
 #define SHT_ACCURACY 1.0e-40
 #define SHT_SCALE_FACTOR 2.0370359763344860863e+90
@@ -73,6 +72,16 @@ __device__ __forceinline__ double atomicAdd(double* address, double val)
 }
 #endif
 
+__device__ __forceinline__ bool polar_skip_sint(double sint, int llim, int m)
+{
+	// polar optimization (see Reinecke 2013, section 3.3)
+	int x = sint * llim;
+	#if LMAX > 10350
+		return (m - max(80, llim>>7) > x);
+	#else
+		return (m - 80 > x);
+	#endif
+}
 
 #if BLKSZE_SH2ISH > 0
 __device__ double qish(const double* __restrict__ xlm, const double* __restrict__ ql, const int llim_m, int ll)
@@ -275,6 +284,7 @@ void leg_m_kernel(
 						qk[f][j+BLOCKSIZE] = ql[2*m+j+BLOCKSIZE + (b*NFIELDS+f)*ql_dist];	
 				}
 			}
+
 		#pragma unroll
 		for (int i=0; i<NW; i++) {
 			#pragma unroll
@@ -284,15 +294,18 @@ void leg_m_kernel(
 			}
 		}
 
-	if (BLOCKSIZE > WARPSZE) {
-		__shared__ double st_max;
-		if (j == BLOCKSIZE-1) st_max = y1[NW-1];	// one thread writes its value (the largest one)
-		__syncthreads();
-		y0[0] = st_max;	// everyone reads that value
-	} else	y0[0] = shfl(y1[NW-1], WARPSZE-1);	// get largest value in block/warp + sync warp
-	// at this point, block is in sync (consistent view of shared memory).
-	if ((LMAX > 10350) ? (m - llim*y0[0] <= max(80, llim>>7)) : (m - 80 <= llim*y0[0]))	// polar optimization (see Reinecke 2013), avoiding warp divergence
-	{
+		bool skip_block = false;
+		if (NLAT_2 > BLOCKSIZE*NW) {	// polar optimization
+			if (j == BLOCKSIZE-1)	skip_block = polar_skip_sint(y1[NW-1], llim, m);
+			if (BLOCKSIZE > WARPSZE) {
+				__shared__ int xx;
+				if (j == BLOCKSIZE-1) xx = skip_block;	// one thread writes its value (the largest one)
+				__syncthreads();
+				skip_block = xx;	// everyone reads that value	
+			} else	skip_block = _any(skip_block);	// get largest value in block/warp
+		} else if (BLOCKSIZE > WARPSZE) { __syncthreads(); } else { _syncwarp; }
+		// at this point, block is in sync (consistent view of shared memory).
+	if (!skip_block) {
 		#pragma unroll
 		for (int i=0; i<NW; i++)	y0[i] = 1.0;
 		l = m - S;
@@ -516,7 +529,6 @@ void ileg_m_kernel(const double* __restrict__ al, const double* __restrict__ ct,
 
 	static_assert((BLOCKSIZE % (((M0_ONLY)?1:2)*LSPAN*NFIELDS)) == 0, "BLOCKSIZE must be a multiple of 2*LSPAN*NFIELDS");
 	static_assert( ((WARPSZE >= BLOCKSIZE/LSPAN) ? (WARPSZE % (BLOCKSIZE/LSPAN)) : ((BLOCKSIZE/LSPAN) % WARPSZE)) == 0, "WARPSZE and BLOCKSIZE/LSPAN must be multiples");
-	static_assert( (!HI_LLIM) || (BLOCKSIZE == WARPSZE), "for high llim, BLOCKSIZE must be 32");
 	static_assert((LSPAN % 4) == 0, "LSPAN must be a multiple of 4");
 
 	const int padding = 2;		// padding = 0 is very bad for performance (shared-memory bank conflicts).
@@ -605,7 +617,7 @@ void ileg_m_kernel(const double* __restrict__ al, const double* __restrict__ ct,
 					qll[0] += shfl_down(qll[0], ofs, BLOCKSIZE/NW);
 				}
 				if ( ((j % (BLOCKSIZE/NW)) == 0) && ((l+ll)<=llim) ) {	// write result
-					#ifdef NO_ATOMIC_ACC
+					#if NLAT_2 <= BLKSZE_A
 						// no atomicAdd needed if (nlat_2 <= BLOCKSIZE), which can be decided before compilation
 						ql[ql_ofs] = qll[0];
 					#else
@@ -625,23 +637,27 @@ void ileg_m_kernel(const double* __restrict__ al, const double* __restrict__ ct,
 		double my_reo[NW];			// in registers
 
 		const int m = im*MRES;
-		int l = (im*(2*(LMAX+1)-MRES-m))>>1;
-
 		y0 = cost * cost;			// cos(theta)^2
-		al += l+m;
+		int l = (im*(2*(LMAX+1)-MRES-m))>>1;
 		y1 = sqrt(1.0 - y0);	// sin(theta)
+		al += l+m;
 		if (j < LSPAN+2) ak[j] = al[j];
-
-		// polar optimization (see Reinecke 2013)
-		if (BLOCKSIZE > WARPSZE) {
-			if (j == BLOCKSIZE-1) yl[BLOCKSIZE] = y1;	// one thread writes its value (the largest one); yl[BLOCKSIZE] is unused otherwise => no race condition with later writes
-			__syncthreads();
-			my_reo[0] = yl[BLOCKSIZE];	// everyone reads that value
-		} else	my_reo[0] = shfl(y1, WARPSZE-1);	// get largest value in block/warp
-		// at this point block is in sync.
-		if ((LMAX > 10350) ? (m - llim*my_reo[0] > max(80, llim>>7)) : (m-80 > llim*my_reo[0])) return;
-
 		ql += 2*(l + S*im);	// allow vector transforms where llim = lmax+1
+
+		#if NLAT_2 > BLKSZE_A
+		{	// polar optimization
+			bool skip_block = (j == BLOCKSIZE-1) ? polar_skip_sint(y1, llim, m) : false;
+			if (BLOCKSIZE > WARPSZE) {
+				__shared__ int xx;
+				if (j == BLOCKSIZE-1) xx = skip_block;	// one thread writes its value (the largest one)
+				__syncthreads();
+				skip_block = xx;	// everyone reads that value	
+			} else	skip_block = _any(skip_block);	// get largest value in block/warp
+			// at this point, block is in sync (consistent view of shared memory)
+			if (skip_block)  return;
+		}
+		#endif
+
 		const double sgn = j - (j^1);	//	2*(j&1) - 1;	// -/+
 		#pragma unroll
 		for (int f=0; f<NFIELDS; f++) {
@@ -728,9 +744,20 @@ void ileg_m_kernel(const double* __restrict__ al, const double* __restrict__ ct,
 				y0 = c0 * y1 + y0;
 				y1 = c1 * y0 + y1;
 			}
-			const bool y_not_zero = (HI_LLIM) ? _any(ny==0) : true;		// special case where all y are zero.
 
+		#if HI_LLIM==1
+			bool y_not_zero;
+			if (BLOCKSIZE > WARPSZE) {
+				__shared__ int ny_max;
+				if (j == BLOCKSIZE-1) ny_max = ny;	// one thread writes its value (the largest one);
+				__syncthreads();
+				y_not_zero = (ny_max==0);	// everyone reads that value
+			} else	y_not_zero = _any(ny==0);	// get largest value in block/warp [warp vote is faster than shuffle on nvidia]
+		#else
+			const bool y_not_zero = true;
 			if (BLOCKSIZE > WARPSZE) {	__syncthreads(); } else { _syncwarp; }
+		#endif
+			// at this point block is in sync (consistent view of shared memory).
 
 			if ((!HI_LLIM) || (y_not_zero)) {		// when all y are zero, we can skip this.
 				// transposed work (at given l):
@@ -764,7 +791,7 @@ void ileg_m_kernel(const double* __restrict__ al, const double* __restrict__ ct,
 						qlri[0] += shfl_down(qlri[0], ofs, BLOCKSIZE/NW);
 					}
 					if ( ((j % (BLOCKSIZE/NW)) == 0) && ((l+(ll>>1))<=llim) ) {	// write result
-						#ifdef NO_ATOMIC_ACC
+						#if NLAT_2 <= BLKSZE_A
 							// no atomicAdd needed if (nlat_2 <= BLOCKSIZE), which can be decided before compilation
 							ql[ql_ofs]   = qlri[0];
 						#else
