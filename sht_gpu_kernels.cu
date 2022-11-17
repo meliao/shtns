@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2010-2020 Centre National de la Recherche Scientifique.
+ * Copyright (c) 2010-2022 Centre National de la Recherche Scientifique.
  * written by Nathanael Schaeffer (CNRS, ISTerre, Grenoble, France).
  * 
  * nathanael.schaeffer@univ-grenoble-alpes.fr
@@ -17,11 +17,8 @@
 
 // Various CUDA kernels for SHTns
 
-
 /// Maximum number of threads per block that should be used.
 #define MAX_THREADS_PER_BLOCK 256
-/// The warp size is always 32 on cuda devices (up to Ampere at least)
-#define WARPSZE 32
 
 // adjustment for cuda
 #undef SHT_L_RESCALE_FLY

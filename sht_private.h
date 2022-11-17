@@ -42,8 +42,16 @@
   #include <omp.h>
 #endif
 
-#ifdef HAVE_LIBCUFFT
+#if defined(HAVE_LIBCUFFT) || defined(HAVE_LIBROCFFT)
+#ifndef HAVE_LIBROCFFT
 #include <cufft.h>
+/// The warp size is always 32 on cuda devices
+#define WARPSZE 32
+#else
+#include <hipfft.h>
+/// The warp size is always 64 on AMD devices
+#define WARPSZE 64
+#endif
 #include "shtns_cuda.h"
 
 #ifdef __cplusplus
@@ -168,7 +176,7 @@ struct shtns_info {		// MUST start with "int nlm;"
 	fftw_plan ifft_lat;		///< fftw plan for SHqst_to_lat
 	int nphi_lat;			///< nphi of previous SHqst_to_lat
 
-	#ifdef HAVE_LIBCUFFT
+	#if defined(HAVE_LIBCUFFT) || defined(HAVE_LIBROCFFT)
 	/* cuda stuff */
 	short cu_flags;
 	double* d_clm;

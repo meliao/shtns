@@ -56,8 +56,14 @@
 	#define _syncwarp __syncwarp()
 #endif
 
+#if WARPSZE == 64
+	// AMD HIP
+	#define __forceinline__ inline
+	//#define atomicAdd unsafeAtomicAdd
+#endif
+
 #if (__CUDACC_VER_MAJOR__ < 8) || ( defined(__CUDA_ARCH__) && __CUDA_ARCH__ < 600 )
-__device__ __forceinline__ double atomicAdd(double* address, double val)
+__device__ __forceinline__ double atomicAdd_sht(double* address, double val)
 {
 	unsigned long long int* address_as_ull =
 							 (unsigned long long int*)address;
@@ -70,6 +76,8 @@ __device__ __forceinline__ double atomicAdd(double* address, double val)
 	} while (assumed != old);
 	return __longlong_as_double(old);
 }
+#else
+	#define atomicAdd_sht atomicAdd
 #endif
 
 __device__ __forceinline__ bool polar_skip_sint(double sint, int llim, int m)
@@ -170,7 +178,6 @@ void leg_m_kernel(
 		if (BLOCKSIZE > WARPSZE) { __syncthreads(); } else { _syncwarp; }
 
 		while (l<=llim - LSPAN) {	// compute even and odd parts
-			#pragma unroll
 			for (int k = 0; k<LSPAN; k+=4) {
 				#pragma unroll
 				for (int f=0; f<NFIELDS; f++) {
@@ -346,7 +353,6 @@ void leg_m_kernel(
 
 		l=m;		al+=2;
 		while (l<=llim - LSPAN) {	// compute even and odd parts
-			#pragma unroll
 			for (int k = 0; k<LSPAN; k+=4) {
 				double tmp[NW];
 				#pragma unroll
@@ -624,7 +630,7 @@ void ileg_m_kernel(const double* __restrict__ al, const double* __restrict__ ct,
 						// no atomicAdd needed if (nlat_2 <= BLOCKSIZE), which can be decided before compilation
 						ql[ql_ofs] = qll[0];
 					#else
-						atomicAdd(ql+ql_ofs, qll[0]);		// VERY slow atomic add on Kepler.
+						atomicAdd_sht(ql+ql_ofs, qll[0]);		// VERY slow atomic add on Kepler.
 					#endif
 				}
 
@@ -798,7 +804,7 @@ void ileg_m_kernel(const double* __restrict__ al, const double* __restrict__ ct,
 							// no atomicAdd needed if (nlat_2 <= BLOCKSIZE), which can be decided before compilation
 							ql[ql_ofs]   = qlri[0];
 						#else
-							atomicAdd(ql+ql_ofs, qlri[0]);
+							atomicAdd_sht(ql+ql_ofs, qlri[0]);
 						#endif
 					}
 			}

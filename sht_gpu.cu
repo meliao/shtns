@@ -157,7 +157,7 @@ static void destroy_cuda_buffer_fft(shtns_cfg shtns)
 	if (shtns->xfft_cpu) shtns_free(shtns->xfft_cpu);
 }
 
-#ifdef HAVE_LIBCUFFT
+#if defined(HAVE_LIBCUFFT) || defined(HAVE_LIBROCFFT)
 int cuda_gpu_id = 0;	// by default, use gpu device 0
 #endif
 #ifdef VKFFT_BACKEND
@@ -231,7 +231,7 @@ static int init_cuda_buffer_fft(shtns_cfg shtns)
 		size_t worksize = 0;
 		cufftGetSize(shtns->cufft_plan, &worksize);
 		#if SHT_VERBOSE > 1
-			printf("cufft work-area size: %ld \t nlat*nphi = %ld\n", worksize/8, shtns->nlat * shtns->nphi);
+			printf("cufft work-area size: %ld \t nlat*nphi = %d\n", worksize/8, shtns->nlat * shtns->nphi);
 		#endif
 	}
 
@@ -379,7 +379,7 @@ int init_cuda_program(shtns_cfg shtns, const int gpu_arch_target)
 	s += sprintf(s, "#define MPOS_SCALE %g\n", shtns->mpos_scale_analys);
 	s += sprintf(s, "#define NLAT_2 %d\n", shtns->nlat_2);
 	#if SHT_VERBOSE > 1
-		printf(src);		// displays the defines for debug purposes
+		printf("%s", src);		// displays the defines for debug purposes
 	#endif
 
 	// first look for file to read (allows quick changes without recompiling), otherwise use embedded kernel source.
@@ -413,13 +413,13 @@ int init_cuda_program(shtns_cfg shtns, const int gpu_arch_target)
 	#if SHT_VERBOSE > 1
 		printf("compiling cuda kernels (lmax=%d, nlat=%d, nbatch=%d) for %s\n", shtns->lmax, shtns->nlat, shtns->howmany, arch);
 	#endif
-	rtc_res = nvrtcCompileProgram(prog, 6, opts);
+	rtc_res = nvrtcCompileProgram(prog, (WARPSZE==32) ? sizeof(opts)/sizeof(const char*) : 0, opts);
 	if ((rtc_res != NVRTC_SUCCESS) || (SHT_VERBOSE > 1)) {		// show compile log in case of failure, or if verbose (debug) output required
 		size_t sze = 0;
 		nvrtcGetProgramLogSize (prog, &sze);
 		char* log = (char*) malloc(sze);
 		nvrtcGetProgramLog (prog, log);
-		if (sze > 0) printf(log);
+		if (sze > 0) printf("%s", log);
 		free(log);
 	}
 	if (rtc_res != NVRTC_SUCCESS) {
