@@ -546,35 +546,33 @@ void ileg_m_kernel(const double* __restrict__ al, const double* __restrict__ ct,
 		const int ll = (j % (BLOCKSIZE/NFIELDS)) / (BLOCKSIZE/NW);
 		double my_reo[NW];			// in registers
 
+		q += b*NFIELDS*q_dist;
 		if (j < LSPAN+2) ak[j] = al[j];
 
 		#pragma unroll
 		for (int f=0; f<NFIELDS; f++) {
-			y0 = (it < nlat_2) ? q[it + (b*NFIELDS+f)*q_dist] : 0.0;				// north
-			y1 = (it < nlat_2) ? q[nlat_2*2-1 - it + (b*NFIELDS+f)*q_dist] : 0.0;	// south
-			if (S==1 && ROBERT_FORM) {
-				double st_1 = rsqrt(1.0 - cost*cost);		// 1/sin(theta)
-				y0 *= st_1;		y1 *= st_1;
-			}
-			yl[f*2*l_inc +j]     = y0+y1;			// even
-			yl[(f*2+1)*l_inc +j] = (y0-y1)*cost;	// odd
+			double x0 = (it < nlat_2) ? q[it              + f*q_dist] : 0.0;	// north
+			double x1 = (it < nlat_2) ? q[nlat_2*2-1 - it + f*q_dist] : 0.0;	// south
+			yl[f*2*l_inc +j]     = x0+x1;			// even
+			yl[(f*2+1)*l_inc +j] = (x0-x1)*cost;	// odd
 		}
 		if (BLOCKSIZE > WARPSZE) {	__syncthreads(); } else { _syncwarp; }
-			// transpose reo to my_reo
-			#pragma unroll
-			for (int k=0; k<NW; k++) {
-				int it = j % (BLOCKSIZE/NW) + k*(BLOCKSIZE/NW);
-				my_reo[k] = yl[(2*f0  + (ll&1))*l_inc + it];
-			}
 
-		int l = 0;
 		y0 = (it < nlat_2) ? ct[it + nlat_2] : 0.0;		// weights are stored just after ct.
 		cost *= cost;	// ct2
-		if (S==1) y0 *= rsqrt(1.0 - cost);
+		
+		// transpose reo to my_reo
+		#pragma unroll
+		for (int k=0; k<NW; k++) {
+			int it = j % (BLOCKSIZE/NW) + k*(BLOCKSIZE/NW);
+			my_reo[k] = yl[(2*f0  + (ll&1))*l_inc + it];
+		}
+		if (S==1) y0 *= (ROBERT_FORM) ? 1.0/(1.0-cost) : rsqrt(1.0 - cost);
 		y1 = (ak[1]*cost + ak[0]) * y0;
 
 		al+=2;
-		while (l <= llim) {
+		int l = 0;
+		do {
 			if (BLOCKSIZE > WARPSZE) {	__syncthreads(); } else { _syncwarp; }
 				#pragma unroll
 				for (int k=0; k<LSPAN/2; k+=2) {		// compute a block of the matrix, write it in shared mem.
@@ -582,16 +580,16 @@ void ileg_m_kernel(const double* __restrict__ al, const double* __restrict__ ct,
 					double c1 = ak[2*k+5]*cost + ak[2*k+4];
 					yl[k*l_inc +j]     = y0;		// l and l+1
 					yl[(k+1)*l_inc +j] = y1;		// l+2 and l+3
-					al += 4;
-					y0 = c0 * y1 + y0;
-					y1 = c1 * y0 + y1;
+					y0 += c0 * y1;
+					y1 += c1 * y0;
 				}
+			// now re-assign each thread an l (transpose)
+			const int itl = (ll >> 1)*l_inc + j % (BLOCKSIZE/NW);
+
 			if (BLOCKSIZE > WARPSZE) {	__syncthreads(); } else { _syncwarp; }
 
 			const int NACC = 4;		// number of independent accumulators per NFIELD. 4 is good for V100
 			double qll[NACC];		// accumulators
-			// now re-assign each thread an l (transpose)
-			const int itl = (ll >> 1)*l_inc + j % (BLOCKSIZE/NW);
 			#pragma unroll
 			for (int a=0; a<NACC; a++) 	qll[a] = my_reo[a] * yl[itl + a*(BLOCKSIZE/NW)];	// first element of sum
 			const int ql_ofs = (l+ll) + (b*NFIELDS+f0)*ql_dist;		// compute destination ofset in parallel with reduce!
@@ -600,6 +598,10 @@ void ileg_m_kernel(const double* __restrict__ al, const double* __restrict__ ct,
 				#pragma unroll
 				for (int a=0; a<NACC; a++) 	qll[a] += my_reo[a+k] * yl[itl + (k+a)*(BLOCKSIZE/NW)];
 			}
+
+			al += LSPAN;
+			if (j<LSPAN) ak[j+2] = al[j];
+
 			if (NACC > 1) {		// reduce the NACC independent accumulators
 				#pragma unroll
 				for (int a=0; a<NACC; a+=2) {
@@ -625,9 +627,8 @@ void ileg_m_kernel(const double* __restrict__ al, const double* __restrict__ ct,
 					#endif
 				}
 
-			if (j<LSPAN) ak[j+2] = al[j];
 			l+=LSPAN;
-		}
+		} while (l <= llim);
 	}
 #if M0_ONLY==0
 	else {	// im > 0
@@ -635,7 +636,6 @@ void ileg_m_kernel(const double* __restrict__ al, const double* __restrict__ ct,
 		// re-assign each thread an l (transposed view)
 		const int ll = (j % (BLOCKSIZE/NFIELDS)) / (BLOCKSIZE/NW);		// actualy ll = 2*l + (imag ? 1 : 0)
 		double my_reo[NW];			// in registers
-
 		const int m = im*MRES;
 		y0 = cost * cost;			// cos(theta)^2
 		int l = (im*(2*(LMAX+1)-MRES-m))>>1;
@@ -658,27 +658,22 @@ void ileg_m_kernel(const double* __restrict__ al, const double* __restrict__ ct,
 		}
 		#endif
 
-		const double sgn = j - (j^1);	//	2*(j&1) - 1;	// -/+
+		q += b*NFIELDS*q_dist;
+		const double sgn = (j^1)-j;	//	1-2*(j&1);	// +/-
+		const double costx = shfl_xor(cost, 1)*sgn;		// neighboor cost for "reverse" exchange
 		#pragma unroll
 		for (int f=0; f<NFIELDS; f++) {
-			double qer = (it < nlat_2) ? q[im*m_inc        + it            + (b*NFIELDS+f)*q_dist] : 0.0;	// north imag (ani)
-			double t0  = (it < nlat_2) ? q[(nphi-im)*m_inc + it            + (b*NFIELDS+f)*q_dist] : 0.0;	// north real (an)
-			double qor = (it < nlat_2) ? q[im*m_inc        + nlat_2*2-1-it + (b*NFIELDS+f)*q_dist] : 0.0;	// south imag (asi)
-			double t1  = (it < nlat_2) ? q[(nphi-im)*m_inc + nlat_2*2-1-it + (b*NFIELDS+f)*q_dist] : 0.0;	// south real (as)
+			double qer = (it < nlat_2) ? q[im*m_inc        + it            + f*q_dist] : 0.0;	// north imag (ani)
+			double t0  = (it < nlat_2) ? q[(nphi-im)*m_inc + it            + f*q_dist] : 0.0;	// north real (an)
+			double qor = (it < nlat_2) ? q[im*m_inc        + nlat_2*2-1-it + f*q_dist] : 0.0;	// south imag (asi)
+			double t1  = (it < nlat_2) ? q[(nphi-im)*m_inc + nlat_2*2-1-it + f*q_dist] : 0.0;	// south real (as)
 			double qei = t0-qer;		qer += t0;		// ani = -qei[lane+1],   bni = qei[lane-1]
 			double qoi = t1-qor;		qor += t1;		// bsi = -qoi[lane-1],   asi = qoi[lane+1];
-			t0 = shfl_xor(qei, 1);	// exchange between adjacent lanes.
-			t1 = shfl_xor(qoi, 1);
-			if (S==1 && ROBERT_FORM) {
-				double st_1 = rsqrt(1.0 - y0);		// 1/sin(theta)
-				t0  *= st_1;	t1 *=  st_1;
-				qer *= st_1;	qor *= st_1;
-			}
 
-			yl[(f*4+3)*l_inc +j] = (sgn*cost)*(t0 + t1);	// roi, exchange even and odd lanes
-			yl[(f*4+2)*l_inc +j] = (qer - qor)*cost;		// ror
-			yl[(f*4+1)*l_inc +j]   = sgn*(t0 - t1);	// rei, exchange evend and odd lanes
-			yl[f*4*l_inc     +j] 		   = qer + qor;		// rer
+			yl[(f*4+3)*l_inc +(j^1)] = (qei + qoi)*costx;	// roi, exchange even and odd lanes
+			yl[(f*4+2)*l_inc + j]    = (qer - qor)*cost;	// ror
+			yl[(f*4+1)*l_inc +(j^1)] = (qei - qoi)*sgn;		// rei, exchange evend and odd lanes
+			yl[f*4*l_inc     + j]    =  qer + qor;			// rer
 		}
 
 		const int ofs = (4*f0+(ll&3))*l_inc + j % (BLOCKSIZE/NW);
@@ -691,7 +686,12 @@ void ileg_m_kernel(const double* __restrict__ al, const double* __restrict__ ct,
 
 		cost = y0;		// cos(theta)^2
 		y0 = MPOS_SCALE;	// y0
-		l = m - S;
+		l = m - S;		// exponent of sin(theta)
+		if (ROBERT_FORM && S==1) {
+			if (l==0) {
+				y0 /= y1;	// division by sin(theta) only for m=1
+			} else --l;		// otherwise we just reduce the exponent of sin(theta)^l
+		}
 		#if HI_LLIM==1
 		int ny = 0;
 		int nsint = 0;
@@ -738,12 +738,13 @@ void ileg_m_kernel(const double* __restrict__ al, const double* __restrict__ ct,
 					}
 				}
 				#endif
-				al += 4;
 				yl[k*l_inc +j]     = (HI_LLIM && (ny<0)) ? 0.0 : y0;		// l and l+1
 				yl[(k+1)*l_inc +j] = (HI_LLIM && (ny<0)) ? 0.0 : y1;		// l+2 and l+3
-				y0 = c0 * y1 + y0;
-				y1 = c1 * y0 + y1;
+				y0 += c0 * y1;
+				y1 += c1 * y0;
 			}
+
+			const int itl = (ll>>2)*l_inc + (j % (BLOCKSIZE/NW));		// transposed work (at given l)
 
 		#if HI_LLIM==1
 			bool y_not_zero;
@@ -759,12 +760,13 @@ void ileg_m_kernel(const double* __restrict__ al, const double* __restrict__ ct,
 		#endif
 			// at this point block is in sync (consistent view of shared memory).
 
+				al += LSPAN;
+				if (j<LSPAN) ak[j+2] = al[j];
+
 			if ((!HI_LLIM) || (y_not_zero)) {		// when all y are zero, we can skip this.
-				// transposed work (at given l):
 				const int NACC = 2;		// number of independent accumulators (2 is the sweetspot for V100).
 				double qlri[NACC];		// accumulators
 
-				const int itl = (ll>>2)*l_inc + (j % (BLOCKSIZE/NW));
 				#pragma unroll
 				for (int a=0; a<NACC; a++) {	// NACC independent accumulators
 					qlri[a]   = my_reo[a]   * yl[itl + a*(BLOCKSIZE/NW)];
@@ -800,7 +802,6 @@ void ileg_m_kernel(const double* __restrict__ al, const double* __restrict__ ct,
 					}
 			}
 
-			if (j<LSPAN) ak[j+2] = al[j];
 			l+=LSPAN;
 		}
 	}
