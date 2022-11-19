@@ -267,6 +267,13 @@ static int init_cuda_buffer_fft(shtns_cfg shtns)
 	return err_count;
 }
 
+void read_line_int(FILE* fp, int* val)
+{
+	char s[32];
+	char* x = fgets(s, 30, fp);		// read line
+	if (x) sscanf(x, "%d", val);		// convert to int
+}
+
 /// use some apriori metric to choose a good blocksize. An optimal one would require to measure.
 static int optimize_nwarp(int* nwarp, int n_target, int nw, float loss_max, const bool div_by_2=false)
 {
@@ -307,6 +314,18 @@ int init_cuda_program(shtns_cfg shtns, const int gpu_arch_target)
 		sh2ish_fuse = false;	// don't fuse hi_llim
 		if (nw_s > 2) nw_s=2;	// nw_s = 1 or 2 only
 	}
+
+	#if SHT_VERBOSE > 1
+	{	// override from sht_gpu.conf file
+		FILE *fp = fopen("sht_gpu.conf", "r");
+		if (fp) {
+			printf("WARNING! defaults override from sht_gpu.conf\n");
+			read_line_int(fp, &nwarp_s);	read_line_int(fp, &nf_s);	read_line_int(fp, &nw_s);
+			read_line_int(fp, &nwarp_a);	read_line_int(fp, &nf_a);	read_line_int(fp, &lspan_a);
+			fclose(fp);
+		}
+	}
+	#endif
 
 	// for analysis, simple:
 	if (SHT_VERBOSE > 1) printf("optimize analysis:\n");
