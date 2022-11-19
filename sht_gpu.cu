@@ -287,8 +287,10 @@ int init_cuda_program(shtns_cfg shtns, const int gpu_arch_target)
 {
 	const int nwarp_target = (shtns->nlat_2 + WARPSZE-1)/WARPSZE;		// number of 'warps' needed for nlat_2 points
 	int hi_llim = 0;
+	bool sh2ish_fuse = SHT_ALLOW_SH2ISH_FUSE;
 	int nwarp_s=4;		// 1 to 4 warps is a good choice on V100 for vector or when sh2ish is disabled. Usually, 4 is a bit better.
 	int nwarp_a=1;		// 1 WARP is by far the best choice here, at least on V100
+	const int nw_a=1;	// only one point per thread possible for analysis
 	int nw_s=2;		int nf_s=1;			int nf_a=1;
 	if (nwarp_target % 3 == 0) nw_s=3;	// if we need a multiple of 3, nw_s=3 is likely a bit better
 	// adjust values (heuristics)
@@ -297,17 +299,10 @@ int init_cuda_program(shtns_cfg shtns, const int gpu_arch_target)
 	else if (shtns->howmany % 3 == 0) { nf_s=3; nw_s=1; 	nf_a=1;	}
 	int lspan_a = 16/nf_a;		// V100: 16/nf_a works best (mmax>0)
 
-	bool sh2ish_fuse = SHT_ALLOW_SH2ISH_FUSE;
 	if (shtns->mmax == 0) {
-		nw_s = 4;	nwarp_s = 1;
-		if (nf_s == 4) nf_s = 2;
-		if (nf_s == 3) nf_s = 1;
-		if (nf_a == 4) nf_a = 2;
-		if (nf_a == 1) nwarp_a = 2;
 		lspan_a = 32/nf_a;		// V100: 32/nf_a works best (mmax==0)
 		sh2ish_fuse = false;	// don't fuse mmax=0
 	} else if (shtns->lmax > SHT_L_RESCALE_FLY) {
-		nwarp_a = 1;
 		hi_llim = 1;		// only if mmax>0
 		sh2ish_fuse = false;	// don't fuse hi_llim
 		if (nw_s > 2) nw_s=2;	// nw_s = 1 or 2 only
@@ -315,7 +310,7 @@ int init_cuda_program(shtns_cfg shtns, const int gpu_arch_target)
 
 	// for analysis, simple:
 	if (SHT_VERBOSE > 1) printf("optimize analysis:\n");
-	optimize_nwarp(&nwarp_a, nwarp_target, 1, 1.14f);
+	optimize_nwarp(&nwarp_a, nwarp_target, nw_a, 1.14f);
 	// for regular scalar synthesis (not fused) and vector synthesis
 	if (SHT_VERBOSE > 1) printf("optimize vector synthesis:\n");
 	optimize_nwarp(&nwarp_s, nwarp_target, nw_s, 1.14f);
@@ -337,7 +332,7 @@ int init_cuda_program(shtns_cfg shtns, const int gpu_arch_target)
 	// also store into plan the kernel launch parameters:
 	shtns->nwarp[0] = nwarp_s;		shtns->nwarp[1] = nwarp_a;		shtns->nwarp[2] = sh2ish_fuse ? nwarp_s0 : 0;
 	shtns->gridDim_x[0] = (shtns->nlat_2 + nw_s*nwarp_s*WARPSZE-1)/(nw_s*nwarp_s*WARPSZE);
-	shtns->gridDim_x[1] = (shtns->nlat_2 + nwarp_a*WARPSZE-1)/(nwarp_a*WARPSZE);
+	shtns->gridDim_x[1] = (shtns->nlat_2 + nw_a*nwarp_a*WARPSZE-1)/(nw_a*nwarp_a*WARPSZE);
 	shtns->gridDim_x[2] = sh2ish_fuse ? nblocks_s0 : 0;
 	shtns->gridDim_y[0] = shtns->howmany / nf_s;
 	shtns->gridDim_y[1] = shtns->howmany / nf_a;
