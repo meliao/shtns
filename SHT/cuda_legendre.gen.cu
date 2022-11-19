@@ -569,6 +569,7 @@ void ileg_m_kernel(const double* __restrict__ al, const double* __restrict__ ct,
 		}
 		if (S==1) y0 *= (ROBERT_FORM) ? 1.0/(1.0-cost) : rsqrt(1.0 - cost);
 		y1 = (ak[1]*cost + ak[0]) * y0;
+		if (WARPSZE < LSPAN+2  &&  j<LSPAN+2-WARPSZE)	ak[WARPSZE+j] = al[WARPSZE+j];		// sometimes a bit more than a warp is needed
 
 		al+=2;
 		int l = 0;
