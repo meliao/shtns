@@ -91,6 +91,13 @@ __device__ __forceinline__ bool polar_skip_sint(double sint, int llim, int m)
 	#endif
 }
 
+__device__ __forceinline__ bool polar_skip_sint2(double sint2, int llim, int m)
+{
+	// polar optimization (see Reinecke 2013, section 3.3) -- squared
+	int mm = m - ((LMAX > 10350) ? max(80, llim>>7) : 80);
+	return (mm>0) && (mm*mm > (int) (sint2*(llim*llim)));
+}
+
 #if BLKSZE_SH2ISH > 0
 __device__ double qish(const double* __restrict__ xlm, const double* __restrict__ ql, const int llim_m, int ll)
 {
@@ -169,8 +176,7 @@ void leg_m_kernel(
 		}
 		int l = 0;
 		#pragma unroll
-		for (int i=0; i<NW; i++) y0[i] = 1.0;
-		if (S==1 && !ROBERT_FORM) for (int i=0; i<NW; i++) y0[i] = rsqrt(1.0 - ct2[i]);	// for vectors, divide by sin(theta) -- except in Robert form
+		for (int i=0; i<NW; i++) y0[i] = (S==1 && !ROBERT_FORM) ? rsqrt(1.0 - ct2[i]) : 1.0;    // for vectors, divide by sin(theta) -- except in Robert form
 		#pragma unroll
 		for (int i=0; i<NW; i++) y1[i] = (al[1]*ct2[i] + al[0])*y0[i];
 
@@ -266,7 +272,9 @@ void leg_m_kernel(
 			if (S==0)	xlm += 3*im*(2*(LMAX+4)+MRES-m)/4;
 		#endif
 		#pragma unroll
-		for (int i=0; i<NW; i++) 	y1[i] = sqrt(1.0 - ct2[i]);		// y1 = sin(theta)
+		for (int i=0; i<NW; i++) 	y1[i] = 1.0 - ct2[i];		// y1 = sin(theta)^2
+		#pragma unroll
+		for (int i=0; i<NW; i++) 	y0[i] = 1.0;
 		al += l+m;
 		ql += 2*(l + S*im);	// allow vector transforms where llim = lmax+1
 
@@ -303,7 +311,7 @@ void leg_m_kernel(
 
 		bool skip_block = false;
 		if (NLAT_2 > BLOCKSIZE*NW) {	// polar optimization
-			if (j == BLOCKSIZE-1)	skip_block = polar_skip_sint(y1[NW-1], llim, m);
+			if (j == BLOCKSIZE-1)	skip_block = polar_skip_sint2(y1[NW-1], llim, m);
 			if (BLOCKSIZE > WARPSZE) {
 				__shared__ int xx;
 				if (j == BLOCKSIZE-1) xx = skip_block;	// one thread writes its value (the largest one)
@@ -313,10 +321,13 @@ void leg_m_kernel(
 		} else if (BLOCKSIZE > WARPSZE) { __syncthreads(); } else { _syncwarp; }
 		// at this point, block is in sync (consistent view of shared memory).
 	if (!skip_block) {
-		#pragma unroll
-		for (int i=0; i<NW; i++)	y0[i] = 1.0;
 		l = m - S;
 		if (S==1 && ROBERT_FORM) l = m;		// multiply vectors by sin(theta) with robert_form
+		if (l&1) {	// square-root needed
+			#pragma unroll
+			for (int i=0; i<NW; i++)	y0[i] = sqrt(y1[i]);
+		}
+		l >>= 1;
 		#if HI_LLIM==1
 		int nsint = 0;
 		int ny = 0;
@@ -646,14 +657,14 @@ void ileg_m_kernel(const double* __restrict__ al, const double* __restrict__ ct,
 		const int m = im*MRES;
 		y0 = cost * cost;			// cos(theta)^2
 		int l = (im*(2*(LMAX+1)-MRES-m))>>1;
-		y1 = sqrt(1.0 - y0);	// sin(theta)
+		y1 = 1.0 - y0;		// sin(theta)^2
 		al += l+m;
 		if (j < LSPAN+2) ak[j] = al[j];
 		ql += 2*(l + S*im);	// allow vector transforms where llim = lmax+1
 
 		#if NLAT_2 > BLKSZE_A
 		{	// polar optimization
-			bool skip_block = (j == BLOCKSIZE-1) ? polar_skip_sint(y1, llim, m) : false;
+			bool skip_block = (j == BLOCKSIZE-1) ? polar_skip_sint2(y1, llim, m) : false;
 			if (BLOCKSIZE > WARPSZE) {
 				__shared__ int xx;
 				if (j == BLOCKSIZE-1) xx = skip_block;	// one thread writes its value (the largest one)
@@ -695,10 +706,12 @@ void ileg_m_kernel(const double* __restrict__ al, const double* __restrict__ ct,
 		y0 = MPOS_SCALE;	// y0
 		l = m - S;		// exponent of sin(theta)
 		if (ROBERT_FORM && S==1) {
-			if (l==0) {
-				y0 /= y1;	// division by sin(theta) only for m=1
+			if (MRES==1 && l==0) {
+				y0 *= rsqrt(y1);	// division by sin(theta) only for m=1 in Robert form
 			} else --l;		// otherwise we just reduce the exponent of sin(theta)^l
 		}
+		if (l&1) y0 *= sqrt(y1);	// sqrt only computed when needed
+		l>>=1;
 		#if HI_LLIM==1
 		int ny = 0;
 		int nsint = 0;
