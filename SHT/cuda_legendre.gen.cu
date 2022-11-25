@@ -126,7 +126,6 @@ void leg_m_kernel(
 	const int BLOCKSIZE = (BLKSZE_SH2ISH>0 && S==0) ? BLKSZE_SH2ISH : BLKSZE_S;
 	const int NW=NW_S;
 	const int NFIELDS=NF_S;
-	const int it = (HI_LLIM) ? BLOCKSIZE*NW * blockIdx.x + NW*threadIdx.x : BLOCKSIZE*NW * blockIdx.x + threadIdx.x;
 	const int im = (M0_ONLY) ? 0 : blockIdx.z;
 	const int j = threadIdx.x;
 	const int b = blockIdx.y;		// position in batch
@@ -141,17 +140,22 @@ void leg_m_kernel(
 
 	static_assert( (!HI_LLIM) || ( NW==1 || (NW&1)==0 ), "high llim works with NW=1 or NW even" );
 
-	double cost[NW];
+	#define COST_CACHE		// optional: store cos(theta) into shared memory to reduce register pressure
 	double y0[NW];
 	double y1[NW];
+	double ct2[NW];
+	#ifndef COST_CACHE
+	double cost_[NW];
+	#define COST(i,j) cost_[i]
+	#else
+	__shared__ double cost_[NW][BLOCKSIZE];
+	#define COST(i,j) cost_[i][j]
+	#endif
 	#pragma unroll
 	for (int i=0; i<NW; i++) {
-		const int iit = (HI_LLIM) ? it+i : it+i*BLOCKSIZE;
-		cost[i] = (iit < nlat_2) ? ct[iit] : 0.0;
+		const int it = BLOCKSIZE*NW * blockIdx.x + ((HI_LLIM) ? NW*j+i : j+i*BLOCKSIZE);
+		ct2[i] = (it < nlat_2) ? ct[it] : 0.0;
 	}
-	double ct2[NW];
-	#pragma unroll
-	for (int i=0; i<NW; i++) ct2[i] = cost[i]*cost[i];		// cos(theta)^2
 
 	if (im==0) {
 		if ((LSPAN==BLOCKSIZE || j<LSPAN) && (j<=llim)) {
@@ -165,6 +169,10 @@ void leg_m_kernel(
 						qk[f][j] = ql[j + (b*NFIELDS+f)*ql_dist];		// keep only real part
 			}
 		}
+
+		#pragma unroll
+		for (int i=0; i<NW; i++) {	COST(i,j) = ct2[i];		ct2[i] *= ct2[i];	}	// cos(theta)^2
+
 		double re[NFIELDS][NW], ro[NFIELDS][NW];
 		#pragma unroll
 		for (int f=0; f<NFIELDS; f++) {
@@ -252,13 +260,13 @@ void leg_m_kernel(
 
 		#pragma unroll
 		for (int i=0; i<NW; i++) {
-			const int iit = (HI_LLIM) ? it+i : it+i*BLOCKSIZE;
-			if (iit < nlat_2) {
+			const int it = BLOCKSIZE*NW * blockIdx.x + ((HI_LLIM) ? NW*j+i : j+i*BLOCKSIZE);
+			if (it < nlat_2) {
 				// store mangled for complex fft
 				#pragma unroll
 				for (int f=0; f<NFIELDS; f++) {
-						q[iit*k_inc + (b*NFIELDS+f)*q_dist] = re[f][i]+ro[f][i]*cost[i];
-						q[(nlat_2*2-1-iit)*k_inc + (b*NFIELDS+f)*q_dist] = re[f][i]-ro[f][i]*cost[i];
+					q[it*k_inc              + (b*NFIELDS+f)*q_dist] = re[f][i]+ro[f][i]*COST(i,j);
+					q[(nlat_2*2-1-it)*k_inc + (b*NFIELDS+f)*q_dist] = re[f][i]-ro[f][i]*COST(i,j);
 				}
 			}
 		}
@@ -271,10 +279,6 @@ void leg_m_kernel(
 		#if BLKSZE_SH2ISH > 0
 			if (S==0)	xlm += 3*im*(2*(LMAX+4)+MRES-m)/4;
 		#endif
-		#pragma unroll
-		for (int i=0; i<NW; i++) 	y1[i] = 1.0 - ct2[i];		// y1 = sin(theta)^2
-		#pragma unroll
-		for (int i=0; i<NW; i++) 	y0[i] = 1.0;
 		al += l+m;
 		ql += 2*(l + S*im);	// allow vector transforms where llim = lmax+1
 
@@ -299,6 +303,13 @@ void leg_m_kernel(
 						qk[f][j+BLOCKSIZE] = ql[2*m+j+BLOCKSIZE + (b*NFIELDS+f)*ql_dist];	
 				}
 			}
+
+		#pragma unroll
+		for (int i=0; i<NW; i++) {	COST(i,j) = ct2[i];		ct2[i] *= ct2[i];	}	// cos(theta)^2
+		#pragma unroll
+		for (int i=0; i<NW; i++) 	y1[i] = 1.0 - ct2[i];		// y1 = sin(theta)^2
+		#pragma unroll
+		for (int i=0; i<NW; i++) 	y0[i] = 1.0;
 
 		#pragma unroll
 		for (int i=0; i<NW; i++) {
@@ -489,10 +500,10 @@ void leg_m_kernel(
 		for (int f=0; f<NFIELDS; f++) {
 			#pragma unroll
 			for (int i=0; i<NW; i++) {
-				y0[i]     = rer[f][i]+ror[f][i]*cost[i];	// recycle y0 as temporary value
-				rer[f][i] = rer[f][i]-ror[f][i]*cost[i];
-				ror[f][i] = rei[f][i]-roi[f][i]*cost[i];
-				rei[f][i] = rei[f][i]+roi[f][i]*cost[i];
+				y0[i]     = rer[f][i]+ror[f][i]*COST(i,j);	// recycle y0 as temporary value
+				rer[f][i] = rer[f][i]-ror[f][i]*COST(i,j);
+				ror[f][i] = rei[f][i]-roi[f][i]*COST(i,j);
+				rei[f][i] = rei[f][i]+roi[f][i]*COST(i,j);
 				roi[f][i] = y0[i];
 			}
 		}
@@ -512,16 +523,16 @@ void leg_m_kernel(
 
 		#pragma unroll
 		for (int i=0; i<NW; i++) {
-			const double sgn = (HI_LLIM && NW>1) ? (i^1)-i : (j^1)-j; 	//(iit^1) - iit;	// 1 - 2*(j&1);		// 1 for even j, -1 for odd j.
-			const int iit = (HI_LLIM) ? it+i : it+i*BLOCKSIZE;
+			const double sgn = (HI_LLIM && NW>1) ? (i^1)-i : (j^1)-j; 	//(it^1) - it;	// 1 - 2*(j&1);		// 1 for even j, -1 for odd j.
+			const int it = BLOCKSIZE*NW * blockIdx.x + ((HI_LLIM) ? NW*j+i : j+i*BLOCKSIZE);
 			const int i2 = (HI_LLIM && NW>1) ? i^1 : i;
-			if (iit < nlat_2) {
+			if (it < nlat_2) {
 				#pragma unroll
 				for (int f=0; f<NFIELDS; f++) {
-					q[im*m_inc        + iit*k_inc              + (b*NFIELDS+f)*q_dist] = roi[f][i] - rei[f][i2]*sgn;
-					q[(nphi-im)*m_inc + iit*k_inc              + (b*NFIELDS+f)*q_dist] = roi[f][i] + rei[f][i2]*sgn;
-					q[im*m_inc        + (nlat_2*2-1-iit)*k_inc + (b*NFIELDS+f)*q_dist] = rer[f][i] + ror[f][i2]*sgn;
-					q[(nphi-im)*m_inc + (nlat_2*2-1-iit)*k_inc + (b*NFIELDS+f)*q_dist] = rer[f][i] - ror[f][i2]*sgn;
+					q[im*m_inc        + it*k_inc              + (b*NFIELDS+f)*q_dist] = roi[f][i] - rei[f][i2]*sgn;
+					q[(nphi-im)*m_inc + it*k_inc              + (b*NFIELDS+f)*q_dist] = roi[f][i] + rei[f][i2]*sgn;
+					q[im*m_inc        + (nlat_2*2-1-it)*k_inc + (b*NFIELDS+f)*q_dist] = rer[f][i] + ror[f][i2]*sgn;
+					q[(nphi-im)*m_inc + (nlat_2*2-1-it)*k_inc + (b*NFIELDS+f)*q_dist] = rer[f][i] - ror[f][i2]*sgn;
 				}
 			}
 		}
