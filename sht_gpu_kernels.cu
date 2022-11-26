@@ -198,40 +198,39 @@ transpose_cplx_skip(cudaStream_t stream, const double* in, double* out, const in
 }
 
 
-
-__device__ double qish(const double* __restrict__ xlm, const double* __restrict__ ql, const int llim_m, int ll)
-{
-	double q = ql[ll];
-	const int x_ofs = 3*(ll >> 2) + (ll&2);
-	q *= xlm[x_ofs];
-	if (((ll&2)==0) && (ll+2 <2*llim_m))	// l-m even
-		q += ql[ll+4] * xlm[x_ofs + 1];		// contribution of l+2
-	return q;
-}
-
 __global__ void
-sh2ishioka_kernel_alt(const double* __restrict__ xlm, const double* __restrict__ ql, double* ql_ish, 
+sh2ishioka_kernel_alt(const int NFIELDS, const double* __restrict__ xlm, const double* __restrict__ ql, double* ql_ish,
 		const int llim, const int lmax, const int mres, const int S, const int ql_dist=0, const int ql_ish_dist=0)
 {
-	const int j = threadIdx.x;
 	const int im = blockIdx.y;
-	const int b = blockIdx.z;
-	const int l0 = (blockDim.x * blockIdx.x) >> 1;
-	const int l  = l0 + (j >> 1);
+	const int ll = blockDim.x * blockIdx.x + threadIdx.x;
 	const int m = im*mres;
+	const int l  = ll >> 1;
 	const int llim_m = llim-m;
-	const int q_ofs = im*(((lmax+1+S)*2) -m+mres);
 
-	xlm += 3*im*(2*(lmax+4) -m+mres)/4;
-	ql     += q_ofs;
-	ql_ish += q_ofs;
-	
-	if (l<=llim_m) {
-		double q = qish(xlm, ql + b*ql_dist, llim-m, 2*l0 + j);
-		if (im>0) {
-			ql_ish[2*l0 +j + b*ql_ish_dist] = q;   // coalesced store
-		} else if ((j&1)==0) {
-			ql_ish[l0 +(j>>1) + b*ql_ish_dist] = q;   // coalesced store, compacting real parts together without imaginary part (0)
+	if (l>llim_m) return;		// nothing to do
+
+	// first load matrix coefficients into registers
+	const int x_ofs = 3*im*(2*(lmax+4) -m+mres)/4 + 3*(ll >> 2);
+	double x0 = xlm[x_ofs + (ll&2)];
+	double x1 = xlm[x_ofs + 1];
+
+	// address calculation
+	const int q_ofs = im*(((lmax+1+S)*2) -m+mres);
+	const int b = (blockIdx.z*blockDim.z + threadIdx.z)*NFIELDS;
+	ql     += q_ofs + b*ql_dist + ll;
+	ql_ish += q_ofs + b*ql_ish_dist + ((im>0) ? ll : l);
+
+	const bool write = (im>0 || (ll&1)==0);
+	const bool add2 = ((l&1)==0) && (l+1 <llim_m);
+	// loop over NFIELDS different fields
+	for (int k=NFIELDS-1; k>=0; k--) {
+		double q = ql[k*ql_dist] * x0;
+		if (add2) {	// l-m even
+			q += ql[k*ql_dist +4] * x1;		// contribution of l+2
+		}
+		if (write) {
+			ql_ish[k*ql_ish_dist] = q;   // coalesced store -- for im=0, compacting real parts together without imaginary part (0)
 		}
 	}
 }
@@ -279,51 +278,56 @@ sh2ishioka_kernel(const double* __restrict__ xlm, const double* __restrict__ ql,
 
 /// performs: Ql[2*l] = qq[2*l]*xlm[3*l] + qq[2*l-2]*xlm[3*l+1];   Ql[2*l+1] = qq[2*l+1] * xlm[3*l+2];
 /// includes zero-out for unused modes.
-template<bool M0>
-__device__ __forceinline__ double qish_to_sh(const double* __restrict__ xlm, const double* __restrict__ ql_ish, const int llim_m, int ll)
-{
-	double q = 0.0;
-	const int x_ofs = 3*(ll >> 2) + (ll&2);
-	const int l = ll >> 1;
-	if (l <= llim_m) {
-		double x = xlm[x_ofs];
-		if (!M0) {
-			q = ql_ish[ll] * x;
-			if (((ll&2)==0) && (x_ofs > 0)) {	// l-m even
-				q += ql_ish[ll-4] * xlm[x_ofs - 2];		// contribution of l-2
-			}
-		} else {	// m=0, real only
-			if ((ll&1)==0) q = ql_ish[l] * x;	// only real part (ll&1 == 0)
-			if (((ll&3)==0) && (x_ofs > 0)) {	// l-m even && real part (ll&3 == 0)
-				q += ql_ish[l-2] * xlm[x_ofs - 2];		// contribution of l-2
-			}
-		}
-	}
-	return q;
-}
-
-/// performs: Ql[2*l] = qq[2*l]*xlm[3*l] + qq[2*l-2]*xlm[3*l+1];   Ql[2*l+1] = qq[2*l+1] * xlm[3*l+2];
-/// includes zero-out for unused modes.
 __global__ void
-ishioka2sh_kernel_alt(const double* __restrict__ xlm, const double* __restrict__ ql_ish, double* ql,
+ishioka2sh_kernel_alt(const int NFIELDS, const double* __restrict__ xlm, const double* __restrict__ ql_ish, double* ql,
 	const int llim, const int lmax, const int mmax, const int mres, const int S, const int ql_ish_dist=0, const int ql_dist=0)
 {
 	const int im = blockIdx.y;
-	const int b = blockIdx.z;
 	const int ll = blockDim.x * blockIdx.x + threadIdx.x;
-
 	const int m = im*mres;
-	const int q_ofs = im*(((lmax+1+S)*2) -m+mres);
 
+	if ((ll>>1) > lmax+S-m) return;		// be sure to include zero-out for llim<l<=lmax AND zero-out for m>mmax
+
+	// first load matrix coefficients into registers
+	xlm += 3*im*(2*(lmax+4) -m+mres)/4;
+	const int x_ofs = 3*(ll>>2);
+	double x0 = xlm[x_ofs + (ll&2)];
+	double x1;
+	if (x_ofs>0) x1 = xlm[x_ofs-2];
+
+	const int b = (blockIdx.z*blockDim.z + threadIdx.z) * NFIELDS;
+	int q_ofs = ll;
 	double q = 0.0;
 	if (im==0) {
-		q = qish_to_sh<true>(xlm, ql_ish + b*ql_ish_dist, llim-m, ll);
-	} else if (im <= mmax) {
-		const int x_ofs = 3*im*(2*(lmax+4) -m+mres)/4;
-		q = qish_to_sh<false>(xlm + x_ofs, ql_ish + q_ofs + b*ql_ish_dist, llim-m, ll);
+		ql_ish += b*ql_ish_dist + (ll>>1);
+		ql += q_ofs + b*ql_dist;
+		const bool read = (ll>>1) <= llim-m && ((ll&1)==0);
+		const bool add2 = ((ll&2)==0) && (ll >= 4) && read;
+		for (int k=NFIELDS-1; k>=0; k--) {
+			if (read)  q = ql_ish[k*ql_ish_dist] * x0;	// only real part (ll&1 == 0)
+			if (add2) {	// l-m even && real part (ll&3 == 0)
+				q += ql_ish[k*ql_ish_dist -2] * x1;		// contribution of l-2
+			}
+			ql[k*ql_dist] = q;	// coalesced store
+		}
+	} else {
+		q_ofs += im*(((lmax+1+S)*2) -m+mres);
+		ql_ish += b*ql_ish_dist + q_ofs;
+		ql += q_ofs + b*ql_dist;
+		if (im<=mmax) {
+			const bool read = (ll>>1) <= llim-m;
+			const bool add2 = ((ll&2)==0) && (ll >= 4) && read;
+			for (int k=NFIELDS-1; k>=0; k--) {
+				if (read)  q = ql_ish[k*ql_ish_dist] * x0;
+				if (add2) {	// l-m even
+					q += ql_ish[k*ql_ish_dist -4] * x1;		// contribution of l-2
+				}
+				ql[k*ql_dist] = q;	// coalesced store
+			}
+		} else {
+			for (int k=NFIELDS-1; k>=0; k--)  ql[k*ql_dist] = 0.0;	// coalesced store
+		}
 	}
-	if ((ll>>1) <= lmax+S-m)
-		ql[q_ofs + ll + b*ql_dist] = q;	// coalesced store (including zero-out for llim<l<=lmax) AND zero-out for m>mmax
 }
 
 
@@ -625,6 +629,21 @@ ish2sphtor_kernel(const double* __restrict__ mx, const double* __restrict__ xlm,
 	}
 }
 
+void set_block_size_ish(int n_elem_x, int howmany_z, int& blksze_x, int& blksze_z, int &nblk_z)
+{
+	blksze_z = 1;		nblk_z = howmany_z;
+	if (howmany_z % 4 == 0) {	blksze_z = 4;	nblk_z /= 4;  }
+	else if (howmany_z % 3 == 0) {  blksze_z = 3;	nblk_z /= 3;  }
+	else if (howmany_z % 2 == 0) {  blksze_z = 2;	nblk_z /= 2;  }
+
+	if (blksze_z > 1) {
+		blksze_x = (((n_elem_x+1)/2+WARPSZE-1)/WARPSZE) * WARPSZE;
+		if (blksze_x > MAX_THREADS_PER_BLOCK/2) blksze_x = MAX_THREADS_PER_BLOCK/2;
+	} else {
+		blksze_x = ((n_elem_x+WARPSZE-1)/WARPSZE) * WARPSZE;
+		if (blksze_x > MAX_THREADS_PER_BLOCK) blksze_x = MAX_THREADS_PER_BLOCK;
+	}
+}
 
 void sh2ishioka_gpu(shtns_cfg shtns, cplx* d_Qlm, cplx* d_Qlm_ish, int llim, int mmax, int S=0)
 {
@@ -636,12 +655,22 @@ void sh2ishioka_gpu(shtns_cfg shtns, cplx* d_Qlm, cplx* d_Qlm_ish, int llim, int
 	sh2ishioka_kernel <<< blocks, threads,(blksze/4*7-3)*sizeof(double), shtns->comp_stream >>>
 		(shtns->d_xlm, (double*) d_Qlm, (double*) d_Qlm_ish, llim, shtns->lmax, shtns->mres, S, shtns->spec_dist*2, shtns->nlm_stride);
 #else
-	int blksze = (((llim+1+S)*2+WARPSZE-1)/WARPSZE) * WARPSZE;
-	if (blksze > MAX_THREADS_PER_BLOCK) blksze = MAX_THREADS_PER_BLOCK;
-	dim3 blocks((2*(llim+1+S)+blksze-1)/blksze, mmax+1, shtns->howmany);
-	dim3 threads(blksze, 1, 1);
+	int blksze, blksze_z, nblk_z;
+	const int nelem_max = (llim+1+S)*2;
+	int nfields = shtns->howmany;
+	if (shtns->nlm > 256*1024 || nfields <= 5) {	// enough work to saturate the GPU with 1 z-block, or only few fields
+		set_block_size_ish( nelem_max, 1, blksze, blksze_z, nblk_z);
+	} else {
+		nblk_z = nfields;	nfields=1;
+		for (int k=4; k>=2; k--) {		// first factorization
+			if (nblk_z % k == 0) { nblk_z /= k;	nfields=k;	break; }
+		}
+		set_block_size_ish( nelem_max, nblk_z, blksze, blksze_z, nblk_z);		// second factor into blocks
+	}
+	dim3 blocks((nelem_max+blksze-1)/blksze, mmax+1, nblk_z);
+	dim3 threads(blksze, 1, blksze_z);
 	sh2ishioka_kernel_alt <<< blocks, threads, 0, shtns->comp_stream >>>
-		(shtns->d_xlm, (double*) d_Qlm, (double*) d_Qlm_ish, llim, shtns->lmax, shtns->mres, S, shtns->spec_dist*2, shtns->nlm_stride);
+		(nfields, shtns->d_xlm, (double*) d_Qlm, (double*) d_Qlm_ish, llim, shtns->lmax, shtns->mres, S, shtns->spec_dist*2, shtns->nlm_stride);
 #endif
 	CUDA_ERROR_CHECK;
 }
@@ -656,12 +685,23 @@ void ishioka2sh_gpu(shtns_cfg shtns, cplx* d_Qlm_ish, cplx* d_Qlm, int llim, int
 	ishioka2sh_kernel <<< blocks, threads, (blksze/4*7+3)*sizeof(double), shtns->comp_stream >>>
 		(shtns->d_xlm, (double*) d_Qlm_ish, (double*) d_Qlm, llim, shtns->lmax, mmax, shtns->mres, S, shtns->nlm_stride, shtns->spec_dist*2);
 #else
-	int blksze = (((shtns->lmax+1+S)*2+WARPSZE-1)/WARPSZE) * WARPSZE;
-	if (blksze > MAX_THREADS_PER_BLOCK) blksze = MAX_THREADS_PER_BLOCK;
-	dim3 blocks((2*(shtns->lmax+1+S)+blksze-1)/blksze, shtns->mmax+1, shtns->howmany);
-	dim3 threads(blksze, 1, 1);
+	int blksze, blksze_z, nblk_z;
+	const int nelem_max = (llim+1+S)*2;
+	int nfields = shtns->howmany;
+	if (shtns->nlm > 256*1024 || nfields <= 5) {	// enough work to saturate the GPU with 1 z-block, or only few fields
+		set_block_size_ish( nelem_max, 1, blksze, blksze_z, nblk_z);
+	} else {
+		nblk_z = nfields;	nfields=1;
+		for (int k=4; k>=2; k--) {		// first factorization
+			if (nblk_z % k == 0) { nblk_z /= k;	nfields=k;	break; }
+		}
+		set_block_size_ish( nelem_max, nblk_z, blksze, blksze_z, nblk_z);		// second factor into blocks
+	}
+
+	dim3 blocks((nelem_max+blksze-1)/blksze, shtns->mmax+1, nblk_z);
+	dim3 threads(blksze, 1, blksze_z);
 	ishioka2sh_kernel_alt <<< blocks, threads, 0, shtns->comp_stream >>>
-		(shtns->d_xlm, (double*) d_Qlm_ish, (double*) d_Qlm, llim, shtns->lmax, mmax, shtns->mres, S, shtns->nlm_stride, shtns->spec_dist*2);
+		(nfields, shtns->d_xlm, (double*) d_Qlm_ish, (double*) d_Qlm, llim, shtns->lmax, mmax, shtns->mres, S, shtns->nlm_stride, shtns->spec_dist*2);
 #endif
 	CUDA_ERROR_CHECK;
 }
