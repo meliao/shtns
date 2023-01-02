@@ -24,6 +24,9 @@
 /* Define to 1 if you have the <inttypes.h> header file. */
 #undef HAVE_INTTYPES_H
 
+/* Define to 1 if you have the `amdhip64' library (-lamdhip64). */
+#undef HAVE_LIBAMDHIP64
+
 /* Define to 1 if you have the `cuda' library (-lcuda). */
 #undef HAVE_LIBCUDA
 
@@ -39,11 +42,17 @@
 /* Define to 1 if you have the `fftw3_omp' library (-lfftw3_omp). */
 #undef HAVE_LIBFFTW3_OMP
 
+/* Define to 1 if you have the `hipfft' library (-lhipfft). */
+#undef HAVE_LIBHIPFFT
+
 /* Define to 1 if you have the `m' library (-lm). */
 #undef HAVE_LIBM
 
 /* Define to 1 if you have the `nvrtc' library (-lnvrtc). */
 #undef HAVE_LIBNVRTC
+
+/* Define to 1 if you have the `rocfft' library (-lrocfft). */
+#undef HAVE_LIBROCFFT
 
 /* Define to 1 if the type `long double' works and has more range or precision
    than `double'. */

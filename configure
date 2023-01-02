@@ -648,7 +648,7 @@ ac_includes_default="\
 ac_header_c_list=
 ac_subst_vars='LTLIBOBJS
 LIBOBJS
-nvcc_flags
+gpu_compile
 FFLAGS
 CFLAGS2
 CC2
@@ -718,6 +718,7 @@ enable_openmp
 enable_mkl
 enable_knl
 enable_cuda
+enable_hip
 enable_magic_layout
 enable_python
 enable_long_double
@@ -1364,6 +1365,9 @@ Optional Features:
   --enable-cuda[=kepler|pascal|volta|ampere]
                           Enable compilation for Nvidia gpu using cuda,
                           optionally specifying architecture
+  --enable-hip[=mi100|mi200|mi250]
+                          Enable compilation for AMD gpu using HIP, optionally
+                          specifying architecture
   --enable-magic-layout   Compile specific version for the MagIC code
   --enable-python         Build Python interface
   --enable-long-double    Use long double during initialization for (maybe)
@@ -1374,7 +1378,8 @@ Optional Features:
                           AVX-512, or VSX)
   --disable-ishioka       Do not use the new and faster recursion
   --enable-kernel-compiler=gcc
-                          Use a different compiler for kernels (default=gcc)
+                          Use a different compiler for CPU kernels
+                          (default=gcc)
   --disable-openmp        do not use OpenMP
 
 Some influential environment variables:
@@ -2482,6 +2487,14 @@ then :
   enableval=$enable_cuda;
 else $as_nop
   enable_cuda=no
+fi
+
+# Check whether --enable-hip was given.
+if test ${enable_hip+y}
+then :
+  enableval=$enable_hip;
+else $as_nop
+  enable_hip=no
 fi
 
 # Check whether --enable-magic-layout was given.
@@ -4495,15 +4508,12 @@ printf "%s\n" "#define SHTNS4MAGIC 1" >>confdefs.h
 
 fi
 
-nvcc_flags="-std=c++11"   # for nvcc, the underlying gcc is not always c++11 by default, so we need to explicitely ask for it.
-# Disable precomputed matrix support with openmp: to avoid bugs arising with icc + openmp.
 if test -e penmp || test -e mp; then
   as_fn_error $? "AC_OPENMP clobbers files named 'mp' and 'penmp'. Aborting configure because one of these files already exists." "$LINENO" 5
 fi
 if test "x$enable_openmp" = "xyes"
 then :
 
-	nvcc_flags="$nvcc_flags -Xcompiler -fopenmp"
 	# Check whether --enable-openmp was given.
 if test ${enable_openmp+y}
 then :
@@ -4593,6 +4603,211 @@ fi
 
 fi
 
+# Check for HIP
+if test "x$enable_hip" != "xno"
+then :
+
+	CFLAGS="$CFLAGS -I${ROCM_PATH}/include -D__HIP_PLATFORM_AMD__"
+	CFLAGS2="$CFLAGS2 -I${ROCM_PATH}/include -D__HIP_PLATFORM_AMD__"
+	LDFLAGS="$LDFLAGS -L${ROCM_PATH}/lib"
+	echo $LDFLAGS
+	{ printf "%s\n" "$as_me:${as_lineno-$LINENO}: checking for hipMalloc in -lamdhip64" >&5
+printf %s "checking for hipMalloc in -lamdhip64... " >&6; }
+if test ${ac_cv_lib_amdhip64_hipMalloc+y}
+then :
+  printf %s "(cached) " >&6
+else $as_nop
+  ac_check_lib_save_LIBS=$LIBS
+LIBS="-lamdhip64  $LIBS"
+cat confdefs.h - <<_ACEOF >conftest.$ac_ext
+/* end confdefs.h.  */
+
+/* Override any GCC internal prototype to avoid an error.
+   Use char because int might match the return type of a GCC
+   builtin and then its argument prototype would still apply.  */
+char hipMalloc ();
+int
+main (void)
+{
+return hipMalloc ();
+  ;
+  return 0;
+}
+_ACEOF
+if ac_fn_c_try_link "$LINENO"
+then :
+  ac_cv_lib_amdhip64_hipMalloc=yes
+else $as_nop
+  ac_cv_lib_amdhip64_hipMalloc=no
+fi
+rm -f core conftest.err conftest.$ac_objext conftest.beam \
+    conftest$ac_exeext conftest.$ac_ext
+LIBS=$ac_check_lib_save_LIBS
+fi
+{ printf "%s\n" "$as_me:${as_lineno-$LINENO}: result: $ac_cv_lib_amdhip64_hipMalloc" >&5
+printf "%s\n" "$ac_cv_lib_amdhip64_hipMalloc" >&6; }
+if test "x$ac_cv_lib_amdhip64_hipMalloc" = xyes
+then :
+  printf "%s\n" "#define HAVE_LIBAMDHIP64 1" >>confdefs.h
+
+  LIBS="-lamdhip64 $LIBS"
+
+else $as_nop
+  as_fn_error $? "hip library not found. Try adding LDFLAGS=\"-L$ROCM_PATH/lib\"" "$LINENO" 5
+fi
+
+	{ printf "%s\n" "$as_me:${as_lineno-$LINENO}: checking for hipfftCreate in -lhipfft" >&5
+printf %s "checking for hipfftCreate in -lhipfft... " >&6; }
+if test ${ac_cv_lib_hipfft_hipfftCreate+y}
+then :
+  printf %s "(cached) " >&6
+else $as_nop
+  ac_check_lib_save_LIBS=$LIBS
+LIBS="-lhipfft  $LIBS"
+cat confdefs.h - <<_ACEOF >conftest.$ac_ext
+/* end confdefs.h.  */
+
+/* Override any GCC internal prototype to avoid an error.
+   Use char because int might match the return type of a GCC
+   builtin and then its argument prototype would still apply.  */
+char hipfftCreate ();
+int
+main (void)
+{
+return hipfftCreate ();
+  ;
+  return 0;
+}
+_ACEOF
+if ac_fn_c_try_link "$LINENO"
+then :
+  ac_cv_lib_hipfft_hipfftCreate=yes
+else $as_nop
+  ac_cv_lib_hipfft_hipfftCreate=no
+fi
+rm -f core conftest.err conftest.$ac_objext conftest.beam \
+    conftest$ac_exeext conftest.$ac_ext
+LIBS=$ac_check_lib_save_LIBS
+fi
+{ printf "%s\n" "$as_me:${as_lineno-$LINENO}: result: $ac_cv_lib_hipfft_hipfftCreate" >&5
+printf "%s\n" "$ac_cv_lib_hipfft_hipfftCreate" >&6; }
+if test "x$ac_cv_lib_hipfft_hipfftCreate" = xyes
+then :
+  printf "%s\n" "#define HAVE_LIBHIPFFT 1" >>confdefs.h
+
+  LIBS="-lhipfft $LIBS"
+
+else $as_nop
+  { printf "%s\n" "$as_me:${as_lineno-$LINENO}: hipftt library not found." >&5
+printf "%s\n" "$as_me: hipftt library not found." >&6;}
+fi
+
+	{ printf "%s\n" "$as_me:${as_lineno-$LINENO}: checking for rocfft_execute in -lrocfft" >&5
+printf %s "checking for rocfft_execute in -lrocfft... " >&6; }
+if test ${ac_cv_lib_rocfft_rocfft_execute+y}
+then :
+  printf %s "(cached) " >&6
+else $as_nop
+  ac_check_lib_save_LIBS=$LIBS
+LIBS="-lrocfft  $LIBS"
+cat confdefs.h - <<_ACEOF >conftest.$ac_ext
+/* end confdefs.h.  */
+
+/* Override any GCC internal prototype to avoid an error.
+   Use char because int might match the return type of a GCC
+   builtin and then its argument prototype would still apply.  */
+char rocfft_execute ();
+int
+main (void)
+{
+return rocfft_execute ();
+  ;
+  return 0;
+}
+_ACEOF
+if ac_fn_c_try_link "$LINENO"
+then :
+  ac_cv_lib_rocfft_rocfft_execute=yes
+else $as_nop
+  ac_cv_lib_rocfft_rocfft_execute=no
+fi
+rm -f core conftest.err conftest.$ac_objext conftest.beam \
+    conftest$ac_exeext conftest.$ac_ext
+LIBS=$ac_check_lib_save_LIBS
+fi
+{ printf "%s\n" "$as_me:${as_lineno-$LINENO}: result: $ac_cv_lib_rocfft_rocfft_execute" >&5
+printf "%s\n" "$ac_cv_lib_rocfft_rocfft_execute" >&6; }
+if test "x$ac_cv_lib_rocfft_rocfft_execute" = xyes
+then :
+  printf "%s\n" "#define HAVE_LIBROCFFT 1" >>confdefs.h
+
+  LIBS="-lrocfft $LIBS"
+
+else $as_nop
+  { printf "%s\n" "$as_me:${as_lineno-$LINENO}: rocfft library not found." >&5
+printf "%s\n" "$as_me: rocfft library not found." >&6;}
+fi
+
+	objs="$objs sht_gpu.o"
+
+	gpu_compile="hipcc -std=c++11 -O3 --rocm-path=$ROCM_PATH"
+	if test "x$enable_hip" == "xyes"
+then :
+
+	    gpu_compile="$gpu_compile --offload-arch=gfx908:xnack+ --offload-arch=gfx90a:xnack+ --offload-arch=gfx908:xnack- --offload-arch=gfx90a:xnack-"
+
+else $as_nop
+
+	    case $enable_hip in #(
+  "mi100") :
+    hip_arch=gfx908 ;; #(
+  "mi200") :
+    hip_arch=gfx90a ;; #(
+  "mi250") :
+    hip_arch=gfx90a ;; #(
+  *) :
+    hip_arch=$enable_hip ;;
+esac
+	    gpu_compile="$gpu_compile --offload-arch=$hip_arch:xnack+ --offload-arch=$hip_arch:xnack-"
+
+fi
+
+printf "%s\n" "#define SHTNS_GPU 2" >>confdefs.h
+
+	target="libshtns_cuda.a"
+	if test "x$enable_openmp" = "xyes"
+then :
+
+	    gpu_compile="$gpu_compile -fopenmp"
+	    target="libshtns_cuda_omp.a"
+
+fi
+	LIBS="$LIBS -lstdc++"	# hip/cuda uses the c++ standard library. This is needed to link with gcc
+	{ printf "%s\n" "$as_me:${as_lineno-$LINENO}: checking for vkfft/vkFFT.h" >&5
+printf %s "checking for vkfft/vkFFT.h... " >&6; }
+if test ${ac_cv_file_vkfft_vkFFT_h+y}
+then :
+  printf %s "(cached) " >&6
+else $as_nop
+  test "$cross_compiling" = yes &&
+  as_fn_error $? "cannot check for file existence when cross compiling" "$LINENO" 5
+if test -r "vkfft/vkFFT.h"; then
+  ac_cv_file_vkfft_vkFFT_h=yes
+else
+  ac_cv_file_vkfft_vkFFT_h=no
+fi
+fi
+{ printf "%s\n" "$as_me:${as_lineno-$LINENO}: result: $ac_cv_file_vkfft_vkFFT_h" >&5
+printf "%s\n" "$ac_cv_file_vkfft_vkFFT_h" >&6; }
+if test "x$ac_cv_file_vkfft_vkFFT_h" = xyes
+then :
+
+printf "%s\n" "#define VKFFT_BACKEND 2" >>confdefs.h
+
+fi
+
+
+fi
 # Check for CUDA
 if test "x$enable_cuda" != "xno"
 then :
@@ -4689,7 +4904,8 @@ then :
   LIBS="-lcufft $LIBS"
 
 else $as_nop
-  as_fn_error $? "cufft library not found." "$LINENO" 5
+  { printf "%s\n" "$as_me:${as_lineno-$LINENO}: cufft library not found." >&5
+printf "%s\n" "$as_me: cufft library not found." >&6;}
 fi
 
 	{ printf "%s\n" "$as_me:${as_lineno-$LINENO}: checking for nvrtcGetPTX in -lnvrtc" >&5
@@ -4783,11 +4999,6 @@ else $as_nop
 fi
 
 	objs="$objs sht_gpu.o"
-	target="libshtns_cuda.a"
-	if test "x$enable_openmp" = "xyes"
-then :
-  target="libshtns_cuda_omp.a"
-fi
 
 	nvcc_gencode_flags=""
 	# find cuda arch:
@@ -4905,7 +5116,16 @@ fi
 
 printf "%s\n" "#define SHTNS_GPU 1" >>confdefs.h
 
-	nvcc_flags="$nvcc_flags $nvcc_gencode_flags"
+	# for nvcc, the underlying gcc is not always c++11 by default, so we need to explicitely ask for it.
+	gpu_compile="nvcc -std=c++11 $nvcc_gencode_flags -lineinfo -Xptxas=-v"
+	target="libshtns_cuda.a"
+	if test "x$enable_openmp" = "xyes"
+then :
+
+	    gpu_compile="$gpu_compile -Xcompiler -fopenmp"
+	    target="libshtns_cuda_omp.a"
+
+fi
 	LIBS="$LIBS -lstdc++"	# cuda uses the c++ standard library. This is needed to link with gcc
 	{ printf "%s\n" "$as_me:${as_lineno-$LINENO}: checking for vkfft/vkFFT.h" >&5
 printf %s "checking for vkfft/vkFFT.h... " >&6; }

@@ -523,7 +523,11 @@ int cushtns_init_gpu(shtns_cfg shtns)
 	err = cudaGetDeviceProperties(&prop, device_id);
 	if (err != cudaSuccess) return -1;
 	#if SHT_VERBOSE > 0
+	#if SHTNS_GPU == 1
 	printf("  cuda GPU #%d \"%s\" found (warp size = %d, compute capabilities = %d.%d).\n", device_id, prop.name, prop.warpSize, prop.major, prop.minor);
+	#elif SHTNS_GPU == 2
+	printf("  hip GPU #%d \"%s\" found (warp size = %d).\n", device_id, prop.gcnArchName, prop.warpSize);
+	#endif
 	#endif
 	if (prop.warpSize != WARPSZE) return -1;		// failure, warpsize must be known at compile time (does it?).
 	if (prop.major < 3) return -1;			// failure, SHTns requires compute cap. >= 3 (warp shuffle instructions)

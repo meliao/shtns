@@ -24,6 +24,8 @@ AC_ARG_ENABLE([knl],
 	AS_HELP_STRING([--enable-knl], [Enable compilation for Xeon Phi (KNL)]), [], [enable_knl=no])
 AC_ARG_ENABLE([cuda],
 	AS_HELP_STRING([--enable-cuda@<:@=kepler|pascal|volta|ampere@:>@], [Enable compilation for Nvidia gpu using cuda, optionally specifying architecture]), [], [enable_cuda=no])
+AC_ARG_ENABLE([hip],
+	AS_HELP_STRING([--enable-hip@<:@=mi100|mi200|mi250@:>@], [Enable compilation for AMD gpu using HIP, optionally specifying architecture]), [], [enable_hip=no])
 AC_ARG_ENABLE([magic-layout],
 	AS_HELP_STRING([--enable-magic-layout], [Compile specific version for the MagIC code]), [], [enable_magic_layout=no])
 AC_ARG_ENABLE([python],
@@ -37,7 +39,7 @@ AC_ARG_ENABLE([simd],
 AC_ARG_ENABLE([ishioka],
 	AS_HELP_STRING([--disable-ishioka], [Do not use the new and faster recursion]), [], [enable_ishioka=yes])
 AC_ARG_ENABLE([kernel-compiler],
-	AS_HELP_STRING([--enable-kernel-compiler=gcc], [Use a different compiler for kernels (default=gcc)]), [], [enable_kernel_compiler=gcc])
+	AS_HELP_STRING([--enable-kernel-compiler=gcc], [Use a different compiler for CPU kernels (default=gcc)]), [], [enable_kernel_compiler=gcc])
 
 
 dnl Sanitize $prefix. Autoconf does this by itself, but so late in the
@@ -174,10 +176,7 @@ AS_IF([test "x$enable_magic_layout" != "xno"], [
 	AC_DEFINE([SHTNS4MAGIC],[1],[I need the transforms compatible with the MagIC code, to speed it up!])
 ])
 
-nvcc_flags="-std=c++11"   # for nvcc, the underlying gcc is not always c++11 by default, so we need to explicitely ask for it.
-# Disable precomputed matrix support with openmp: to avoid bugs arising with icc + openmp.
 AS_IF([test "x$enable_openmp" = "xyes"], [
-	nvcc_flags="$nvcc_flags -Xcompiler -fopenmp"
 	AC_OPENMP
 	CFLAGS="$CFLAGS $OPENMP_CFLAGS"
 	dnl AC_CHECK_HEADERS([omp.h])
@@ -189,6 +188,33 @@ AS_IF([test "x$enable_openmp" = "xyes"], [
 	])
 ])
 
+# Check for HIP
+AS_IF([test "x$enable_hip" != "xno"], [
+	CFLAGS="$CFLAGS -I${ROCM_PATH}/include -D__HIP_PLATFORM_AMD__"
+	CFLAGS2="$CFLAGS2 -I${ROCM_PATH}/include -D__HIP_PLATFORM_AMD__"
+	LDFLAGS="$LDFLAGS -L${ROCM_PATH}/lib"
+	echo $LDFLAGS
+	AC_CHECK_LIB([amdhip64],[hipMalloc],,AC_MSG_ERROR([hip library not found. Try adding LDFLAGS="-L$ROCM_PATH/lib"]))
+	AC_CHECK_LIB([hipfft],[hipfftCreate],,AC_MSG_NOTICE([hipftt library not found.]))
+	AC_CHECK_LIB([rocfft],[rocfft_execute],,AC_MSG_NOTICE([rocfft library not found.]))
+	objs="$objs sht_gpu.o"
+
+	gpu_compile="hipcc -std=c++11 -O3 --rocm-path=$ROCM_PATH"
+	AS_IF([test "x$enable_hip" == "xyes"],[
+	    gpu_compile="$gpu_compile --offload-arch=gfx908:xnack+ --offload-arch=gfx90a:xnack+ --offload-arch=gfx908:xnack- --offload-arch=gfx90a:xnack-"
+	],[
+	    AS_CASE([$enable_hip], "mi100", [hip_arch=gfx908], "mi200", [hip_arch=gfx90a], "mi250", [hip_arch=gfx90a], [hip_arch=$enable_hip])
+	    gpu_compile="$gpu_compile --offload-arch=$hip_arch:xnack+ --offload-arch=$hip_arch:xnack-"
+	])
+	AC_DEFINE([SHTNS_GPU],[2],[GPU transforms (1 for CUDA, 2 for HIP)])
+	target="libshtns_cuda.a"
+	AS_IF([test "x$enable_openmp" = "xyes"], [
+	    gpu_compile="$gpu_compile -fopenmp"
+	    target="libshtns_cuda_omp.a"
+	])
+	LIBS="$LIBS -lstdc++"	# hip/cuda uses the c++ standard library. This is needed to link with gcc
+	AC_CHECK_FILE([vkfft/vkFFT.h], AC_DEFINE([VKFFT_BACKEND],[2],[Use vkFFT for the FFT on the GPU when possible]))
+])
 # Check for CUDA
 AS_IF([test "x$enable_cuda" != "xno"], [
 	CFLAGS="$CFLAGS -I$CUDA_PATH/include"
@@ -197,12 +223,10 @@ AS_IF([test "x$enable_cuda" != "xno"], [
 	LDFLAGS="$LDFLAGS -L$CUDA_PATH/lib64"
 	echo $LDFLAGS
 	AC_CHECK_LIB([cudart],[cudaMalloc],,AC_MSG_ERROR([cudart library not found. Try adding LDFLAGS="-L/usr/local/cuda/lib64"]))
-	AC_CHECK_LIB([cufft],[cufftPlanMany],,AC_MSG_ERROR([cufft library not found.]))
+	AC_CHECK_LIB([cufft],[cufftPlanMany],,AC_MSG_NOTICE([cufft library not found.]))
 	AC_CHECK_LIB([nvrtc],[nvrtcGetPTX],,AC_MSG_ERROR([nvrtc library not found. Try adding LDFLAGS="-L/usr/local/cuda/lib64"]))
 	AC_CHECK_LIB([cuda],[cuLaunchKernel],,AC_MSG_ERROR([cufft library not found. Try adding LDFLAGS="-L/usr/local/cuda/lib64"]))
 	objs="$objs sht_gpu.o"
-	target="libshtns_cuda.a"
-	AS_IF([test "x$enable_openmp" = "xyes"], [target="libshtns_cuda_omp.a"])
 
 	nvcc_gencode_flags=""
 	# find cuda arch:
@@ -219,7 +243,13 @@ AS_IF([test "x$enable_cuda" != "xno"], [
 	    AC_MSG_ERROR([nvcc does not support any compatible gpu. Is nvcc available ?])
 	])
 	AC_DEFINE([SHTNS_GPU],[1],[GPU transforms (1 for CUDA, 2 for HIP)])
-	nvcc_flags="$nvcc_flags $nvcc_gencode_flags"
+	# for nvcc, the underlying gcc is not always c++11 by default, so we need to explicitely ask for it.
+	gpu_compile="nvcc -std=c++11 $nvcc_gencode_flags -lineinfo -Xptxas=-v"
+	target="libshtns_cuda.a"
+	AS_IF([test "x$enable_openmp" = "xyes"], [
+	    gpu_compile="$gpu_compile -Xcompiler -fopenmp"
+	    target="libshtns_cuda_omp.a"
+	])
 	LIBS="$LIBS -lstdc++"	# cuda uses the c++ standard library. This is needed to link with gcc
 	AC_CHECK_FILE([vkfft/vkFFT.h], AC_DEFINE([VKFFT_BACKEND],[1],[Use vkFFT for the FFT on the GPU when possible]))
 ])
@@ -369,7 +399,7 @@ AC_SUBST([libname])
 AC_SUBST([CC2])
 AC_SUBST([CFLAGS2])
 AC_SUBST([FFLAGS])
-AC_SUBST([nvcc_flags])
+AC_SUBST([gpu_compile])
 AC_CONFIG_FILES([Makefile setup.py])
 AC_OUTPUT
 
