@@ -42,15 +42,19 @@
   #include <omp.h>
 #endif
 
-#if defined(HAVE_LIBCUFFT) || defined(HAVE_LIBROCFFT)
-#ifndef HAVE_LIBROCFFT
-#include <cufft.h>
-/// The warp size is always 32 on cuda devices
-#define WARPSZE 32
-#else
-#include <hipfft.h>
-/// The warp size is always 64 on AMD devices
-#define WARPSZE 64
+#ifdef SHTNS_GPU
+#if SHTNS_GPU == 1
+	#ifdef HAVE_LIBCUFFT
+	#include <cufft.h>
+	#endif
+	/// The warp size is always 32 on cuda devices
+	#define WARPSZE 32
+#elif SHTNS_GPU == 2
+	#ifdef HAVE_LIBROCFFT
+	#include <hipfft.h>
+	#endif
+	/// The warp size is always 64 on AMD devices
+	#define WARPSZE 64
 #endif
 #include "shtns_cuda.h"
 
@@ -176,7 +180,7 @@ struct shtns_info {		// MUST start with "int nlm;"
 	fftw_plan ifft_lat;		///< fftw plan for SHqst_to_lat
 	int nphi_lat;			///< nphi of previous SHqst_to_lat
 
-	#if defined(HAVE_LIBCUFFT) || defined(HAVE_LIBROCFFT)
+	#ifdef SHTNS_GPU
 	/* cuda stuff */
 	short cu_flags;
 	double* d_clm;
@@ -191,8 +195,10 @@ struct shtns_info {		// MUST start with "int nlm;"
 	double* xfft_cpu;
 	size_t nlm_stride, spat_stride;
 	cudaStream_t xfer_stream, comp_stream;		// the cuda streams
+	#if defined(HAVE_LIBCUFFT) || defined(HAVE_LIBROCFFT)
 	cufftHandle cufft_plan;						// the cufft Handle
 	cufftHandle cufft_plan_float;				// the cufft Handle single precision
+	#endif
 	float* d_alm_f;
 	float* d_ct_f;
 	CUfunction gpu_kernels[4];		// 4 kernels (scalar & vector, synth & analys)

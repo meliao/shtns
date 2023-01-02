@@ -184,7 +184,7 @@ extern void* fodd[SHT_NTYP];
 extern void* fomp_a[6][SHT_NTYP];
 extern void* fomp_b[6][SHT_NTYP];
 #endif
-#ifdef HAVE_LIBCUFFT
+#ifdef SHTNS_GPU
 extern void* fgpu[4][SHT_NTYP];
 #endif
 
@@ -264,7 +264,7 @@ static void init_sht_array_func(shtns_cfg shtns)
 		  #endif
 		}
 	}
-	  #ifdef HAVE_LIBCUFFT
+	  #ifdef SHTNS_GPU
 		for (int j=0; j<4; j++) {
 			memcpy(sht_func[SHT_STD][SHT_GPU1+j], &fgpu[j], sizeof(void*)*SHT_NTYP);
 		}
@@ -371,7 +371,7 @@ static void planFFT(shtns_cfg shtns, int layout)
 
 	// default layout:
 	phi_inc = shtns->nlat * howmany;
-	#ifndef HAVE_LIBCUFFT
+	#ifndef SHTNS_GPU
 	if ((layout & SHT_ALLOW_PADDING) && (phi_inc % 64 == 0) && (NPHI * phi_inc > 512) && ((NPHI>1)||(howmany>1)))
 		phi_inc += 8;		// we add some padding, to avoid cache bank conflicts.
 	#endif
@@ -953,7 +953,7 @@ void fprint_ftable(FILE* fp, void* ftable[SHT_NVAR][SHT_NTYP])
 void shtns_print_cfg(shtns_cfg shtns)
 {
 	printf("Lmax=%d, Mmax*Mres=%d, Mres=%d, Nlm=%d  [%d threads, ",LMAX, MMAX*MRES, MRES, NLM, shtns->nthreads);
-	#ifdef HAVE_LIBCUFFT
+	#ifdef SHTNS_GPU
 		if (shtns->d_alm) printf("gpu ready, ");
 	#endif
 	if (shtns->norm & SHT_REAL_NORM) printf("'real' norm, ");
@@ -1111,7 +1111,7 @@ shtns_cfg shtns_create(int lmax, int mmax, int mres, enum shtns_norm norm)
 		shtns->ct = NULL;	shtns->st = NULL;
 		shtns->nphi = 0;	shtns->nlat = 0;	shtns->nlat_2 = 0;		shtns->nspat = 0;	// public data
 		shtns->ylm_lat = NULL;	shtns->ct_lat = 2.0;	shtns->ifft_lat = NULL;		shtns->nphi_lat = 0;	// _to_lat data
-		#ifdef HAVE_LIBCUFFT
+		#ifdef SHTNS_GPU
 		shtns->d_alm = NULL;		// this marks the gpu as disabled.
 		#endif
 		#ifdef SHTNS4MAGIC
@@ -1267,7 +1267,7 @@ void shtns_unset_grid(shtns_cfg shtns)
 /// release all resources allocated by a given shtns_cfg. NOT thead-safe.
 void shtns_destroy(shtns_cfg shtns)
 {
-	#ifdef HAVE_LIBCUFFT
+	#ifdef SHTNS_GPU
 	if (shtns->d_alm) cushtns_release_gpu(shtns);
 	#endif
 	free_unused(shtns, &shtns->l_2);
@@ -1313,7 +1313,7 @@ void shtns_reset()
 	}
 }
 
-#ifndef HAVE_LIBCUFFT
+#ifndef SHTNS_GPU
 // allocation for vector-aligned data. If gpu is enabled, these are replace by pinned memory allocation.
 void* shtns_malloc(size_t size) {
 	return VMALLOC(size);
@@ -1327,7 +1327,7 @@ void shtns_free(void* p) {
 
 static int choose_nlat(int n)
 {
-	#if HAVE_LIBCUFFT
+	#ifdef SHTNS_GPU
 	n = ((n+3)/4) * 4;		// multiple of 4 for GPUs
 	#else
 	n += (n&1);		// even is better.
@@ -1398,7 +1398,7 @@ int shtns_set_grid_auto(shtns_cfg shtns, enum shtns_type flags, double eps, int 
 	#ifdef SHTNS4MAGIC
 		if (flags == sht_reg_poles) shtns_runerr("Grid cannot include poles with MagIC layout.");
 	#endif
-	#if HAVE_LIBCUFFT
+	#if SHTNS_GPU
 		if ((layout & SHT_ALLOW_GPU) && (*nlat % 4)) printf("!!! Warning !!! Nlat must be a multiple of 4 to run on GPU\n");
 	#endif
 
@@ -1424,8 +1424,8 @@ int shtns_set_grid_auto(shtns_cfg shtns, enum shtns_type flags, double eps, int 
 			m = choose_nlat( m );
 			*nlat = m;
 		} else *nlat = n_gauss;
-		#ifndef HAVE_LIBCUFFT
-		// don't do this with GPU, as nlat must be a multiple of 64 there
+		#ifndef SHTNS_GPU
+		// don't do this with GPU (not relevant)
 		if (((layout & (SHT_ALLOW_PADDING|SHT_PHI_CONTIGUOUS)) == 0) && (shtns->nthreads == 1)) {
 			if ((*nlat % 64 == 0) && (*nlat * *nphi > 512)) {		// heuristics to avoid cache bank conflicts.
 			#ifndef SHTNS4MAGIC
@@ -1480,7 +1480,7 @@ int shtns_set_grid_auto(shtns_cfg shtns, enum shtns_type flags, double eps, int 
 	PolarOptimize(shtns, eps);
 	set_sht_fly(shtns, 0);		// switch function pointers to "on-the-fly" functions.
 
-  #ifdef HAVE_LIBCUFFT
+  #ifdef SHTNS_GPU
 	int gpu_ok = -1;
 	if ((layout & SHT_ALLOW_GPU) && (NLAT % 4 == 0)) {
 		gpu_ok = cushtns_init_gpu(shtns);		// try to initialize cuda gpu
@@ -1612,7 +1612,7 @@ int shtns_use_threads(int num_threads)
  */
 int shtns_use_gpu(int device_id)
 {
-#ifdef HAVE_LIBCUFFT
+#ifdef SHTNS_GPU
 	return cushtns_use_gpu(device_id);
 #else
 	return -1;

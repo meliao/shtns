@@ -118,6 +118,9 @@
 /* I need the transforms compatible with the MagIC code, to speed it up! */
 #undef SHTNS4MAGIC
 
+/* GPU transforms (1 for CUDA, 2 for HIP) */
+#undef SHTNS_GPU
+
 /* Enable the new recurrence proposed by Ishioka (2018) see
    https://doi.org/10.2151/jmsj.2018-019 (faster) */
 #undef SHTNS_ISHIOKA

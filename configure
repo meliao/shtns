@@ -4902,6 +4902,9 @@ then :
 	    as_fn_error $? "nvcc does not support any compatible gpu. Is nvcc available ?" "$LINENO" 5
 
 fi
+
+printf "%s\n" "#define SHTNS_GPU 1" >>confdefs.h
+
 	nvcc_flags="$nvcc_flags $nvcc_gencode_flags"
 	LIBS="$LIBS -lstdc++"	# cuda uses the c++ standard library. This is needed to link with gcc
 	{ printf "%s\n" "$as_me:${as_lineno-$LINENO}: checking for vkfft/vkFFT.h" >&5

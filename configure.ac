@@ -1,7 +1,7 @@
 #                                               -*- Autoconf -*-
 # Process this file with autoconf to produce a configure script.
 
-AC_PREREQ([2.71])
+AC_PREREQ([2.69])
 AC_INIT([SHTns],[3.5],[],[shtns],[https://bitbucket.org/nschaeff/shtns])
 AC_LANG([C])
 AC_CONFIG_SRCDIR([sht_init.c])
@@ -218,6 +218,7 @@ AS_IF([test "x$enable_cuda" != "xno"], [
 	AS_IF([test "x$nvcc_gencode_flags" == "x"],[
 	    AC_MSG_ERROR([nvcc does not support any compatible gpu. Is nvcc available ?])
 	])
+	AC_DEFINE([SHTNS_GPU],[1],[GPU transforms (1 for CUDA, 2 for HIP)])
 	nvcc_flags="$nvcc_flags $nvcc_gencode_flags"
 	LIBS="$LIBS -lstdc++"	# cuda uses the c++ standard library. This is needed to link with gcc
 	AC_CHECK_FILE([vkfft/vkFFT.h], AC_DEFINE([VKFFT_BACKEND],[1],[Use vkFFT for the FFT on the GPU when possible]))

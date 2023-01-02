@@ -149,7 +149,12 @@ void memzero_omp(double* mem, double* mem2, double* mem3, const size_t sze)
 
 static void destroy_cuda_buffer_fft(shtns_cfg shtns)
 {
+	#if defined(HAVE_LIBCUFFT) || defined(HAVE_LIBROCFFT)
 	if (shtns->nphi > 1) cufftDestroy(shtns->cufft_plan);
+	#endif
+	#ifdef VKFFT_BACKEND
+	deleteVkFFT(&shtns->vkfft_plan);
+	#endif
 	if (shtns->cu_flags & CUSHT_OWN_XFER_STREAM) cudaStreamDestroy(shtns->xfer_stream);
 	if (shtns->gpu_mem) cudaFree(shtns->gpu_mem);
 	if (shtns->gpu_buf_out) cudaFree(shtns->gpu_buf_out);
@@ -157,9 +162,7 @@ static void destroy_cuda_buffer_fft(shtns_cfg shtns)
 	if (shtns->xfft_cpu) shtns_free(shtns->xfft_cpu);
 }
 
-#if defined(HAVE_LIBCUFFT) || defined(HAVE_LIBROCFFT)
 int cuda_gpu_id = 0;	// by default, use gpu device 0
-#endif
 #ifdef VKFFT_BACKEND
 CUdevice vkfft_device_struct;
 #endif
@@ -174,21 +177,30 @@ static int init_cuda_buffer_fft(shtns_cfg shtns)
 	shtns->cu_flags |= CUSHT_OWN_XFER_STREAM;		// mark the transfer stream as managed by shtns.
 	if (err != cudaSuccess)	{	err_count++;	CUDA_ERROR_CHECK;  }
 
-	/* cuFFT init */
+	/* GPU FFT init */
 	int nfft = shtns->nphi;
 	//int nreal = 2*(nfft/2+1);
 	if (nfft > 1) {
 		// cufftPlanMany(cufftHandle *plan, int rank, int *n,   int *inembed, int istride, int idist,   int *onembed, int ostride, int odist,   cufftType type, int batch);
-		cufftResult res = CUFFT_SUCCESS;
+		#if defined(HAVE_LIBCUFFT) || defined(HAVE_LIBROCFFT)
+			cufftResult res = CUFFT_SUCCESS;
+		#endif
 		if ((shtns->fft_mode & FFT_PHI_CONTIG_CPLX) && (nfft % 16 == 0) && (shtns->nlat_2 % 16 == 0)) {	// DEPRECATED: use the fastest data-layout for large sizes in CUFFT
 			printf("!!! Use phi-contiguous FFT +transpose: WARNING, the spatial data is neither phi-contiguous nor theta-contiguous !!!\n");
-			res = cufftPlanMany(&shtns->cufft_plan, 1, &nfft, &nfft, 1, shtns->nphi, &nfft, 1, shtns->nphi, CUFFT_Z2Z, shtns->nlat_2);
-			//cufftPlanMany(&shtns->cufft_plan, 1, &nfft, &nfft, 1, shtns->nphi, &nreal, 1, shtns->nphi, CUFFT_D2Z, shtns->nlat);
+			#if defined(HAVE_LIBCUFFT) || defined(HAVE_LIBROCFFT)
+				res = cufftPlanMany(&shtns->cufft_plan, 1, &nfft, &nfft, 1, shtns->nphi, &nfft, 1, shtns->nphi, CUFFT_Z2Z, shtns->nlat_2);
+			#else
+				printf("WARNING: layout not available without cuFFT/rocFFT.\n");
+				err_count ++;
+				return 1;
+			#endif
 		} else if (shtns->fft_mode & FFT_THETA_CONTIG) {
 			printf("!!! Use theta-contiguous FFT on GPU !!!\n");
 			int howmany = shtns->nlat_2 * shtns->howmany;		// support batched transforms
 			int dist = shtns->nlat_padded / 2;
-			res = cufftPlanMany(&shtns->cufft_plan, 1, &nfft, &nfft, dist, 1, &nfft, dist, 1, CUFFT_Z2Z, howmany);
+			#if defined(HAVE_LIBCUFFT) || defined(HAVE_LIBROCFFT)
+				res = cufftPlanMany(&shtns->cufft_plan, 1, &nfft, &nfft, dist, 1, &nfft, dist, 1, CUFFT_Z2Z, howmany);
+			#endif
 			#ifdef VKFFT_BACKEND
 				VkFFTConfiguration config = {};		//zero-initialize configuration
 				config.FFTdim = 2; //FFT dimension: 1D, but we use a second dimension to get non-unit strides.
@@ -222,16 +234,18 @@ static int init_cuda_buffer_fft(shtns_cfg shtns)
 			printf("WARNING: layout not available on GPU.\n");
 			err_count ++;
 			return 1;
-		}
-		if (res != CUFFT_SUCCESS) {
-			printf("cufft init FAILED with error code %d\n", res);
-			err_count ++;
-		}
-		res = cufftSetStream(shtns->cufft_plan, shtns->comp_stream);	// select stream for cufft
-		size_t worksize = 0;
-		cufftGetSize(shtns->cufft_plan, &worksize);
-		#if SHT_VERBOSE > 1
-			printf("cufft work-area size: %ld \t nlat*nphi = %d\n", worksize/8, shtns->nlat * shtns->nphi);
+		}		
+		#if defined(HAVE_LIBCUFFT) || defined(HAVE_LIBROCFFT)
+			if (res != CUFFT_SUCCESS) {
+				printf("cufft init FAILED with error code %d\n", res);
+				err_count ++;
+			}
+			res = cufftSetStream(shtns->cufft_plan, shtns->comp_stream);	// select stream for cufft
+			size_t worksize = 0;
+			cufftGetSize(shtns->cufft_plan, &worksize);
+			#if SHT_VERBOSE > 1
+				printf("cufft work-area size: %ld \t nlat*nphi = %d\n", worksize/8, shtns->nlat * shtns->nphi);
+			#endif
 		#endif
 	}
 
@@ -643,20 +657,22 @@ shtns_cfg cushtns_clone(shtns_cfg shtns, cudaStream_t compute_stream, cudaStream
 void fourier_to_spat_gpu(shtns_cfg shtns, double* q, const int mmax)
 {
 	const int nphi = shtns->nphi;
-	cufftResult res = CUFFT_SUCCESS;
 	if (nphi > 1) {
-		cufftDoubleComplex* x = (cufftDoubleComplex*) q;
+	#if defined(HAVE_LIBCUFFT) || defined(HAVE_LIBROCFFT)
+		cufftResult res = CUFFT_SUCCESS;
 		if (shtns->fft_mode & FFT_PHI_CONTIG_CPLX) {
 			double* xfft = shtns->gpu_buf_in;
-			transpose_cplx_zero(shtns->comp_stream, (double*) x, xfft, shtns->nlat_2, nphi, mmax);		// zero out m>mmax during transpose
-			res = cufftExecZ2Z(shtns->cufft_plan, (cufftDoubleComplex*) xfft, x, CUFFT_INVERSE);
-		} else {	// THETA_CONTIGUOUS:
+			transpose_cplx_zero(shtns->comp_stream, q, xfft, shtns->nlat_2, nphi, mmax);		// zero out m>mmax during transpose
+			res = cufftExecZ2Z(shtns->cufft_plan, (cufftDoubleComplex*) xfft, (cufftDoubleComplex*) q, CUFFT_INVERSE);
+		} else
+	#endif
+		{	// THETA_CONTIGUOUS:
 			#ifndef VKFFT_BACKEND
 			if (2*(mmax+1) <= nphi) {
 				const int nlat = shtns->nlat_padded;
 				cudaMemsetAsync( q + (mmax+1)*nlat, 0, sizeof(double)*(nphi-2*mmax-1)*nlat, shtns->comp_stream );		// zero out m>mmax before fft
 			}
-			res = cufftExecZ2Z(shtns->cufft_plan, x, x, CUFFT_INVERSE);
+			res = cufftExecZ2Z(shtns->cufft_plan, (cufftDoubleComplex*) q, (cufftDoubleComplex*) q, CUFFT_INVERSE);
 			#else
 				// rely on vkfft to avoid reading the unused Fourier modes above shtns->mmax
 				if (mmax < shtns->mmax) {	// some zero must be added, only if more than nominal
@@ -664,34 +680,40 @@ void fourier_to_spat_gpu(shtns_cfg shtns, double* q, const int mmax)
 					cudaMemsetAsync( q + (mmax+1)*nlat, 0, sizeof(double)*(nphi-2*mmax-1)*nlat, shtns->comp_stream );		// zero out m>mmax before fft
 				}
 				VkFFTLaunchParams launchParams = {};
-				launchParams.buffer = (void**) &x;
+				launchParams.buffer = (void**) &q;
 				VkFFTAppend(&shtns->vkfft_plan, 1, &launchParams);
 			#endif
 		}
+	#if defined(HAVE_LIBCUFFT) || defined(HAVE_LIBROCFFT)
 		if (res != CUFFT_SUCCESS) printf("cufft error %d\n", res);
+	#endif
 	}
 }
 
 void spat_to_fourier_gpu(shtns_cfg shtns, double* q, const int mmax)
 {
 	const int nphi = shtns->nphi;
-	cufftResult res = CUFFT_SUCCESS;
 	if (nphi > 1) {
-		cufftDoubleComplex *x = (cufftDoubleComplex*) q;
+	#if defined(HAVE_LIBCUFFT) || defined(HAVE_LIBROCFFT)
+		cufftResult res = CUFFT_SUCCESS;
 		if (shtns->fft_mode & FFT_PHI_CONTIG_CPLX) {
 			double* xfft = shtns->gpu_buf_in;
-			res = cufftExecZ2Z(shtns->cufft_plan, x, (cufftDoubleComplex*) xfft, CUFFT_FORWARD);
-			transpose_cplx_skip(shtns->comp_stream, xfft, (double*) x, nphi, shtns->nlat_2, mmax);		// ignore m > mmax during transpose
-		} else {	// THETA_CONTIGUOUS:
+			res = cufftExecZ2Z(shtns->cufft_plan, (cufftDoubleComplex*) q, (cufftDoubleComplex*) xfft, CUFFT_FORWARD);
+			transpose_cplx_skip(shtns->comp_stream, xfft, q, nphi, shtns->nlat_2, mmax);		// ignore m > mmax during transpose
+		} else
+	#endif
+		{	// THETA_CONTIGUOUS:
 			#ifndef VKFFT_BACKEND
-			res = cufftExecZ2Z(shtns->cufft_plan, x, x, CUFFT_FORWARD);
+			res = cufftExecZ2Z(shtns->cufft_plan, (cufftDoubleComplex*) q, (cufftDoubleComplex*) q, CUFFT_FORWARD);
 			#else
 				VkFFTLaunchParams launchParams = {};
-				launchParams.buffer = (void**) &x;
+				launchParams.buffer = (void**) &q;
 				VkFFTAppend(&shtns->vkfft_plan, -1, &launchParams);
 			#endif
 		}
+	#if defined(HAVE_LIBCUFFT) || defined(HAVE_LIBROCFFT)
 		if (res != CUFFT_SUCCESS) printf("cufft error %d\n", res);
+	#endif
 	}
 }
 

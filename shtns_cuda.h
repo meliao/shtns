@@ -19,7 +19,7 @@
  \brief shtns_cuda.h declares transforms and initialization functions for cuda-enabled GPU.
 **/
 
-#ifdef HAVE_LIBROCFFT
+#if SHTNS_GPU == 2
 #warning "hip replaces cuda"
 #include <hip/hip_runtime.h>
 #include "cuda2hip.h"		// tanslates cuda API names to HIP
