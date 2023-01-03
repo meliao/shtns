@@ -313,12 +313,18 @@ int init_cuda_program(shtns_cfg shtns, const int gpu_arch_target)
 	int nwarp_a=1;		// 1 WARP is by far the best choice here, at least on V100
 	const int nw_a=1;	// only one point per thread possible for analysis
 	int nw_s=2;		int nf_s=1;			int nf_a=1;
+#if WARPSZE == 32
 	if (nwarp_target % 3 == 0) nw_s=3;	// if we need a multiple of 3, nw_s=3 is likely a bit better
 	// adjust values (heuristics)
 	if (shtns->howmany % 4 == 0) 	  {	nf_s=4;	nw_s=1;		nf_a=4;	}
 	else if (shtns->howmany % 2 == 0) {	nf_s=2;	nw_s=2; 	nf_a=2;	}
 	else if (shtns->howmany % 3 == 0) { nf_s=3; nw_s=1; 	nf_a=1;	}
-	int lspan_a = 16/nf_a;		// V100: 16/nf_a works best (mmax>0)
+#else
+	if ((nwarp_target == 1) && (shtns->howmany % 4 == 0))  {  nf_s=4; nw_s=1; }			// MI100
+	else if ((nwarp_target <= 2) && (shtns->howmany % 2 == 0))  {  nf_s=2; nw_s=2; }	// MI100
+	if (shtns->howmany % 2 == 0) {	nf_a=2;	}	// for MI100
+#endif
+	int lspan_a = 16/nf_a;		// V100 and MI100: 16/nf_a works best (mmax>0)
 
 	if (shtns->mmax == 0) {
 		lspan_a = 32/nf_a;		// V100: 32/nf_a works best (mmax==0)
@@ -326,6 +332,10 @@ int init_cuda_program(shtns_cfg shtns, const int gpu_arch_target)
 	} else if (shtns->lmax > SHT_L_RESCALE_FLY) {
 		hi_llim = 1;		// only if mmax>0
 		sh2ish_fuse = false;	// don't fuse hi_llim
+		if (WARPSZE==64) {	// for MI100
+			nwarp_s=1;
+			if (shtns->howmany % 2 == 0) {	nf_s=2;	}	// for MI100
+		}
 		if (nw_s > 2) nw_s=2;	// nw_s = 1 or 2 only
 	}
 

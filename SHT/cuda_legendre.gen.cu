@@ -132,7 +132,7 @@ void leg_m_kernel(
 	//const int m_inc = 2*nlat_2;
 	const int k_inc = 1;
 
-	const int LSPAN = (BLOCKSIZE >= 2*WARPSZE) ? BLOCKSIZE/2 : WARPSZE;
+	const int LSPAN = (WARPSZE==32 && BLOCKSIZE >= 2*WARPSZE) ? BLOCKSIZE/2 : WARPSZE;		// always WARPSZE for amd
 	static_assert(LSPAN <= BLOCKSIZE, "LSPAN must not exceed BLOCKSIZE");
 	static_assert(LSPAN % 4 == 0, "LSPAN must be a multiple of 4");
 	__shared__ double ak[LSPAN];
