@@ -56,10 +56,12 @@
 	#define _syncwarp __syncwarp()
 #endif
 
+#ifdef __gfx90a__
+	#define atomicAdd_sht unsafeAtomicAdd
+#else	/* NOT __gfx90a__ */
 #if WARPSZE == 64
 	// AMD HIP
 	#define __forceinline__ inline
-	//#define atomicAdd unsafeAtomicAdd
 #endif
 
 #if (__CUDACC_VER_MAJOR__ < 8) || ( defined(__CUDA_ARCH__) && __CUDA_ARCH__ < 600 )
@@ -78,6 +80,7 @@ __device__ __forceinline__ double atomicAdd_sht(double* address, double val)
 }
 #else
 	#define atomicAdd_sht atomicAdd
+#endif
 #endif
 
 __device__ __forceinline__ bool polar_skip_sint(double sint, int llim, int m)
@@ -541,9 +544,12 @@ void leg_m_kernel(
 }
 
 
-template<int S> __global__ 
+template<int S> __global__
+#ifdef __gfx90a__
+__launch_bounds__(64,1)
+#endif
 void ileg_m_kernel(const double* __restrict__ al, const double* __restrict__ ct, const double* __restrict__ q, double *ql, const int llim, 
-	const int nlat_2, const int nphi, const int m_inc, const int q_dist=0, const int ql_dist=0)
+	const int nlat_2, const int nphi, const int m_inc, const int q_dist, const int ql_dist)
 {
 	const int BLOCKSIZE=BLKSZE_A;
 	const int NFIELDS=NF_A;

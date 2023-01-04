@@ -304,7 +304,7 @@ static int optimize_nwarp(int* nwarp, int n_target, int nw, float loss_max, cons
 	return nb;
 }
 
-int init_cuda_program(shtns_cfg shtns, const int gpu_arch_target)
+int init_cuda_program(shtns_cfg shtns, const char* gpu_arch_target)
 {
 	const int nwarp_target = (shtns->nlat_2 + WARPSZE-1)/WARPSZE;		// number of 'warps' needed for nlat_2 points
 	int hi_llim = 0;
@@ -313,6 +313,7 @@ int init_cuda_program(shtns_cfg shtns, const int gpu_arch_target)
 	int nwarp_a=1;		// 1 WARP is by far the best choice here, at least on V100
 	const int nw_a=1;	// only one point per thread possible for analysis
 	int nw_s=2;		int nf_s=1;			int nf_a=1;
+	int lspan_a = 16;		// V100 and MI100: 16/nf_a works best (mmax>0)
 #if WARPSZE == 32
 	if (nwarp_target % 3 == 0) nw_s=3;	// if we need a multiple of 3, nw_s=3 is likely a bit better
 	// adjust values (heuristics)
@@ -320,11 +321,17 @@ int init_cuda_program(shtns_cfg shtns, const int gpu_arch_target)
 	else if (shtns->howmany % 2 == 0) {	nf_s=2;	nw_s=2; 	nf_a=2;	}
 	else if (shtns->howmany % 3 == 0) { nf_s=3; nw_s=1; 	nf_a=1;	}
 #else
-	if ((nwarp_target == 1) && (shtns->howmany % 4 == 0))  {  nf_s=4; nw_s=1; }			// MI100
-	else if ((nwarp_target <= 2) && (shtns->howmany % 2 == 0))  {  nf_s=2; nw_s=2; }	// MI100
-	if (shtns->howmany % 2 == 0) {	nf_a=2;	}	// for MI100
+	if (strcmp(gpu_arch_target,"gfx90a") >= 0) {	// MI250
+		nw_s=4;		lspan_a = 32;
+		if ((nwarp_target == 1) && (shtns->howmany % 4 == 0))  {  nf_s=4; nf_a=2; }
+		else if (shtns->howmany % 2 == 0) {	nf_s=2; 	nf_a=2;	}
+	} else {	// assume MI100
+		if ((nwarp_target == 1) && (shtns->howmany % 4 == 0))  {  nf_s=4; nw_s=1; }
+		else if ((nwarp_target <= 2) && (shtns->howmany % 2 == 0))  {  nf_s=2; nw_s=2; }
+		if (shtns->howmany % 2 == 0) {	nf_a=2;	}
+	}
 #endif
-	int lspan_a = 16/nf_a;		// V100 and MI100: 16/nf_a works best (mmax>0)
+	lspan_a /= nf_a;
 
 	if (shtns->mmax == 0) {
 		lspan_a = 32/nf_a;		// V100: 32/nf_a works best (mmax==0)
@@ -431,9 +438,14 @@ int init_cuda_program(shtns_cfg shtns, const int gpu_arch_target)
 	}
 
 	// Compile
-	char arch[16];
-	snprintf(arch, 16, "-arch=sm_%d", gpu_arch_target);		// compile for the current gpu
+	char arch[64];
+#if WARPSZE == 32
+	snprintf(arch, 64, "-arch=%s", gpu_arch_target);		// compile for the current gpu
 	const char *opts[] = {"-std=c++11", "-ftz=true", "-lineinfo", "--ptxas-options","-v", arch};
+#else
+	snprintf(arch, 64, "--offload-arch=%s", gpu_arch_target);             // compile for the current gpu
+	const char *opts[] = {"-std=c++11", "-O3", arch};
+#endif
 	#if SHT_VERBOSE > 1
 		printf("compiling cuda kernels (lmax=%d, nlat=%d, nbatch=%d) for %s\n", shtns->lmax, shtns->nlat, shtns->howmany, arch);
 	#endif
@@ -535,13 +547,15 @@ int cushtns_init_gpu(shtns_cfg shtns)
 	#if SHT_VERBOSE > 0
 	#if SHTNS_GPU == 1
 	printf("  cuda GPU #%d \"%s\" found (warp size = %d, compute capabilities = %d.%d).\n", device_id, prop.name, prop.warpSize, prop.major, prop.minor);
+	char gpu_arch_target[16];
+	sprintf(gpu_arch_target, "sm_%d", prop.major*10 + prop.minor);		// the gpu_arch we will compile for!
 	#elif SHTNS_GPU == 2
 	printf("  hip GPU #%d \"%s\" found (warp size = %d).\n", device_id, prop.gcnArchName, prop.warpSize);
+	const char* gpu_arch_target = prop.gcnArchName;
 	#endif
 	#endif
 	if (prop.warpSize != WARPSZE) return -1;		// failure, warpsize must be known at compile time (does it?).
 	if (prop.major < 3) return -1;			// failure, SHTns requires compute cap. >= 3 (warp shuffle instructions)
-	const int gpu_arch_target = prop.major*10 + prop.minor;		// the gpu_arch we will compile for!
 
 	// Allocate the device input vector alm
 	err = cudaMalloc((void **)&d_alm, (2*nlm+MAX_THREADS_PER_BLOCK-1)*sizeof(double));	// allow some overflow.
