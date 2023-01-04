@@ -307,13 +307,13 @@ static int optimize_nwarp(int* nwarp, int n_target, int nw, float loss_max, cons
 int init_cuda_program(shtns_cfg shtns, const char* gpu_arch_target)
 {
 	const int nwarp_target = (shtns->nlat_2 + WARPSZE-1)/WARPSZE;		// number of 'warps' needed for nlat_2 points
-	int hi_llim = 0;
-	bool sh2ish_fuse = SHT_ALLOW_SH2ISH_FUSE;
+	const bool hi_llim = (shtns->mmax > 0  &&  shtns->lmax > SHT_L_RESCALE_FLY);	// special rescaling needed
+	bool sh2ish_fuse = (SHT_ALLOW_SH2ISH_FUSE  &&  !hi_llim);		// never fuse hi_llim
 	int nwarp_s=4;		// 1 to 4 warps is a good choice on V100 for vector or when sh2ish is disabled. Usually, 4 is a bit better.
 	int nwarp_a=1;		// 1 WARP is by far the best choice here, at least on V100
 	const int nw_a=1;	// only one point per thread possible for analysis
 	int nw_s=2;		int nf_s=1;			int nf_a=1;
-	int lspan_a = 16;		// V100 and MI100: 16/nf_a works best (mmax>0)
+	int lspan_a = 16;	// V100 and MI100: 16/nf_a works best (mmax>0)
 #if WARPSZE == 32
 	if (nwarp_target % 3 == 0) nw_s=3;	// if we need a multiple of 3, nw_s=3 is likely a bit better
 	// adjust values (heuristics)
@@ -321,30 +321,27 @@ int init_cuda_program(shtns_cfg shtns, const char* gpu_arch_target)
 	else if (shtns->howmany % 2 == 0) {	nf_s=2;	nw_s=2; 	nf_a=2;	}
 	else if (shtns->howmany % 3 == 0) { nf_s=3; nw_s=1; 	nf_a=1;	}
 #else
-	if (strcmp(gpu_arch_target,"gfx90a") >= 0) {	// MI250
+	const bool gfx90a = (strcmp(gpu_arch_target,"gfx90a") >= 0);	// MI200+
+	if (shtns->howmany % 2 == 0) {	nf_a=2;		nf_s=2; }
+	if (gfx90a) {	// MI200+
 		nw_s=4;		lspan_a = 32;
-		if ((nwarp_target == 1) && (shtns->howmany % 4 == 0))  {  nf_s=4; nf_a=2; }
-		else if (shtns->howmany % 2 == 0) {	nf_s=2; 	nf_a=2;	}
-	} else {	// assume MI100
-		if ((nwarp_target == 1) && (shtns->howmany % 4 == 0))  {  nf_s=4; nw_s=1; }
-		else if ((nwarp_target <= 2) && (shtns->howmany % 2 == 0))  {  nf_s=2; nw_s=2; }
-		if (shtns->howmany % 2 == 0) {	nf_a=2;	}
-	}
-#endif
-	lspan_a /= nf_a;
-
-	if (shtns->mmax == 0) {
-		lspan_a = 32/nf_a;		// V100: 32/nf_a works best (mmax==0)
-		sh2ish_fuse = false;	// don't fuse mmax=0
-	} else if (shtns->lmax > SHT_L_RESCALE_FLY) {
-		hi_llim = 1;		// only if mmax>0
-		sh2ish_fuse = false;	// don't fuse hi_llim
-		if (WARPSZE==64) {	// for MI100
-			nwarp_s=1;
-			if (shtns->howmany % 2 == 0) {	nf_s=2;	}	// for MI100
+		if (hi_llim) {
+			if (shtns->howmany % 4 == 0)	  {	nf_s=4;	 nf_a=4; nw_s=2; }
+			else if (shtns->howmany % 2 == 0) {	nf_s=2;	 nf_a=2; }
+			else if (shtns->howmany % 3 == 0) {	nf_s=3;	 nf_a=1; }
 		}
-		if (nw_s > 2) nw_s=2;	// nw_s = 1 or 2 only
+	} else {	// assume MI100
+		if (nwarp_target > 2  &&  !hi_llim)	nf_s=1;
 	}
+	if (shtns->howmany % 4 == 0  &&  nwarp_target == 1)  {  nf_s=4; }
+	if (hi_llim)	nwarp_s=1;
+#endif
+	if (shtns->mmax == 0) {
+		lspan_a *= 2;
+		sh2ish_fuse = false;	// don't fuse mmax=0
+	}
+	if (hi_llim  &&  nw_s > 2) nw_s=2;	// nw_s = 1 or 2 only with hi_llim
+	lspan_a /= nf_a;
 
 	#if SHT_VERBOSE > 1
 	{	// override from sht_gpu.conf file
@@ -377,6 +374,7 @@ int init_cuda_program(shtns_cfg shtns, const char* gpu_arch_target)
 		if (SHT_VERBOSE > 1) printf("optimize scalar synthesis:\n");
 		nblocks_s0 = optimize_nwarp(&nwarp_s0, nwarp_target, nw_s, 1.14f);
 		if (nblocks_s0 > 2) sh2ish_fuse = false;	// disable sh2ish_fuse, very likely slower or only marginally faster
+		if (nw_s == 4) sh2ish_fuse = false;			// MI250
 	}
 
 	// also store into plan the kernel launch parameters:
@@ -397,7 +395,7 @@ int init_cuda_program(shtns_cfg shtns, const char* gpu_arch_target)
 	s += sprintf(s, "#define WARPSZE %d\n", WARPSZE);
 	s += sprintf(s, "#define LMAX %d\n", shtns->lmax);
 	s += sprintf(s, "#define MRES %d\n", shtns->mres);
-	s += sprintf(s, "#define HI_LLIM %d\n", hi_llim);
+	s += sprintf(s, "#define HI_LLIM %d\n", (hi_llim) ? 1 : 0);
 	s += sprintf(s, "#define M0_ONLY %d\n", (shtns->mmax == 0) ? 1 : 0);
 	s += sprintf(s, "#define ROBERT_FORM %d\n", shtns->robert_form);
 	s += sprintf(s, "#define BLKSZE_S %d\n", nwarp_s*WARPSZE);
@@ -447,9 +445,9 @@ int init_cuda_program(shtns_cfg shtns, const char* gpu_arch_target)
 	const char *opts[] = {"-std=c++11", "-O3", arch};
 #endif
 	#if SHT_VERBOSE > 1
-		printf("compiling cuda kernels (lmax=%d, nlat=%d, nbatch=%d) for %s\n", shtns->lmax, shtns->nlat, shtns->howmany, arch);
+		printf("compiling cuda kernels (lmax=%d, nlat=%d, nbatch=%d) for %s\n", shtns->lmax, shtns->nlat, shtns->howmany, gpu_arch_target);
 	#endif
-	rtc_res = nvrtcCompileProgram(prog, (WARPSZE==32) ? sizeof(opts)/sizeof(const char*) : 0, opts);
+	rtc_res = nvrtcCompileProgram(prog, sizeof(opts)/sizeof(const char*), opts);
 	if ((rtc_res != NVRTC_SUCCESS) || (SHT_VERBOSE > 1)) {		// show compile log in case of failure, or if verbose (debug) output required
 		size_t sze = 0;
 		nvrtcGetProgramLogSize (prog, &sze);

@@ -47,6 +47,7 @@
 	#define _any(p) __any(p)
 	#define _all(p) __all(p)
 	#define _syncwarp 0
+	#define _syncwarp_fence __threadfence_block()
 #else
 	#define shfl_xor(...) __shfl_xor_sync(0xFFFFFFFF, __VA_ARGS__)
 	#define shfl_down(...) __shfl_down_sync(0xFFFFFFFF, __VA_ARGS__)
@@ -54,6 +55,7 @@
 	#define _any(p) __any_sync(0xFFFFFFFF, p)
 	#define _all(p) __all_sync(0xFFFFFFFF, p)
 	#define _syncwarp __syncwarp()
+	#define _syncwarp_fence __syncwarp()
 #endif
 
 #ifdef __gfx90a__
@@ -326,12 +328,17 @@ void leg_m_kernel(
 		bool skip_block = false;
 		if (NLAT_2 > BLOCKSIZE*NW) {	// polar optimization
 			if (j == BLOCKSIZE-1)	skip_block = polar_skip_sint2(y1[NW-1], llim, m);
-			if (BLOCKSIZE > WARPSZE) {
-				__shared__ int xx;
+			#if WARPSZE==32
+			if (BLOCKSIZE == WARPSZE) skip_block = _any(skip_block);	// get largest value in block/warp
+			#else
+			if (BLOCKSIZE == WARPSZE) skip_block = shfl(skip_block,WARPSZE-1);	// get largest value in block/warp
+			#endif
+			else {
+				__shared__ volatile int xx;
 				if (j == BLOCKSIZE-1) xx = skip_block;	// one thread writes its value (the largest one)
 				__syncthreads();
-				skip_block = xx;	// everyone reads that value	
-			} else	skip_block = _any(skip_block);	// get largest value in block/warp
+				skip_block = xx;	// everyone reads that value
+			}
 		} else if (BLOCKSIZE > WARPSZE) { __syncthreads(); } else { _syncwarp; }
 		// at this point, block is in sync (consistent view of shared memory).
 	if (!skip_block) {
@@ -590,7 +597,7 @@ void ileg_m_kernel(const double* __restrict__ al, const double* __restrict__ ct,
 			yl[f*2*l_inc +j]     = x0+x1;			// even
 			yl[(f*2+1)*l_inc +j] = (x0-x1)*cost;	// odd
 		}
-		if (BLOCKSIZE > WARPSZE) {	__syncthreads(); } else { _syncwarp; }
+		if (BLOCKSIZE > WARPSZE) {	__syncthreads(); } else { _syncwarp_fence; }
 
 		y0 = (it < nlat_2) ? ct[it + nlat_2] : 0.0;		// weights are stored just after ct.
 		cost *= cost;	// ct2
@@ -608,7 +615,7 @@ void ileg_m_kernel(const double* __restrict__ al, const double* __restrict__ ct,
 		al+=2;
 		int l = 0;
 		do {
-			if (BLOCKSIZE > WARPSZE) {	__syncthreads(); } else { _syncwarp; }
+			if (BLOCKSIZE > WARPSZE) {	__syncthreads(); } else { _syncwarp_fence; }
 				#pragma unroll
 				for (int k=0; k<LSPAN/2; k+=2) {		// compute a block of the matrix, write it in shared mem.
 					double c0 = ak[2*k+3]*cost + ak[2*k+2];
@@ -621,7 +628,7 @@ void ileg_m_kernel(const double* __restrict__ al, const double* __restrict__ ct,
 			// now re-assign each thread an l (transpose)
 			const int itl = (ll >> 1)*l_inc + j % (BLOCKSIZE/NW);
 
-			if (BLOCKSIZE > WARPSZE) {	__syncthreads(); } else { _syncwarp; }
+			if (BLOCKSIZE > WARPSZE) {	__syncthreads(); } else { _syncwarp_fence; }
 
 			const int NACC = 4;		// number of independent accumulators per NFIELD. 4 is good for V100
 			double qll[NACC];		// accumulators
@@ -682,12 +689,17 @@ void ileg_m_kernel(const double* __restrict__ al, const double* __restrict__ ct,
 		#if NLAT_2 > BLKSZE_A
 		{	// polar optimization
 			bool skip_block = (j == BLOCKSIZE-1) ? polar_skip_sint2(y1, llim, m) : false;
-			if (BLOCKSIZE > WARPSZE) {
-				__shared__ int xx;
+			#if WARPSZE == 32
+			if (BLOCKSIZE == WARPSZE) skip_block = _any(skip_block);	// get largest value in block/warp
+			#else
+			if (BLOCKSIZE == WARPSZE) skip_block = shfl(skip_block,WARPSZE-1);	// get largest value in block/warp
+			#endif
+			else {
+				__shared__ volatile int xx;
 				if (j == BLOCKSIZE-1) xx = skip_block;	// one thread writes its value (the largest one)
 				__syncthreads();
-				skip_block = xx;	// everyone reads that value	
-			} else	skip_block = _any(skip_block);	// get largest value in block/warp
+				skip_block = xx;	// everyone reads that value
+			}
 			// at this point, block is in sync (consistent view of shared memory)
 			if (skip_block)  return;
 		}
@@ -712,7 +724,7 @@ void ileg_m_kernel(const double* __restrict__ al, const double* __restrict__ ct,
 		}
 
 		const int ofs = (4*f0+(ll&3))*l_inc + j % (BLOCKSIZE/NW);
-		if (BLOCKSIZE > WARPSZE) {	__syncthreads(); } else { _syncwarp; }
+		if (BLOCKSIZE > WARPSZE) {	__syncthreads(); } else { _syncwarp_fence; }
 			// transpose yl to my_reo (registers)
 			#pragma unroll
 			for (int k=0; k<NW; k++) {
@@ -760,7 +772,7 @@ void ileg_m_kernel(const double* __restrict__ al, const double* __restrict__ ct,
 
 		l=m;		al+=2;
 		while (l <= llim) {
-			if (BLOCKSIZE > WARPSZE) {	__syncthreads(); } else { _syncwarp; }
+			if (BLOCKSIZE > WARPSZE) {	__syncthreads(); } else { _syncwarp_fence; }
 			#pragma unroll
 			for (int k=0; k<LSPAN/2; k+=2) {		// compute a block of the matrix, write it in shared mem.
 				double c0 = ak[2*k+3]*cost + ak[2*k+2];
@@ -785,15 +797,20 @@ void ileg_m_kernel(const double* __restrict__ al, const double* __restrict__ ct,
 
 		#if HI_LLIM==1
 			bool y_not_zero;
-			if (BLOCKSIZE > WARPSZE) {
-				__shared__ int ny_max;
+			#if WARPSZE==32
+			if (BLOCKSIZE == WARPSZE) y_not_zero = _any(ny==0);	// get largest value in block/warp [warp vote is faster than shuffle on nvidia]
+			#else
+			if (BLOCKSIZE == WARPSZE) y_not_zero = (shfl(ny,WARPSZE-1)==0);	// get last value in block/warp [shuffle on amd]
+			#endif
+			else {
+				__shared__ volatile int ny_max;
 				if (j == BLOCKSIZE-1) ny_max = ny;	// one thread writes its value (the largest one);
 				__syncthreads();
 				y_not_zero = (ny_max==0);	// everyone reads that value
-			} else	y_not_zero = _any(ny==0);	// get largest value in block/warp [warp vote is faster than shuffle on nvidia]
+			}
 		#else
 			const bool y_not_zero = true;
-			if (BLOCKSIZE > WARPSZE) {	__syncthreads(); } else { _syncwarp; }
+			if (BLOCKSIZE > WARPSZE) {	__syncthreads(); } else { _syncwarp_fence; }
 		#endif
 			// at this point block is in sync (consistent view of shared memory).
 
