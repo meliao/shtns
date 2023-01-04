@@ -325,15 +325,12 @@ int init_cuda_program(shtns_cfg shtns, const char* gpu_arch_target)
 	if (shtns->howmany % 2 == 0) {	nf_a=2;		nf_s=2; }
 	if (gfx90a) {	// MI200+
 		nw_s=4;		lspan_a = 32;
-		if (hi_llim) {
-			if (shtns->howmany % 4 == 0)	  {	nf_s=4;	 nf_a=4; nw_s=2; }
-			else if (shtns->howmany % 2 == 0) {	nf_s=2;	 nf_a=2; }
-			else if (shtns->howmany % 3 == 0) {	nf_s=3;	 nf_a=1; }
-		}
+		if (hi_llim  &&  nf_s==1  &&  shtns->howmany % 3 == 0)	nf_s=3;
+		if (shtns->howmany % 4 == 0) { nf_a=4;		if (hi_llim) { nf_s=4;	nw_s=2; } }
 	} else {	// assume MI100
 		if (nwarp_target > 2  &&  !hi_llim)	nf_s=1;
 	}
-	if (shtns->howmany % 4 == 0  &&  nwarp_target == 1)  {  nf_s=4; }
+	if (shtns->howmany % 4 == 0  &&  nwarp_target == 1)	nf_s=4;
 	if (hi_llim)	nwarp_s=1;
 #endif
 	if (shtns->mmax == 0) {

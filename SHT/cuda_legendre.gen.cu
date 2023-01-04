@@ -118,6 +118,9 @@ __device__ double qish(const double* __restrict__ xlm, const double* __restrict_
 /// requirements : blockSize must be 1 in the y- and z-direction and BLKSZE_S in the x-direction.
 /// llim MUST BE <= 1800, unless HI_LLIM=1
 template<int S> __global__
+#if NLAT_2<=64 && defined(__gfx90a__)
+__launch_bounds__(64, 1)	// leads to better performance for small transforms on MI250
+#endif
 void leg_m_kernel(
 	const double* __restrict__ al, const double* __restrict__ ct, const double* __restrict__ ql, double *q,
 	const int llim, const int nlat_2, const int nphi, const int m_inc,
@@ -818,7 +821,11 @@ void ileg_m_kernel(const double* __restrict__ al, const double* __restrict__ ct,
 				if (j<LSPAN) ak[j+2] = al[j];
 
 			if ((!HI_LLIM) || (y_not_zero)) {		// when all y are zero, we can skip this.
+				#ifndef __gfx90a__
 				const int NACC = 2;		// number of independent accumulators (2 is the sweetspot for V100).
+				#else
+				const int NACC = 4;		// number of independent accumulators (4 is the sweetspot for MI200 / CDNA2).
+				#endif
 				double qlri[NACC];		// accumulators
 
 				#pragma unroll
