@@ -46,6 +46,7 @@
 	#define shfl(...) __shfl(__VA_ARGS__)
 	#define _any(p) __any(p)
 	#define _all(p) __all(p)
+	#define _ballot(p) __ballot(p)
 	#define _syncwarp 0
 	#define _syncwarp_fence __threadfence_block()
 #else
@@ -54,6 +55,7 @@
 	#define shfl(...) __shfl_sync(0xFFFFFFFF, __VA_ARGS__)
 	#define _any(p) __any_sync(0xFFFFFFFF, p)
 	#define _all(p) __all_sync(0xFFFFFFFF, p)
+	#define _ballot(p) __ballot_sync(0xFFFFFFFF, p)
 	#define _syncwarp __syncwarp()
 	#define _syncwarp_fence __syncwarp()
 #endif
@@ -554,6 +556,11 @@ void leg_m_kernel(
 }
 
 
+#if LMAX >= 1000
+	#undef HI_LLIM
+	#define HI_LLIM 1
+#endif
+
 template<int S> __global__
 #ifdef __gfx90a__
 __launch_bounds__(64,1)
@@ -773,54 +780,39 @@ void ileg_m_kernel(const double* __restrict__ al, const double* __restrict__ ct,
 		if (it < nlat_2)     y0 *= ct[it + nlat_2];		// include quadrature weights.
 		y1 = (ak[1]*cost + ak[0]) * y0;
 
-		l=m;		al+=2;
-		while (l <= llim) {
+		l=m;		al+=2+LSPAN;
+		const int itl = (ll>>2)*l_inc + (j % (BLOCKSIZE/NW));		// transposed work (at given l)
+	#if HI_LLIM==1
+		static_assert(BLOCKSIZE == WARPSZE, "with HI_LLIM, block size must equal warp size");
+		#if WARPSZE == 32
+		unsigned int y_zero = _ballot(ny);
+		#else
+		unsigned long long y_zero = _ballot(ny);
+		#endif
+		if (ny) for (int k=0; k<LSPAN/2; k++)  yl[k*l_inc +j] = 0.0;
+		while (y_zero && l <= llim) {
 			if (BLOCKSIZE > WARPSZE) {	__syncthreads(); } else { _syncwarp_fence; }
-			#pragma unroll
+			#pragma unroll 4
 			for (int k=0; k<LSPAN/2; k+=2) {		// compute a block of the matrix, write it in shared mem.
 				double c0 = ak[2*k+3]*cost + ak[2*k+2];
 				double c1 = ak[2*k+5]*cost + ak[2*k+4];
-				#if HI_LLIM==1
-				if (ny < 0) {
 					if (fabs(y0) > SHT_ACCURACY*SHT_SCALE_FACTOR + 1.0)
 					{	// rescale when value is significant
 						++ny;
 						y0 *= 1.0/SHT_SCALE_FACTOR;
 						y1 *= 1.0/SHT_SCALE_FACTOR;
 					}
-				}
-				#endif
-				yl[k*l_inc +j]     = (HI_LLIM && (ny<0)) ? 0.0 : y0;		// l and l+1
-				yl[(k+1)*l_inc +j] = (HI_LLIM && (ny<0)) ? 0.0 : y1;		// l+2 and l+3
+				if (ny==0) yl[k*l_inc +j]     = y0;		// l and l+1
+				if (ny==0) yl[(k+1)*l_inc +j] = y1;		// l+2 and l+3
 				y0 += c0 * y1;
 				y1 += c1 * y0;
 			}
 
-			const int itl = (ll>>2)*l_inc + (j % (BLOCKSIZE/NW));		// transposed work (at given l)
+			y_zero = _ballot(ny);	// at this point block is in sync (consistent view of shared memory).
 
-		#if HI_LLIM==1
-			bool y_not_zero;
-			#if WARPSZE==32
-			if (BLOCKSIZE == WARPSZE) y_not_zero = _any(ny==0);	// get largest value in block/warp [warp vote is faster than shuffle on nvidia]
-			#else
-			if (BLOCKSIZE == WARPSZE) y_not_zero = (shfl(ny,WARPSZE-1)==0);	// get last value in block/warp [shuffle on amd]
-			#endif
-			else {
-				__shared__ volatile int ny_max;
-				if (j == BLOCKSIZE-1) ny_max = ny;	// one thread writes its value (the largest one);
-				__syncthreads();
-				y_not_zero = (ny_max==0);	// everyone reads that value
-			}
-		#else
-			const bool y_not_zero = true;
-			if (BLOCKSIZE > WARPSZE) {	__syncthreads(); } else { _syncwarp_fence; }
-		#endif
-			// at this point block is in sync (consistent view of shared memory).
+			if (j<LSPAN) ak[j+2] = al[j];
 
-				al += LSPAN;
-				if (j<LSPAN) ak[j+2] = al[j];
-
-			if ((!HI_LLIM) || (y_not_zero)) {		// when all y are zero, we can skip this.
+			if (y_zero + 1 != 0) {		// when all y are zero (all bits set -- independent of size), we can skip this.
 				#ifndef __gfx90a__
 				const int NACC = 2;		// number of independent accumulators (2 is the sweetspot for V100).
 				#else
@@ -864,8 +856,77 @@ void ileg_m_kernel(const double* __restrict__ al, const double* __restrict__ ct,
 			}
 
 			l+=LSPAN;
+			al += LSPAN;
 		}
+	#endif
+
+		while (l <= llim) {
+			if (BLOCKSIZE > WARPSZE) {	__syncthreads(); } else { _syncwarp_fence; }
+			#pragma unroll 4
+			for (int k=0; k<LSPAN/2; k+=2) {		// compute a block of the matrix, write it in shared mem.
+				double c0 = ak[2*k+3]*cost + ak[2*k+2];
+				double c1 = ak[2*k+5]*cost + ak[2*k+4];
+				yl[k*l_inc +j]     = y0;		// l and l+1
+				yl[(k+1)*l_inc +j] = y1;		// l+2 and l+3
+				y0 += c0 * y1;
+				y1 += c1 * y0;
+			}
+
+			if (BLOCKSIZE > WARPSZE) {	__syncthreads(); } else { _syncwarp_fence; }
+			// at this point block is in sync (consistent view of shared memory).
+				#if WARPSZE==64
+				if (j<LSPAN) ak[j+2] = al[j];	// on AMD, loading after this point kills performance
+				#endif
+
+				#ifndef __gfx90a__
+				const int NACC = 2;		// number of independent accumulators (2 is the sweetspot for V100).
+				#else
+				const int NACC = 4;		// number of independent accumulators (4 is the sweetspot for MI200 / CDNA2).
+				#endif
+				double qlri[NACC];		// accumulators
+
+				#pragma unroll
+				for (int a=0; a<NACC; a++) {	// NACC independent accumulators
+					qlri[a]   = my_reo[a]   * yl[itl + a*(BLOCKSIZE/NW)];
+				}
+				const int ql_ofs = 2*l+ll + (b*NFIELDS+f0)*ql_dist;		// compute destination ofset in parallel with reduce!
+				#pragma unroll
+				for (int k=NACC; k<NW; k+=NACC) {		// accumulate in NACC separate accumulators
+					#pragma unroll
+					for (int a=0; a<NACC; a++) {	// NACC independent accumulators
+						qlri[a]   += my_reo[k+a]   * yl[itl + (k+a)*(BLOCKSIZE/NW)];
+					}
+				}
+
+				#if WARPSZE==32
+				if (j<LSPAN) ak[j+2] = al[j];	// on nvidia, loading after accumulation is more efficient
+				#endif
+				if (NACC>1) {	// reduce the NACC independent accumulators
+					#pragma unroll
+					for (int a=0; a<NACC; a+=2) 	qlri[a] += qlri[a+1];
+					#pragma unroll
+					for (int a=2; a<NACC; a+=2) 	qlri[0] += qlri[a];
+				}
+
+				static_assert(BLOCKSIZE/NW <= WARPSZE, "Blocksize must not exceed 2*LSPAN*WARPSZE");
+					// reduce_add within same l is in same warp too:
+					#pragma unroll
+					for (int ofs = BLOCKSIZE/(NW*2); ofs > 0; ofs>>=1) {
+						qlri[0] += shfl_down(qlri[0], ofs, BLOCKSIZE/NW);
+					}
+					if ( ((j % (BLOCKSIZE/NW)) == 0) && ((l+(ll>>1))<=llim) ) {	// write result
+						#if NLAT_2 <= BLKSZE_A
+							// no atomicAdd needed if (nlat_2 <= BLOCKSIZE), which can be decided before compilation
+							ql[ql_ofs]   = qlri[0];
+						#else
+							atomicAdd_sht(ql+ql_ofs, qlri[0]);
+						#endif
+					}
+
+			l+=LSPAN;
+			al += LSPAN;
+		}
+
 	}
   #endif
 }
-
