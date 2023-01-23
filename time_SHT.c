@@ -958,6 +958,48 @@ int main(int argc, char *argv[])
 		}
 	}
 
+	{	// test forward and backward separately:
+		const double a00 = sh00_1(shtns);
+		const double a10 = sh10_ct(shtns);
+		const cplx a11 = (MRES==1 && MMAX>0) ? sh11_st(shtns)*(cos(M_PI/12)+I*sin(M_PI/12)) : 0.0;	// with a phase shift.
+
+		for (int ip=0; ip<NPHI; ip++) {
+			double y11 = (MRES==1 && MMAX>0) ? cos(ip*2.*M_PI/NPHI + M_PI/12.) : 0;		// cos(phi + pi/12)
+			for (int it=0;it<NLAT; it++)	Sh[ip*shtns->nlat_padded + it] = 1.0 + shtns->ct[it] + y11*shtns->st[it];
+		}
+		spat_to_SH(shtns, Sh, Slm);
+		double err = 0.0;
+		int lm_max = -1;
+		for (int lm=0; lm<NLM; lm++) {
+			double t = cabs(Slm[lm]);
+			if (lm==LiM(shtns,1,1)) {	t = cabs(Slm[lm] - a11);	if (t>1e-12) printf(COLOR_ERR "l=1,m=1 error = %g" COLOR_END "\n", t);  }
+			if (lm==0) {  t = cabs(Slm[lm] - a00);	if (t>1e-12) printf(COLOR_ERR "l=0,m=0 error = %g" COLOR_END "\n", t);  }
+			if (lm==1) {  t = cabs(Slm[lm] - a10);	if (t>1e-12) printf(COLOR_ERR "l=1,m=0 error = %g" COLOR_END "\n", t);  }
+			if (err < t) {	err = t;	lm_max = lm;  }
+		}
+		printf("** Test forward transform (analysis) spat_to_SH() :: max err = %g   at lm=%d   ", err, lm_max);
+		if (err > 1e-12) {		printf(COLOR_ERR "**** ERROR ****" COLOR_END "\n");	error++;	}
+		else printf(COLOR_OK "OK" COLOR_END "\n");
+		//write_vect("spec_analys_test.txt", (double*) Slm, 2*NLM);
+
+		for (int lm=0; lm<NLM; lm++)	Slm[lm] = 0.0;
+		Slm[0] = a00;
+		Slm[1] = a10;
+		if (MRES==1 && MMAX>0) Slm[LiM(shtns,1,1)] = a11;
+		SH_to_spat(shtns, Slm, Sh);
+		err = 0.0;
+		for (int ip=0; ip<NPHI; ip++) {
+			double y11 = (MRES==1 && MMAX>0) ? cos(ip*2.*M_PI/NPHI + M_PI/12.) : 0;		// cos(phi + pi/12)
+			for (int it=0;it<NLAT; it++) {
+				double t = fabs(Sh[ip*shtns->nlat_padded + it] - (1.0 + shtns->ct[it] + y11*shtns->st[it]));
+				if (err < t) err = t;
+			}
+		}
+		printf("** Test backward transform (synthesis) SH_to_spat() :: max err = %g   ", err);
+		if (err > 1e-12) {		printf(COLOR_ERR "**** ERROR ****" COLOR_END "\n");	error++;	}
+		else printf(COLOR_OK "OK" COLOR_END "\n");
+	}
+
 	{	// test Legendre only:
 		const int im = (MMAX > 0) ? 1 : 0;
 		if (im == 0) {
@@ -1002,48 +1044,6 @@ int main(int argc, char *argv[])
 			if (sqrt(err_v) > 1e-4) {		printf(COLOR_ERR "**** ERROR ****" COLOR_END "\n");	error++;	}
 			else printf(COLOR_OK "OK" COLOR_END "\n");
 		}
-	}
-
-	{	// test forward and backward separately:
-		const double a00 = sh00_1(shtns);
-		const double a10 = sh10_ct(shtns);
-		const cplx a11 = (MRES==1 && MMAX>0) ? sh11_st(shtns)*(cos(M_PI/12)+I*sin(M_PI/12)) : 0.0;	// with a phase shift.
-
-		for (int ip=0; ip<NPHI; ip++) {
-			double y11 = (MRES==1 && MMAX>0) ? cos(ip*2.*M_PI/NPHI + M_PI/12.) : 0;		// cos(phi + pi/12)
-			for (int it=0;it<NLAT; it++)	Sh[ip*shtns->nlat_padded + it] = 1.0 + shtns->ct[it] + y11*shtns->st[it];
-		}
-		spat_to_SH(shtns, Sh, Slm);
-		double err = 0.0;
-		int lm_max = -1;
-		for (int lm=0; lm<NLM; lm++) {
-			double t = cabs(Slm[lm]);
-			if (lm==LiM(shtns,1,1)) {	t = cabs(Slm[lm] - a11);	if (t>1e-12) printf(COLOR_ERR "l=1,m=1 error = %g" COLOR_END "\n", t);  }
-			if (lm==0) {  t = cabs(Slm[lm] - a00);	if (t>1e-12) printf(COLOR_ERR "l=0,m=0 error = %g" COLOR_END "\n", t);  }
-			if (lm==1) {  t = cabs(Slm[lm] - a10);	if (t>1e-12) printf(COLOR_ERR "l=1,m=0 error = %g" COLOR_END "\n", t);  }
-			if (err < t) {	err = t;	lm_max = lm;  }
-		}
-		printf("** Test forward transform (analysis) spat_to_SH() :: max err = %g   at lm=%d   ", err, lm_max);
-		if (err > 1e-12) {		printf(COLOR_ERR "**** ERROR ****" COLOR_END "\n");	error++;	}
-		else printf(COLOR_OK "OK" COLOR_END "\n");
-		//write_vect("spec_analys_test.txt", (double*) Slm, 2*NLM);
-
-		for (int lm=0; lm<NLM; lm++)	Slm[lm] = 0.0;
-		Slm[0] = a00;
-		Slm[1] = a10;
-		if (MRES==1 && MMAX>0) Slm[LiM(shtns,1,1)] = a11;
-		SH_to_spat(shtns, Slm, Sh);
-		err = 0.0;
-		for (int ip=0; ip<NPHI; ip++) {
-			double y11 = (MRES==1 && MMAX>0) ? cos(ip*2.*M_PI/NPHI + M_PI/12.) : 0;		// cos(phi + pi/12)
-			for (int it=0;it<NLAT; it++) {
-				double t = fabs(Sh[ip*shtns->nlat_padded + it] - (1.0 + shtns->ct[it] + y11*shtns->st[it]));
-				if (err < t) err = t;
-			}
-		}
-		printf("** Test backward transform (synthesis) SH_to_spat() :: max err = %g   ", err);
-		if (err > 1e-12) {		printf(COLOR_ERR "**** ERROR ****" COLOR_END "\n");	error++;	}
-		else printf(COLOR_OK "OK" COLOR_END "\n");
 	}
 
 	shtns_create(LMAX, MMAX, MRES, shtnorm);		// test memory allocation and management.
