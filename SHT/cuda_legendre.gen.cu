@@ -57,6 +57,131 @@
 	#define _syncwarp_fence __syncwarp()
 #endif
 
+#if defined(__gfx908__) || defined(__gfx90a__)
+// better shfl_xor operating on 32bit registers only
+template <unsigned XOR_MASK>
+inline __device__ int shfl_xor_b32(int v)
+{
+	if (XOR_MASK==0) return v;
+	else if (XOR_MASK<4) {
+		return __builtin_amdgcn_mov_dpp(v, (0^XOR_MASK) | ((1^XOR_MASK)<<2) | ((2^XOR_MASK)<<4) | ((3^XOR_MASK)<<6),
+			0xF, 0xF, 1);
+	} else if (XOR_MASK==0x8) {
+		return __builtin_amdgcn_mov_dpp(v, 0x128, 0xF, 0xF, 1);		// row rotate right by 8 threads within row (group of 16)
+	} else if (XOR_MASK==0xF) {
+		return __builtin_amdgcn_mov_dpp(v, 0x140, 0xF, 0xF, 1);		// reverse within row (group of 16)
+	} else if (XOR_MASK==0x7) {
+		return __builtin_amdgcn_mov_dpp(v, 0x141, 0xF, 0xF, 1);		// reverse within half-row (group of 8)
+	} else if (XOR_MASK<32) {
+		// ds_swizzle_b32: xor_mask is encoded into instruction, saves instructions compared to next case
+		return __builtin_amdgcn_ds_swizzle(v, (XOR_MASK << 10) | 31);
+	} else
+		return __builtin_amdgcn_ds_bpermute((threadIdx.x ^ XOR_MASK)*4, v);
+	//	return __shfl_xor(v,XOR_MASK);		// emit ds_bpermute_b32, with lots of instructions to compute lanes.
+}
+
+// better broadcast operating on 32bit registers only. NGROUP must be a power of 2.
+template <unsigned LANE_ID, unsigned NGROUP=64>
+inline __device__ int broadcast_b32(int v)
+{
+	static_assert(LANE_ID < NGROUP, "LANE_ID must be less than NGROUP.");
+	if (NGROUP==1) return v;
+	else if (NGROUP<=4) {		// NGROUP==2 or 4
+		return __builtin_amdgcn_mov_dpp(v, (LANE_ID) | ((LANE_ID)<<2) | ((LANE_ID+4-NGROUP)<<4) | ((LANE_ID+4-NGROUP)<<6),
+			0xF, 0xF, 1);
+#ifdef __gfx90a__
+	} else if (NGROUP==16) {
+		return __builtin_amdgcn_mov_dpp(v, 0x150 + LANE_ID, 0xF, 0xF, 1);		// broadcast within row (group of 16), only for MI200
+#endif
+	} else if (NGROUP<=32) {
+		// ds_swizzle_b32: broadcast lane encoded into instruction, saves instructions compared to next case
+		return __builtin_amdgcn_ds_swizzle(v, (LANE_ID << 5) | (32-NGROUP));
+	} else if (NGROUP==64) {
+		//return __builtin_amdgcn_readlane(v, LANE_ID);
+		return __builtin_amdgcn_ds_bpermute(LANE_ID*4, v);
+	} else
+		return __shfl(v,LANE_ID, NGROUP);		// emit ds_bpermute_b32, good for broadcast
+}
+
+// better shfl_down operating on 32bit registers only. NGROUP must be a power of 2.
+// WARNING: threads that read out of bounds (group) are undefined (NOT like nvidia cuda __shfl_down which specifies that those lanes are unchanged)
+template <unsigned NSHIFT, unsigned NGROUP=64>
+inline __device__ int shfl_down_b32(int v)
+{
+	static_assert(NSHIFT < NGROUP, "NSHIFT must be less than NGROUP.");
+	if ((NGROUP==1) || (NSHIFT==0)) return v;
+	else if (NGROUP<=4) {
+		return __builtin_amdgcn_mov_dpp(v, NSHIFT | (((NSHIFT<3) ? 1+NSHIFT : 1) <<2) | (3<<4) | (3<<6),
+			0xF, 0xF, 1);
+	} else if (NGROUP<=16) {	// shift crosses group boundary for NGROUP==8
+		return __builtin_amdgcn_mov_dpp(v, 0x100 | NSHIFT, 0xF, 0xF, 0);
+	} else if ((NGROUP<=64) && (NSHIFT==1)) {
+		return __builtin_amdgcn_mov_dpp(v, 0x130, 0xF, 0xF, 0);		// shift crosses group boundary for NGROUP<64
+	} else if (NGROUP==32) {
+		// ds_swizzle_b32 in rotate mode: upper lanes are filled with lower lanes
+		return __builtin_amdgcn_ds_swizzle(v, 0xC000 | (NSHIFT << 5));
+	} else
+		return __builtin_amdgcn_ds_bpermute((threadIdx.x + NSHIFT)*4, v);	// rotate: fill upper lanes with lower ones
+	//return __shfl_down(v,NSHIFT,NGROUP);		// emit ds_bpermute_b32, with lots of instructions to compute lanes exactly as cuda __shfl_down() does.
+}
+
+template <unsigned XOR_MASK>
+inline __device__ double shfl_xor_(double v) {
+	union {double d; int i[2];};		// allow access to the 2 words forming the double separately
+	d = v;
+	i[0] = shfl_xor_b32<XOR_MASK>(i[0]);		// shuffle
+	i[1] = shfl_xor_b32<XOR_MASK>(i[1]);		// shuffle
+	return d;
+}
+template <unsigned XOR_MASK>
+inline __device__ float shfl_xor_(float v) {
+	return __int_as_float( shfl_xor_b32<XOR_MASK>( __float_as_int(v) ) );
+}
+template <unsigned XOR_MASK>
+inline __device__ int shfl_xor_(int v) {
+	return shfl_xor_b32<XOR_MASK>(v);
+}
+
+template <unsigned NSHIFT, unsigned NGROUP=64>
+inline __device__ float shfl_down_(float v) {
+	return __int_as_float( shfl_down_b32<NSHIFT, NGROUP>( __float_as_int(v) ) );
+}
+template <unsigned NSHIFT, unsigned NGROUP=64>
+inline __device__ int shfl_down_(int v) {
+	return shfl_down_b32<NSHIFT, NGROUP>( v );
+}
+template <unsigned NSHIFT, unsigned NGROUP=64>
+inline __device__ double shfl_down_(double v)
+{
+	union {double d; int i[2];};		// allow access to the 2 words forming the double separately
+	d = v;
+	i[0] = shfl_down_b32<NSHIFT, NGROUP>(i[0]);		// shuflle first half
+	i[1] = shfl_down_b32<NSHIFT, NGROUP>(i[1]);		// and second half
+	return d;
+}
+
+template <unsigned LANE_ID, unsigned NGROUP=64>
+inline __device__ int bcast_(int v) {
+	return broadcast_b32<LANE_ID, NGROUP>(v);
+}
+template <unsigned LANE_ID, unsigned NGROUP=64, class T>
+inline __device__ T bcast_(T v) {
+	const int NINT = (sizeof(T)+3)/4;
+	union {T d; int i[NINT];};
+	d = v;
+	for (int k=0; k<NINT; k++)
+		i[k] = broadcast_b32<LANE_ID, NGROUP>(i[k]);		// shuflle
+	return d;
+}
+
+#undef shfl_xor
+#define shfl_xor(v,xor_mask) shfl_xor_<xor_mask>(v)
+#undef shfl
+#define shfl(v,lane) bcast_<lane>(v)
+#undef shfl_down
+#define shfl_down(v,shift,group) shfl_down_<shift,group>(v)
+#endif
+
 #ifdef __gfx90a__
 	#define atomicAdd_sht unsafeAtomicAdd
 #else	/* NOT __gfx90a__ */
@@ -1051,12 +1176,13 @@ void ileg_m_kernel(const real_g* __restrict__ al, const real_g* __restrict__ ct,
 				}
 			}
 
-			static_assert(BLOCKSIZE/NW <= WARPSZE, "Block size must not exceed LSPAN*NFIELDS*WARPSZE");
+			static_assert(BLOCKSIZE/NW <= 16, "Block size must not exceed 16*NW");
 			// reduce_add within same l is in same warp too:
-				#pragma unroll
-				for (int ofs = BLOCKSIZE/(NW*2); ofs > 0; ofs>>=1) {
-					qll[0] += shfl_down(qll[0], ofs, BLOCKSIZE/NW);
-				}
+				if (BLOCKSIZE/NW > 8) qll[0] += shfl_down(qll[0], 8, 16);
+				if (BLOCKSIZE/NW > 4) qll[0] += shfl_down(qll[0], 4, 8);
+				if (BLOCKSIZE/NW > 2) qll[0] += shfl_down(qll[0], 2, 4);
+				if (BLOCKSIZE/NW > 1) qll[0] += shfl_down(qll[0], 1, 2);
+
 				if ( ((j % (BLOCKSIZE/NW)) == 0) && ((l+ll)<=llim) ) {	// write result
 					#if NLAT_2 <= BLKSZE_A
 						// no atomicAdd needed if (nlat_2 <= BLOCKSIZE), which can be decided before compilation
@@ -1289,12 +1415,11 @@ void ileg_m_kernel(const real_g* __restrict__ al, const real_g* __restrict__ ct,
 					for (int a=2; a<NACC; a+=2) 	qlri[0] += qlri[a];
 				}
 
-				static_assert(BLOCKSIZE/NW <= WARPSZE, "Blocksize must not exceed 2*LSPAN*WARPSZE");
+				static_assert(BLOCKSIZE/NW <= 8, "Blocksize must not exceed 8*NW");
 					// reduce_add within same l is in same warp too:
-					#pragma unroll
-					for (int ofs = BLOCKSIZE/(NW*2); ofs > 0; ofs>>=1) {
-						qlri[0] += shfl_down(qlri[0], ofs, BLOCKSIZE/NW);
-					}
+					if (BLOCKSIZE/NW > 4) qlri[0] += shfl_down(qlri[0], 4, 8);
+					if (BLOCKSIZE/NW > 2) qlri[0] += shfl_down(qlri[0], 2, 4);
+					if (BLOCKSIZE/NW > 1) qlri[0] += shfl_down(qlri[0], 1, 2);
 					if ( ((j % (BLOCKSIZE/NW)) == 0) && ((l+(ll>>1))<=llim) ) {	// write result
 						#if NLAT_2 <= BLKSZE_A
 							// no atomicAdd needed if (nlat_2 <= BLOCKSIZE), which can be decided before compilation
@@ -1370,12 +1495,12 @@ void ileg_m_kernel(const real_g* __restrict__ al, const real_g* __restrict__ ct,
 					for (int a=2; a<NACC; a+=2) 	qlri[0] += qlri[a];
 				}
 
-				static_assert(BLOCKSIZE/NW <= WARPSZE, "Blocksize must not exceed 2*LSPAN*WARPSZE");
+				static_assert(BLOCKSIZE/NW <= 8, "Blocksize must not exceed 8*NW");
 					// reduce_add within same l is in same warp too:
-					#pragma unroll
-					for (int ofs = BLOCKSIZE/(NW*2); ofs > 0; ofs>>=1) {
-						qlri[0] += shfl_down(qlri[0], ofs, BLOCKSIZE/NW);
-					}
+					if (BLOCKSIZE/NW > 4) qlri[0] += shfl_down(qlri[0], 4, 8);
+					if (BLOCKSIZE/NW > 2) qlri[0] += shfl_down(qlri[0], 2, 4);
+					if (BLOCKSIZE/NW > 1) qlri[0] += shfl_down(qlri[0], 1, 2);
+
 					if ( ((j % (BLOCKSIZE/NW)) == 0) && ((l+(ll>>1))<=llim) ) {	// write result
 						#if NLAT_2 * NF_A <= 512  &&  !defined( ILEG_ISHIOKA )
 							//if (S==0)	qlri[0] *= xlm[ofs_to_be_determined + l+(ll>>1)];	// this can be done here without the need for another kernel... maybe ?
