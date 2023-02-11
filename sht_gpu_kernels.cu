@@ -686,7 +686,7 @@ void ishioka2sh_gpu(shtns_cfg shtns, cplx* d_Qlm_ish, cplx* d_Qlm, int llim, int
 		(shtns->d_xlm, (double*) d_Qlm_ish, (double*) d_Qlm, llim, shtns->lmax, mmax, shtns->mres, S, shtns->nlm_stride, shtns->spec_dist*2);
 #else
 	int blksze, blksze_z, nblk_z;
-	const int nelem_max = (llim+1+S)*2;
+	const int nelem_max = (shtns->lmax+1+S)*2;
 	int nfields = shtns->howmany;
 	if (shtns->nlm > 256*1024 || nfields <= 5) {	// enough work to saturate the GPU with 1 z-block, or only few fields
 		set_block_size_ish( nelem_max, 1, blksze, blksze_z, nblk_z);
