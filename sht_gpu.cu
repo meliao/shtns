@@ -276,7 +276,8 @@ int init_cuda_program(shtns_cfg shtns, const char* gpu_arch_target)
 	const bool gfx90a = (strcmp(gpu_arch_target,"gfx90a") >= 0);	// MI200+
 	if (shtns->howmany % 2 == 0) {	nf_a=2;		nf_s=2; }
 	if (gfx90a) {	// MI200+
-		nw_s=4;		lspan_a = 32;
+		nw_s=4;
+		lspan_a = (nf_a > 1) ? 32 : 16;		// 16 for nf_a=1
 		if (hi_llim  &&  nf_s==1  &&  shtns->howmany % 3 == 0)	nf_s=3;
 		if (shtns->howmany % 4 == 0) { nf_a=4;		if (hi_llim) { nf_s=4;	nw_s=2; } }
 	} else {	// assume MI100
