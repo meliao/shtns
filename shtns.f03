@@ -44,7 +44,7 @@
     
     subroutine shtns_print_cfg(shtns) bind(C, name='shtns_print_cfg')
       import
-      type(C_PTR) :: shtns
+      type(C_PTR), value :: shtns
     end subroutine shtns_print_cfg
     
     type(C_PTR) function shtns_init(flags,lmax,mmax,mres,nlat,nphi) bind(C, name='shtns_init')
