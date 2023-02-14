@@ -1588,6 +1588,9 @@ shtns_cfg shtns_init(enum shtns_type flags, int lmax, int mmax, int mres, int nl
 /// set the use of Robert form. If robert != 0, the vector synthesis returns a field multiplied by sin(theta), while the analysis divides by sin(theta) before the transform.
 void shtns_robert_form(shtns_cfg shtns, int robert)
 {
+	#ifdef SHTNS_GPU
+	if (robert != shtns->robert_form  &&  shtns->d_alm) shtns_runerr("[shtns_robert_form] ERROR: must be called before shtns_set_grid!");
+	#endif
 	shtns->robert_form = robert;
 }
 
