@@ -1371,6 +1371,7 @@ int shtns_set_grid_auto(shtns_cfg shtns, enum shtns_type flags, double eps, int 
 		case sht_reg_poles : quick_init = 1;	break;		// WARNING: quick_init mandatory here, as reg_poles needs NWAY>1 to work (quick_init sets NWAY=2)
 		default : break;
 	}
+	if (layout & SHT_ROBERT_FORM) shtns->robert_form = 1;	// set Robert form
 	#ifdef SHTNS4MAGIC
 		if (flags == sht_reg_poles) shtns_runerr("Grid cannot include poles with MagIC layout.");
 	#endif

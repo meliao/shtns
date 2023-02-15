@@ -5,11 +5,12 @@
   integer(C_INT), parameter :: SHT_PHI_CONTIGUOUS=512
   integer(C_INT), parameter :: SHT_NO_CS_PHASE=1024
   integer(C_INT), parameter :: SHT_REAL_NORM=2048
-  integer(C_INT), parameter :: SHT_SOUTH_POLE_FIRST=8192
   integer(C_INT), parameter :: SHT_SCALAR_ONLY=4096
+  integer(C_INT), parameter :: SHT_SOUTH_POLE_FIRST=8192
   integer(C_INT), parameter :: SHT_LOAD_SAVE_CFG=16384
   integer(C_INT), parameter :: SHT_ALLOW_GPU=32768
   integer(C_INT), parameter :: SHT_ALLOW_PADDING=65536
+  integer(C_INT), parameter :: SHT_ROBERT_FORM=131072
 
   enum, bind(C)
     enumerator :: SHT_GAUSS=0, SHT_AUTO=1, SHT_REG_FAST=2

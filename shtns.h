@@ -35,7 +35,7 @@ extern "C" {
 
 /// SHTns interface version (loosely follow versions) allowing simple version checks: (major << 16) | (minor << 8) | patchlevel
 /// should be increased at least each time this file changes.
-#define SHTNS_INTERFACE 0x30500
+#define SHTNS_INTERFACE 0x30503
 
 /// pointer to data structure describing an SHT, returned by shtns_init() or shtns_create().
 typedef struct shtns_info* shtns_cfg;
@@ -73,6 +73,7 @@ enum shtns_type {
 #define SHT_LOAD_SAVE_CFG (256*64)	///< try to load and save the config. (add to flags in shtns_set_grid)
 #define SHT_ALLOW_GPU (256*128)		///< allows to use a GPU. This needs special care because the same plan cannot be used simultaneously by different threads anymore.
 #define SHT_ALLOW_PADDING (256*256)	///< allows SHTns to add extra space between lines of the spatial array to avoid cache bank conflicts.
+#define SHT_ROBERT_FORM (256*512)	///< use Robert form for vector transforms. See also \ref shtns_robert_form
 
 
 #ifndef SHTNS_PRIVATE
