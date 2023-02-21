@@ -4656,101 +4656,10 @@ else $as_nop
   as_fn_error $? "hip library not found. Try adding LDFLAGS=\"-L$ROCM_PATH/lib\"" "$LINENO" 5
 fi
 
-	{ printf "%s\n" "$as_me:${as_lineno-$LINENO}: checking for hipfftCreate in -lhipfft" >&5
-printf %s "checking for hipfftCreate in -lhipfft... " >&6; }
-if test ${ac_cv_lib_hipfft_hipfftCreate+y}
-then :
-  printf %s "(cached) " >&6
-else $as_nop
-  ac_check_lib_save_LIBS=$LIBS
-LIBS="-lhipfft  $LIBS"
-cat confdefs.h - <<_ACEOF >conftest.$ac_ext
-/* end confdefs.h.  */
+			objs="$objs sht_gpu.o"
 
-/* Override any GCC internal prototype to avoid an error.
-   Use char because int might match the return type of a GCC
-   builtin and then its argument prototype would still apply.  */
-char hipfftCreate ();
-int
-main (void)
-{
-return hipfftCreate ();
-  ;
-  return 0;
-}
-_ACEOF
-if ac_fn_c_try_link "$LINENO"
-then :
-  ac_cv_lib_hipfft_hipfftCreate=yes
-else $as_nop
-  ac_cv_lib_hipfft_hipfftCreate=no
-fi
-rm -f core conftest.err conftest.$ac_objext conftest.beam \
-    conftest$ac_exeext conftest.$ac_ext
-LIBS=$ac_check_lib_save_LIBS
-fi
-{ printf "%s\n" "$as_me:${as_lineno-$LINENO}: result: $ac_cv_lib_hipfft_hipfftCreate" >&5
-printf "%s\n" "$ac_cv_lib_hipfft_hipfftCreate" >&6; }
-if test "x$ac_cv_lib_hipfft_hipfftCreate" = xyes
-then :
-  printf "%s\n" "#define HAVE_LIBHIPFFT 1" >>confdefs.h
-
-  LIBS="-lhipfft $LIBS"
-
-else $as_nop
-  { printf "%s\n" "$as_me:${as_lineno-$LINENO}: hipftt library not found." >&5
-printf "%s\n" "$as_me: hipftt library not found." >&6;}
-fi
-
-	{ printf "%s\n" "$as_me:${as_lineno-$LINENO}: checking for rocfft_execute in -lrocfft" >&5
-printf %s "checking for rocfft_execute in -lrocfft... " >&6; }
-if test ${ac_cv_lib_rocfft_rocfft_execute+y}
-then :
-  printf %s "(cached) " >&6
-else $as_nop
-  ac_check_lib_save_LIBS=$LIBS
-LIBS="-lrocfft  $LIBS"
-cat confdefs.h - <<_ACEOF >conftest.$ac_ext
-/* end confdefs.h.  */
-
-/* Override any GCC internal prototype to avoid an error.
-   Use char because int might match the return type of a GCC
-   builtin and then its argument prototype would still apply.  */
-char rocfft_execute ();
-int
-main (void)
-{
-return rocfft_execute ();
-  ;
-  return 0;
-}
-_ACEOF
-if ac_fn_c_try_link "$LINENO"
-then :
-  ac_cv_lib_rocfft_rocfft_execute=yes
-else $as_nop
-  ac_cv_lib_rocfft_rocfft_execute=no
-fi
-rm -f core conftest.err conftest.$ac_objext conftest.beam \
-    conftest$ac_exeext conftest.$ac_ext
-LIBS=$ac_check_lib_save_LIBS
-fi
-{ printf "%s\n" "$as_me:${as_lineno-$LINENO}: result: $ac_cv_lib_rocfft_rocfft_execute" >&5
-printf "%s\n" "$ac_cv_lib_rocfft_rocfft_execute" >&6; }
-if test "x$ac_cv_lib_rocfft_rocfft_execute" = xyes
-then :
-  printf "%s\n" "#define HAVE_LIBROCFFT 1" >>confdefs.h
-
-  LIBS="-lrocfft $LIBS"
-
-else $as_nop
-  { printf "%s\n" "$as_me:${as_lineno-$LINENO}: rocfft library not found." >&5
-printf "%s\n" "$as_me: rocfft library not found." >&6;}
-fi
-
-	objs="$objs sht_gpu.o"
-
-	gpu_compile="hipcc -std=c++11 -O3 --rocm-path=$ROCM_PATH"
+	gpu_compile="hipcc -std=c++11 -O3 --rocm-path=$ROCM_PATH -D__HIP_PLATFORM_AMD__"
+	#gpu_compile="amdclang -mllvm -amdgpu-early-inline-all=true -mllvm -amdgpu-function-calls=false -std=c++11 -O3 --rocm-path=$ROCM_PATH -D__HIP_PLATFORM_AMD__ -x hip"
 	if test "x$enable_hip" == "xyes"
 then :
 
@@ -4815,7 +4724,7 @@ then :
 	CFLAGS="$CFLAGS -I$CUDA_PATH/include"
 	CFLAGS2="$CFLAGS2 -I$CUDA_PATH/include"
 	# assume 64 bit mode, add default directory to find CUDA
-	LDFLAGS="$LDFLAGS -L$CUDA_PATH/lib64"
+	LDFLAGS="$LDFLAGS -L$CUDA_PATH/lib64 -L$CUDA_PATH/lib64/stubs"
 	echo $LDFLAGS
 	{ printf "%s\n" "$as_me:${as_lineno-$LINENO}: checking for cudaMalloc in -lcudart" >&5
 printf %s "checking for cudaMalloc in -lcudart... " >&6; }
@@ -4862,53 +4771,7 @@ else $as_nop
   as_fn_error $? "cudart library not found. Try adding LDFLAGS=\"-L/usr/local/cuda/lib64\"" "$LINENO" 5
 fi
 
-	{ printf "%s\n" "$as_me:${as_lineno-$LINENO}: checking for cufftPlanMany in -lcufft" >&5
-printf %s "checking for cufftPlanMany in -lcufft... " >&6; }
-if test ${ac_cv_lib_cufft_cufftPlanMany+y}
-then :
-  printf %s "(cached) " >&6
-else $as_nop
-  ac_check_lib_save_LIBS=$LIBS
-LIBS="-lcufft  $LIBS"
-cat confdefs.h - <<_ACEOF >conftest.$ac_ext
-/* end confdefs.h.  */
-
-/* Override any GCC internal prototype to avoid an error.
-   Use char because int might match the return type of a GCC
-   builtin and then its argument prototype would still apply.  */
-char cufftPlanMany ();
-int
-main (void)
-{
-return cufftPlanMany ();
-  ;
-  return 0;
-}
-_ACEOF
-if ac_fn_c_try_link "$LINENO"
-then :
-  ac_cv_lib_cufft_cufftPlanMany=yes
-else $as_nop
-  ac_cv_lib_cufft_cufftPlanMany=no
-fi
-rm -f core conftest.err conftest.$ac_objext conftest.beam \
-    conftest$ac_exeext conftest.$ac_ext
-LIBS=$ac_check_lib_save_LIBS
-fi
-{ printf "%s\n" "$as_me:${as_lineno-$LINENO}: result: $ac_cv_lib_cufft_cufftPlanMany" >&5
-printf "%s\n" "$ac_cv_lib_cufft_cufftPlanMany" >&6; }
-if test "x$ac_cv_lib_cufft_cufftPlanMany" = xyes
-then :
-  printf "%s\n" "#define HAVE_LIBCUFFT 1" >>confdefs.h
-
-  LIBS="-lcufft $LIBS"
-
-else $as_nop
-  { printf "%s\n" "$as_me:${as_lineno-$LINENO}: cufft library not found." >&5
-printf "%s\n" "$as_me: cufft library not found." >&6;}
-fi
-
-	{ printf "%s\n" "$as_me:${as_lineno-$LINENO}: checking for nvrtcGetPTX in -lnvrtc" >&5
+		{ printf "%s\n" "$as_me:${as_lineno-$LINENO}: checking for nvrtcGetPTX in -lnvrtc" >&5
 printf %s "checking for nvrtcGetPTX in -lnvrtc... " >&6; }
 if test ${ac_cv_lib_nvrtc_nvrtcGetPTX+y}
 then :
@@ -4995,7 +4858,7 @@ then :
   LIBS="-lcuda $LIBS"
 
 else $as_nop
-  as_fn_error $? "cufft library not found. Try adding LDFLAGS=\"-L/usr/local/cuda/lib64\"" "$LINENO" 5
+  as_fn_error $? "cuda library not found. Try adding LDFLAGS=\"-L/usr/local/cuda/lib64\"" "$LINENO" 5
 fi
 
 	objs="$objs sht_gpu.o"

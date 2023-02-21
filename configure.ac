@@ -195,11 +195,12 @@ AS_IF([test "x$enable_hip" != "xno"], [
 	LDFLAGS="$LDFLAGS -L${ROCM_PATH}/lib"
 	echo $LDFLAGS
 	AC_CHECK_LIB([amdhip64],[hipMalloc],,AC_MSG_ERROR([hip library not found. Try adding LDFLAGS="-L$ROCM_PATH/lib"]))
-	AC_CHECK_LIB([hipfft],[hipfftCreate],,AC_MSG_NOTICE([hipftt library not found.]))
-	AC_CHECK_LIB([rocfft],[rocfft_execute],,AC_MSG_NOTICE([rocfft library not found.]))
+	dnl AC_CHECK_LIB([hipfft],[hipfftCreate],,AC_MSG_NOTICE([hipftt library not found.]))
+	dnl AC_CHECK_LIB([rocfft],[rocfft_execute],,AC_MSG_NOTICE([rocfft library not found.]))
 	objs="$objs sht_gpu.o"
 
-	gpu_compile="hipcc -std=c++11 -O3 --rocm-path=$ROCM_PATH"
+	gpu_compile="hipcc -std=c++11 -O3 --rocm-path=$ROCM_PATH -D__HIP_PLATFORM_AMD__"
+	#gpu_compile="amdclang -mllvm -amdgpu-early-inline-all=true -mllvm -amdgpu-function-calls=false -std=c++11 -O3 --rocm-path=$ROCM_PATH -D__HIP_PLATFORM_AMD__ -x hip"
 	AS_IF([test "x$enable_hip" == "xyes"],[
 	    gpu_compile="$gpu_compile --offload-arch=gfx908:xnack+ --offload-arch=gfx90a:xnack+ --offload-arch=gfx908:xnack- --offload-arch=gfx90a:xnack-"
 	],[
@@ -220,12 +221,12 @@ AS_IF([test "x$enable_cuda" != "xno"], [
 	CFLAGS="$CFLAGS -I$CUDA_PATH/include"
 	CFLAGS2="$CFLAGS2 -I$CUDA_PATH/include"
 	# assume 64 bit mode, add default directory to find CUDA
-	LDFLAGS="$LDFLAGS -L$CUDA_PATH/lib64"
+	LDFLAGS="$LDFLAGS -L$CUDA_PATH/lib64 -L$CUDA_PATH/lib64/stubs"
 	echo $LDFLAGS
 	AC_CHECK_LIB([cudart],[cudaMalloc],,AC_MSG_ERROR([cudart library not found. Try adding LDFLAGS="-L/usr/local/cuda/lib64"]))
-	AC_CHECK_LIB([cufft],[cufftPlanMany],,AC_MSG_NOTICE([cufft library not found.]))
+	dnl AC_CHECK_LIB([cufft],[cufftPlanMany],,AC_MSG_NOTICE([cufft library not found.]))
 	AC_CHECK_LIB([nvrtc],[nvrtcGetPTX],,AC_MSG_ERROR([nvrtc library not found. Try adding LDFLAGS="-L/usr/local/cuda/lib64"]))
-	AC_CHECK_LIB([cuda],[cuLaunchKernel],,AC_MSG_ERROR([cufft library not found. Try adding LDFLAGS="-L/usr/local/cuda/lib64"]))
+	AC_CHECK_LIB([cuda],[cuLaunchKernel],,AC_MSG_ERROR([cuda library not found. Try adding LDFLAGS="-L/usr/local/cuda/lib64"]))
 	objs="$objs sht_gpu.o"
 
 	nvcc_gencode_flags=""
