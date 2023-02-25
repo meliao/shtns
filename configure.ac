@@ -46,10 +46,7 @@ dnl after our eval magic below.
 AS_IF([test "$prefix" = "NONE"],[prefix=$ac_default_prefix])
 
 # Checks for programs.
-if test "x$CFLAGS" = "x"; then
-	CFLAGS="-O2"
-fi
-CFLAGS="$CFLAGS -I$prefix/include -L$prefix/lib"
+CFLAGS="-O2 $CFLAGS -I$prefix/include -L$prefix/lib"   # we need at least -O2 optimization level here, but it can be everriden by CFLAGS (gcc specifies that the last -O wins)
 FFLAGS="$CFLAGS"
 AC_PROG_CC
 AC_PROG_SED
