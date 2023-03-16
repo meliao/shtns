@@ -1,6 +1,12 @@
 SHTNS CHANGE LOG:
 -----------------
 
+* v3.5.3  (17 Mar 2023)
+    - Allow "Robert form" to be set using the new `SHT_ROBERT_FORM` flag when calling `shtns_set_grid*()`
+    - Fix minor issue in ./configure when CFLAGS is set without -O option.
+    - Fortran: fix call to `shtns_print_cfg()`.
+    - Python: enable analysis with `sht_reg_poles` grid.
+
 * v3.5.2  (20 Jun 2022)
 	- Fix major bug, leading to rare NaNs in transforms. Results were either NaN, or good.
 	- Fix intel MKL detection, wich was failing with newer gcc versions.
