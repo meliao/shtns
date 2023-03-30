@@ -4876,7 +4876,7 @@ then :
 
 	{ printf "%s\n" "$as_me:${as_lineno-$LINENO}: result: yes" >&5
 printf "%s\n" "yes" >&6; }
-	nvcc_gencode_flags="$nvcc_gencode_flags -gencode=arch=compute_30,code=sm_30"
+	nvcc_gencode_flags="$nvcc_gencode_flags -gencode=arch=compute_30,code=compute_30"
 
 else $as_nop
 
@@ -4893,7 +4893,7 @@ then :
 
 	{ printf "%s\n" "$as_me:${as_lineno-$LINENO}: result: yes" >&5
 printf "%s\n" "yes" >&6; }
-	nvcc_gencode_flags="$nvcc_gencode_flags -gencode=arch=compute_60,code=sm_60"
+	nvcc_gencode_flags="$nvcc_gencode_flags -gencode=arch=compute_60,code=compute_60"
 
 else $as_nop
 
@@ -4910,7 +4910,7 @@ then :
 
 	{ printf "%s\n" "$as_me:${as_lineno-$LINENO}: result: yes" >&5
 printf "%s\n" "yes" >&6; }
-	nvcc_gencode_flags="$nvcc_gencode_flags -gencode=arch=compute_70,code=sm_70"
+	nvcc_gencode_flags="$nvcc_gencode_flags -gencode=arch=compute_70,code=compute_70"
 
 else $as_nop
 
@@ -4927,7 +4927,7 @@ then :
 
 	{ printf "%s\n" "$as_me:${as_lineno-$LINENO}: result: yes" >&5
 printf "%s\n" "yes" >&6; }
-	nvcc_gencode_flags="$nvcc_gencode_flags -gencode=arch=compute_80,code=sm_80"
+	nvcc_gencode_flags="$nvcc_gencode_flags -gencode=arch=compute_80,code=compute_80"
 
 else $as_nop
 
@@ -4948,6 +4948,8 @@ else $as_nop
     cuda_cc=70 ;; #(
   'ampere') :
     cuda_cc=80 ;; #(
+  'hopper') :
+    cuda_cc=90 ;; #(
   *) :
     cuda_cc=$enable_cuda ;;
 esac
@@ -4959,7 +4961,7 @@ then :
 
 	{ printf "%s\n" "$as_me:${as_lineno-$LINENO}: result: yes" >&5
 printf "%s\n" "yes" >&6; }
-	nvcc_gencode_flags="$nvcc_gencode_flags -gencode=arch=compute_$cuda_cc,code=sm_$cuda_cc"
+	nvcc_gencode_flags="$nvcc_gencode_flags -gencode=arch=compute_$cuda_cc,code=compute_$cuda_cc"
 
 else $as_nop
 

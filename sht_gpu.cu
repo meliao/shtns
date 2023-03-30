@@ -383,8 +383,13 @@ int init_cuda_program(shtns_cfg shtns, const char* gpu_arch_target)
 	// Compile
 	char arch[64];
 #if WARPSZE == 32
-	snprintf(arch, 64, "-arch=%s", gpu_arch_target);		// compile for the current gpu
-	const char *opts[] = {"-std=c++11", "-ftz=true", "-lineinfo", "--ptxas-options","-v", arch};
+	#if CUDA_VERSION >= 11030
+		snprintf(arch, 64, "-arch=sm%s", gpu_arch_target);		// compile for the current gpu
+		const char *opts[] = {"-std=c++11", "-ftz=true", "-lineinfo", "--ptxas-options","-v", arch};
+	#else
+		snprintf(arch, 64, "-arch=compute%s", gpu_arch_target);		// compile for the current gpu
+		const char *opts[] = {"-std=c++11", "-ftz=true", "-lineinfo", arch};
+	#endif
 #else
 	snprintf(arch, 64, "--offload-arch=%s", gpu_arch_target);             // compile for the current gpu
 	const char *opts[] = {"-std=c++11", "-O3", arch};
@@ -491,7 +496,7 @@ int cushtns_init_gpu(shtns_cfg shtns)
 	#if SHTNS_GPU == 1
 	printf("  cuda GPU #%d \"%s\" found (warp size = %d, compute capabilities = %d.%d).\n", device_id, prop.name, prop.warpSize, prop.major, prop.minor);
 	char gpu_arch_target[16];
-	sprintf(gpu_arch_target, "sm_%d", prop.major*10 + prop.minor);		// the gpu_arch we will compile for!
+	sprintf(gpu_arch_target, "_%d", prop.major*10 + prop.minor);		// the gpu_arch we will compile for!
 	#elif SHTNS_GPU == 2
 	printf("  hip GPU #%d \"%s\" found (warp size = %d).\n", device_id, prop.gcnArchName, prop.warpSize);
 	const char* gpu_arch_target = prop.gcnArchName;

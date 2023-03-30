@@ -78,7 +78,7 @@ AC_DEFUN([AX_CHECK_CUDA_ARCH],[
   AC_MSG_CHECKING([whether nvcc supports gpu with compute capability $1])
   AS_IF([nvcc sht_gpu.cu -c -arch=sm_$1 --dryrun > /dev/null 2>&1], [
 	AC_MSG_RESULT(yes)
-	nvcc_gencode_flags="$nvcc_gencode_flags -gencode=arch=compute_$1,code=sm_$1"
+	nvcc_gencode_flags="$nvcc_gencode_flags -gencode=arch=compute_$1,code=compute_$1"
   ],[
 	AC_MSG_RESULT(no)
   ])
@@ -237,7 +237,7 @@ AS_IF([test "x$enable_cuda" != "xno"], [
 	    AX_CHECK_CUDA_ARCH([70])
 	    AX_CHECK_CUDA_ARCH([80])
 	],[
-	    AS_CASE([$enable_cuda], "kepler", [cuda_cc=30], "pascal", [cuda_cc=60], "volta", [cuda_cc=70], 'ampere', [cuda_cc=80], [cuda_cc=$enable_cuda])
+	    AS_CASE([$enable_cuda], "kepler", [cuda_cc=30], "pascal", [cuda_cc=60], "volta", [cuda_cc=70], 'ampere', [cuda_cc=80], 'hopper', [cuda_cc=90], [cuda_cc=$enable_cuda])
 	    AX_CHECK_CUDA_ARCH([$cuda_cc])
 	])
 	AS_IF([test "x$nvcc_gencode_flags" == "x"],[
