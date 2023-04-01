@@ -105,7 +105,6 @@ static void destroy_cuda_buffer_fft(shtns_cfg shtns)
 	#endif
 	if (shtns->cu_flags & CUSHT_OWN_XFER_STREAM) cudaStreamDestroy(shtns->xfer_stream);
 	if (shtns->gpu_mem) cudaFree(shtns->gpu_mem);
-	if (shtns->gpu_buf_out) cudaFree(shtns->gpu_buf_out);
 	if (shtns->gpu_buf_in) cudaFree(shtns->gpu_buf_in);
 	if (shtns->xfft_cpu) shtns_free(shtns->xfft_cpu);
 }
@@ -211,12 +210,10 @@ static int init_cuda_buffer_fft(shtns_cfg shtns)
 	}
 	err = cudaMalloc( (void **)&shtns->gpu_buf_in,  sze*sizeof(double) * howmany );
 	if (err != cudaSuccess)	{	err_count++;	CUDA_ERROR_CHECK;  }
-	err = cudaMalloc( (void **)&shtns->gpu_buf_out, 2*dual_stride*sizeof(double) );		// 2 spatial -OR- 2 spectral
-	if (err != cudaSuccess)	{	err_count++;	CUDA_ERROR_CHECK;  }
 
 	err = cudaMalloc( (void **)&gpu_mem, (2*nlm_stride*howmany + 2*dual_stride + spat_stride)*sizeof(double) );		// maximum GPU memory required for SHT
 	if (err != cudaSuccess)	{	err_count++;	CUDA_ERROR_CHECK;  }
-	
+
 	if (shtns->fft_mode & FFT_OOP) {
 		// we also need a buffer on the CPU when the FFT is out-of-place:
 		shtns->xfft_cpu = (double*) shtns_malloc(spat_stride * sizeof(double) * howmany);
@@ -890,7 +887,7 @@ void SH_to_spat_gpu(shtns_cfg shtns, cplx *Qlm, double *Vr, const long int llim)
 	long nlm = shtns->nlm;
 	int mmax = shtns->mmax;
 
-	double *d_q   = shtns->gpu_buf_out;		// outer buffer for transfer (safe)
+	double *d_q   = shtns->gpu_mem;		// buffer for transfer (safe)
 	double *d_qlm = d_q;		// "in-place" operation possible with ishioka
 	if (SHT_ALLOW_SH2ISH_FUSE == 1  &&  shtns->nwarp[2]>0) d_qlm = shtns->gpu_buf_in; // include sh2ishioka into legendre kernel
 
@@ -1161,7 +1158,7 @@ extern "C"
 void spat_to_SH_gpu(shtns_cfg shtns, double *Vr, cplx *Qlm, const long int llim)
 {
 	cudaError_t err = cudaSuccess;
-	double *d_q   = shtns->gpu_buf_out;
+	double *d_q   = shtns->gpu_mem;
 	double *d_qlm = d_q;		// "in-place" operation possible
 
 	// copy spatial data to GPU

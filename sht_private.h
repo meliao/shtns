@@ -190,7 +190,6 @@ struct shtns_info {		// MUST start with "int nlm;"
 	double* d_mx_stdt;
 	double* d_mx_van;
 	double* gpu_mem;
-	double* gpu_buf_out;	// outer buffer: can hold either spectral or spatial fields; used for transfers.
 	double* gpu_buf_in;		// inner buffer: can each hold either spectral or spatial fields.
 	double* xfft_cpu;
 	size_t nlm_stride, spat_stride;
