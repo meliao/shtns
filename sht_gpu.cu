@@ -108,6 +108,11 @@ static void destroy_cuda_buffer_fft(shtns_cfg shtns)
 	if (shtns->gpu_buf_in) cudaFree(shtns->gpu_buf_in);
 }
 
+#define CACHE_LINE_GPU 128
+inline void* align_ptr(void* p, uintptr_t align) {
+	return (void*) ((((uintptr_t) p) + (align-1)) &~ (align-1));
+}
+
 int cuda_gpu_id = 0;	// by default, use gpu device 0
 #ifdef VKFFT_BACKEND
 CUdevice vkfft_device_struct;
@@ -458,12 +463,7 @@ void cushtns_release_gpu(shtns_cfg shtns)
 {
 	destroy_cuda_buffer_fft(shtns);
 	// TODO: arrays possibly shared between different shtns_cfg should be deallocated ONLY if not used by other shtns_cfg.
-	if (shtns->d_ct) cudaFree(shtns->d_ct);
 	if (shtns->d_alm) cudaFree(shtns->d_alm);
-	if (shtns->d_xlm) cudaFree(shtns->d_xlm);
-	if (shtns->d_clm) cudaFree(shtns->d_clm);
-	if (shtns->d_mx_stdt) cudaFree(shtns->d_mx_stdt);
-	if (shtns->d_mx_van) cudaFree(shtns->d_mx_van);
 	shtns->d_alm = 0;		// disable gpu.
 	shtns->cu_flags = 0;
 }
@@ -475,6 +475,7 @@ int cushtns_init_gpu(shtns_cfg shtns)
 	const long nlm = shtns->nlm;
 	const long nlat_2 = shtns->nlat_2;
 
+	double *buf = 0;
 	double *d_alm = 0;
 	double *d_ct  = 0;
 	double *d_mx_stdt = 0;
@@ -502,27 +503,17 @@ int cushtns_init_gpu(shtns_cfg shtns)
 	if (prop.major < 3) return -1;			// failure, SHTns requires compute cap. >= 3 (warp shuffle instructions)
 	if (shtns->nlat % 4) return -1;			// failure, nlat must be a multiple of 4.
 
-	// Allocate the device input vector alm
-	err = cudaMalloc((void **)&d_alm, (2*nlm+MAX_THREADS_PER_BLOCK-1)*sizeof(double));	// allow some overflow.
-	if (err != cudaSuccess) err_count ++;
 	const long nlm0 = nlm_calc(LMAX+4, MMAX, MRES);
-	err = cudaMalloc((void **)&d_clm, (nlm0+MAX_THREADS_PER_BLOCK-1)*sizeof(double));	// allow some overflow.
+	// Allocate the coefficients vectors alm, ...
+	size_t sze = 2*nlm + nlm0 + 3*nlm0/2 + 4*nlat_2  +  (CACHE_LINE_GPU/sizeof(double)-1)*3;
+	if( shtns->mx_stdt) sze += 2*nlm + 2*nlm + (CACHE_LINE_GPU/sizeof(double)-1)*2;
+	err = cudaMalloc((void **)&buf, (sze + MAX_THREADS_PER_BLOCK-1)*sizeof(double));	// allow some overflow.
 	if (err != cudaSuccess) err_count ++;
-	err = cudaMalloc((void **)&d_xlm, (3*nlm0/2+MAX_THREADS_PER_BLOCK-1)*sizeof(double));	// allow some overflow.
-	if (err != cudaSuccess) err_count ++;
-	if (shtns->mx_stdt) {
-		// Allocate the device matrix for d(sin(t))/dt
-		err = cudaMalloc((void **)&d_mx_stdt, (2*nlm+MAX_THREADS_PER_BLOCK-1)*sizeof(double));
-		if (err != cudaSuccess) err_count ++;
-		// Same thing for analysis
-		err = cudaMalloc((void **)&d_mx_van, (2*nlm+MAX_THREADS_PER_BLOCK-1)*sizeof(double));
-		if (err != cudaSuccess) err_count ++;
-	}
-	// Allocate the device input vector cos(theta) and gauss weights, sin(theta) and 1/sin(theta)
-	err = cudaMalloc((void **)&d_ct, 4*nlat_2*sizeof(double));
-	if (err != cudaSuccess) err_count ++;
-
 	if (err_count == 0) {
+		d_alm = buf;		buf = (double*) align_ptr(buf + 2*nlm, CACHE_LINE_GPU);
+		d_clm = buf;		buf = (double*) align_ptr(buf + nlm0,  CACHE_LINE_GPU);
+		d_xlm = buf;		buf = (double*) align_ptr(buf + 3*nlm0/2, CACHE_LINE_GPU);
+
 		err = cudaMemcpy(d_alm, shtns->alm, 2*nlm*sizeof(double), cudaMemcpyHostToDevice);
 		if (err != cudaSuccess)  err_count ++;
 		err = cudaMemcpy(d_clm, shtns->clm, nlm0*sizeof(double), cudaMemcpyHostToDevice);
@@ -530,11 +521,17 @@ int cushtns_init_gpu(shtns_cfg shtns)
 		err = cudaMemcpy(d_xlm, shtns->xlm, 3*nlm0/2*sizeof(double), cudaMemcpyHostToDevice);
 		if (err != cudaSuccess)  err_count ++;
 		if (shtns->mx_stdt) {
+			d_mx_stdt = buf;	buf = (double*) align_ptr(buf + 2*nlm, CACHE_LINE_GPU);	// Allocate the device matrix for d(sin(t))/dt
+			d_mx_van  = buf;	buf = (double*) align_ptr(buf + 2*nlm, CACHE_LINE_GPU);	// Same thing for analysis
+
 			err = cudaMemcpy(d_mx_stdt, shtns->mx_stdt, 2*nlm*sizeof(double), cudaMemcpyHostToDevice);
 			if (err != cudaSuccess)  err_count ++;
 			err = cudaMemcpy(d_mx_van, shtns->mx_van, 2*nlm*sizeof(double), cudaMemcpyHostToDevice);
 			if (err != cudaSuccess)  err_count ++;
 		}
+		// Allocate the device input vector cos(theta) and gauss weights, sin(theta) and 1/sin(theta)
+		d_ct = buf;			//buf = (double*) align_ptr(buf + 4*nlat_2, CACHE_LINE_GPU);
+
 		err = cudaMemcpy(d_ct, shtns->ct, nlat_2*sizeof(double), cudaMemcpyHostToDevice);
 		if (err != cudaSuccess)  err_count ++;
 		err = cudaMemcpy(d_ct + nlat_2, shtns->wg, nlat_2*sizeof(double), cudaMemcpyHostToDevice);
