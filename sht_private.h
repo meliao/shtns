@@ -63,9 +63,8 @@ extern "C" {
 #endif /* __cplusplus */
 
 /// private gpu functions:
-int cushtns_init_gpu(shtns_cfg);
-void cushtns_release_gpu(shtns_cfg);
 int cushtns_use_gpu(int);
+int init_gpu_staging_buffer(shtns_cfg shtns);
 #ifdef __cplusplus
 }
 #endif /* __cplusplus */
@@ -189,21 +188,21 @@ struct shtns_info {		// MUST start with "int nlm;"
 	double* d_ct;
 	double* d_mx_stdt;
 	double* d_mx_van;
-	double* gpu_mem;
+	double* gpu_staging_mem;	// for auto-offload only
 	double* gpu_buf_in;		// inner buffer: can each hold either spectral or spatial fields.
 	size_t nlm_stride, spat_stride;
 	cudaStream_t xfer_stream, comp_stream;		// the cuda streams
-	#if defined(HAVE_LIBCUFFT) || defined(HAVE_LIBROCFFT)
-	cufftHandle cufft_plan;						// the cufft Handle
-	cufftHandle cufft_plan_float;				// the cufft Handle single precision
-	#endif
-	float* d_alm_f;
-	float* d_ct_f;
+	//float* d_alm_f;
+	//float* d_ct_f;
 	CUfunction gpu_kernels[4];		// 4 kernels (scalar & vector, synth & analys)
 	unsigned short gridDim_x[3];	// third value is for synthesis when nwarp[3] > 0
 	unsigned short gridDim_y[2];
 	unsigned char nwarp[3];			// third value is for scalar synthesis with sh2ish_fuse, or set to 0 to disable sh2ish
 	CUmodule gpu_module;			// not sure this is needed
+	#if defined(HAVE_LIBCUFFT) || defined(HAVE_LIBROCFFT)
+	cufftHandle cufft_plan;						// the cufft Handle
+	//cufftHandle cufft_plan_float;				// the cufft Handle single precision
+	#endif
 	#endif
 	#ifdef VKFFT_BACKEND
 		VkFFTApplication vkfft_plan;

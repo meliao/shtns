@@ -103,8 +103,6 @@ static void destroy_cuda_buffer_fft(shtns_cfg shtns)
 	#ifdef VKFFT_BACKEND
 	deleteVkFFT(&shtns->vkfft_plan);
 	#endif
-	if (shtns->cu_flags & CUSHT_OWN_XFER_STREAM) cudaStreamDestroy(shtns->xfer_stream);
-	if (shtns->gpu_mem) cudaFree(shtns->gpu_mem);
 	if (shtns->gpu_buf_in) cudaFree(shtns->gpu_buf_in);
 }
 
@@ -114,19 +112,12 @@ inline void* align_ptr(void* p, uintptr_t align) {
 }
 
 int cuda_gpu_id = 0;	// by default, use gpu device 0
-#ifdef VKFFT_BACKEND
-CUdevice vkfft_device_struct;
-#endif
 
 // WARNING! streams should be set BEFORE this routine is called!!
 static int init_cuda_buffer_fft(shtns_cfg shtns)
 {
 	cudaError_t err = cudaSuccess;
 	int err_count = 0;
-
-	err = cudaStreamCreateWithFlags(&shtns->xfer_stream, cudaStreamNonBlocking);		// stream for async data transfer.
-	shtns->cu_flags |= CUSHT_OWN_XFER_STREAM;		// mark the transfer stream as managed by shtns.
-	if (err != cudaSuccess)	{	err_count++;	CUDA_ERROR_CHECK;  }
 
 	/* GPU FFT init */
 	int nfft = shtns->nphi;
@@ -153,6 +144,7 @@ static int init_cuda_buffer_fft(shtns_cfg shtns)
 				res = cufftPlanMany(&shtns->cufft_plan, 1, &nfft, &nfft, dist, 1, &nfft, dist, 1, CUFFT_Z2Z, howmany);
 			#endif
 			#ifdef VKFFT_BACKEND
+				CUdevice vkfft_device_struct;
 				VkFFTConfiguration config = {};		//zero-initialize configuration
 				config.FFTdim = 2; //FFT dimension: 1D, but we use a second dimension to get non-unit strides.
 				config.size[0] = howmany;
@@ -201,7 +193,6 @@ static int init_cuda_buffer_fft(shtns_cfg shtns)
 	}
 
 	// Allocate working arrays for SHT on GPU:
-	double* gpu_mem = 0;
 	const int howmany = shtns->howmany;		// batch size
 	const int nlm2 = shtns->nlm + (shtns->mmax+1);		// one more data per m
 	const size_t nlm_stride = ((2*nlm2+WARPSZE-1)/WARPSZE) * WARPSZE;
@@ -216,18 +207,30 @@ static int init_cuda_buffer_fft(shtns_cfg shtns)
 	err = cudaMalloc( (void **)&shtns->gpu_buf_in,  sze*sizeof(double) * howmany );
 	if (err != cudaSuccess)	{	err_count++;	CUDA_ERROR_CHECK;  }
 
-	{  // only needed for auto-offload
-		sze = dual_stride;		// 1 spatial or spectral buffer
-		if (shtns->mx_stdt) sze = 2*dual_stride + spat_stride;		// for vector transform: 2 spatial or spectral + 1 spatial buffers.
-		err = cudaMalloc( (void **)&gpu_mem, sze*sizeof(double) );		// maximum GPU memory required for SHT
-		if (err != cudaSuccess)	{	err_count++;	CUDA_ERROR_CHECK;  }
-	}
-
 	shtns->nlm_stride = nlm_stride;
 	shtns->spat_stride = dual_stride;
-	shtns->gpu_mem = gpu_mem;
 
 	return err_count;
+}
+
+/// allocate buffers on the GPU for copying data to and from CPU memory 
+extern "C"
+int init_gpu_staging_buffer(shtns_cfg shtns)
+{
+	cudaError_t err = cudaSuccess;
+	if (shtns->xfer_stream == 0) {
+		err = cudaStreamCreateWithFlags(&shtns->xfer_stream, cudaStreamNonBlocking);		// stream for async data transfer.
+		if (err != cudaSuccess)	{	CUDA_ERROR_CHECK;  return 1; }
+		shtns->cu_flags |= CUSHT_OWN_XFER_STREAM;		// mark the transfer stream as managed by shtns.
+	}
+
+	double* gpu_mem = 0;
+	size_t sze = shtns->spat_stride;		// 1 spatial or spectral buffer
+	if (shtns->mx_stdt) sze *= 3;		// for vector transform: 3 spatial or spectral buffers.
+	err = cudaMalloc( (void **)&gpu_mem, sze*sizeof(double) );		// maximum GPU memory required for SHT auto-offloading
+	if (err != cudaSuccess)	{	CUDA_ERROR_CHECK;  return 1; }
+	shtns->gpu_staging_mem = gpu_mem;
+	return 0;
 }
 
 void read_line_int(FILE* fp, int* val)
@@ -461,6 +464,8 @@ int init_cuda_program(shtns_cfg shtns, const char* gpu_arch_target)
 extern "C"
 void cushtns_release_gpu(shtns_cfg shtns)
 {
+	if (shtns->gpu_staging_mem) cudaFree(shtns->gpu_staging_mem);
+	if (shtns->cu_flags & CUSHT_OWN_XFER_STREAM) cudaStreamDestroy(shtns->xfer_stream);
 	destroy_cuda_buffer_fft(shtns);
 	// TODO: arrays possibly shared between different shtns_cfg should be deallocated ONLY if not used by other shtns_cfg.
 	if (shtns->d_alm) cudaFree(shtns->d_alm);
@@ -582,6 +587,10 @@ int cushtns_use_gpu(int device_id)
 extern "C"
 void cushtns_set_streams(shtns_cfg shtns, cudaStream_t compute_stream, cudaStream_t transfer_stream)
 {
+	if (shtns->gpu_buf_in) {
+		printf("[cushtns_set_streams] must be called before initializing shtns on GPU");
+		exit(1);
+	}
 	shtns->comp_stream = compute_stream;
 	if (transfer_stream != 0) {
 		if (shtns->cu_flags & CUSHT_OWN_XFER_STREAM) cudaStreamDestroy(shtns->xfer_stream);
@@ -590,33 +599,24 @@ void cushtns_set_streams(shtns_cfg shtns, cudaStream_t compute_stream, cudaStrea
 	}
 }
 
-/*
 extern "C"
 shtns_cfg cushtns_clone(shtns_cfg shtns, cudaStream_t compute_stream, cudaStream_t transfer_stream)
 {
-	if (shtns->d_alm == 0) return 0;		// do not clone if there is no GPU associated...
+	shtns_cfg sht_clone = shtns_create_with_grid(shtns, shtns->mmax, 0);		// copy the shtns_cfg, sharing all data.
+	if (sht_clone == 0) return 0;
 
-	shtns_cfg sht_clone;
-	sht_clone = shtns_create_with_grid(shtns, shtns->mmax, 0);		// copy the shtns_cfg, sharing all data.
-
-	// set new buffer and cufft plan (should be unique for each shtns_cfg).
-	int err_count = init_cuda_buffer_fft(sht_clone);
-	if (err_count > 0) return 0;		// TODO: memory should be properly deallocated here...
-	// set new streams (should also be unique).
+	int err_count = 0;
+	sht_clone->cu_flags = 0;	// reset
+	sht_clone->gpu_buf_in = 0;
+	sht_clone->gpu_staging_mem = 0;
+	sht_clone->xfer_stream = 0;
 	cushtns_set_streams(sht_clone, compute_stream, transfer_stream);
-	return sht_clone;
-}
-*/
-
-extern "C"
-shtns_cfg cushtns_clone(shtns_cfg shtns, cudaStream_t compute_stream, cudaStream_t transfer_stream)
-{
-	shtns_cfg sht_clone;
-	sht_clone = shtns_create_with_grid(shtns, shtns->mmax, 0);		// copy the shtns_cfg, sharing all data.
-
-	int dev_id = cushtns_init_gpu(sht_clone);
-	if (dev_id >= 0) {
-		cushtns_set_streams(sht_clone, compute_stream, transfer_stream);
+	cushtns_init_gpu(sht_clone);	// for now, we should copy everything again
+	//err_count += init_cuda_buffer_fft(sht_clone);
+	if (shtns->gpu_staging_mem) {
+		err_count += init_gpu_staging_buffer(sht_clone);
+	}
+	if (err_count == 0) {
 		return sht_clone;
 	} else {
 		shtns_destroy(sht_clone);
@@ -884,7 +884,7 @@ void SH_to_spat_gpu(shtns_cfg shtns, cplx *Qlm, double *Vr, const long int llim)
 	long nlm = shtns->nlm;
 	int mmax = shtns->mmax;
 
-	double *d_q   = shtns->gpu_mem;		// buffer for transfer (safe)
+	double *d_q   = shtns->gpu_staging_mem;		// buffer for transfer (safe)
 	double *d_qlm = d_q;		// "in-place" operation possible with ishioka
 	if (SHT_ALLOW_SH2ISH_FUSE == 1  &&  shtns->nwarp[2]>0) d_qlm = shtns->gpu_buf_in; // include sh2ishioka into legendre kernel
 
@@ -922,7 +922,7 @@ void SHsphtor_to_spat_gpu(shtns_cfg shtns, cplx *Slm, cplx *Tlm, double *Vt, dou
 	cudaStream_t xfer_stream = shtns->xfer_stream;
 
 	double* d_vwlm = shtns->gpu_buf_in;
-	double* d_vtp = shtns->gpu_mem;
+	double* d_vtp = shtns->gpu_staging_mem;
 
 	if (llim < mmax*mres) {
 		mmax = llim / mres;	// truncate mmax too !
@@ -1000,7 +1000,7 @@ void SHqst_to_spat_gpu(shtns_cfg shtns, cplx *Qlm, cplx *Slm, cplx *Tlm, double 
 	cudaStream_t comp_stream = shtns->comp_stream;
 
 	double* d_qvwlm = shtns->gpu_buf_in;
-	double* d_vrtp = shtns->gpu_mem;
+	double* d_vrtp = shtns->gpu_staging_mem;
 
 	if (llim < mmax*mres) {
 		mmax = llim / mres;	// truncate mmax too !
@@ -1053,7 +1053,7 @@ extern "C"
 void spat_to_SH_gpu(shtns_cfg shtns, double *Vr, cplx *Qlm, const long int llim)
 {
 	cudaError_t err = cudaSuccess;
-	double *d_q   = shtns->gpu_mem;
+	double *d_q   = shtns->gpu_staging_mem;
 	double *d_qlm = d_q;		// "in-place" operation possible
 
 	// copy spatial data to GPU
@@ -1092,7 +1092,7 @@ void spat_to_SHsphtor_gpu(shtns_cfg shtns, double *Vt, double *Vp, cplx *Slm, cp
 	double* d_vwlm;
 	double* d_vtp;
 
-	d_vtp = shtns->gpu_mem;
+	d_vtp = shtns->gpu_staging_mem;
 	d_vwlm = shtns->gpu_buf_in;
 
 	// copy spatial data to gpu
@@ -1143,7 +1143,7 @@ void spat_to_SHqst_gpu(shtns_cfg shtns, double *Vr, double *Vt, double *Vp, cplx
 	double* d_vrtp;
 
 	d_qvwlm = shtns->gpu_buf_in;
-	d_vrtp = shtns->gpu_mem;	//d_qvwlm + 2*nlm_stride;
+	d_vrtp = shtns->gpu_staging_mem;	//d_qvwlm + 2*nlm_stride;
 
 	// copy spatial data to gpu
 	err = cudaMemcpy(d_vrtp, Vt, nspat*sizeof(double), cudaMemcpyHostToDevice);

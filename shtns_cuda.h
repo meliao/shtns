@@ -75,8 +75,11 @@ shtns_cfg cushtns_clone(shtns_cfg shtns, cudaStream_t compute_stream, cudaStream
 
 ///@}
 
-/// Perform initialization of config for GPU, and use GPU for transform where possible.
+/// Perform initialization of config for GPU, allowing to call GPU transforms cu_* above.
 int cushtns_init_gpu(shtns_cfg shtns);
+
+/// Release resources needed for GPU transforms, which won't work after this call.
+void cushtns_release_gpu(shtns_cfg);
 
 /// Set user-specified streams for compute (including fft) and transfer.
 void cushtns_set_streams(shtns_cfg shtns, cudaStream_t compute_stream, cudaStream_t transfer_stream);

@@ -1487,6 +1487,10 @@ int shtns_set_grid_auto(shtns_cfg shtns, enum shtns_type flags, double eps, int 
 	int gpu_ok = -1;
 	if ((layout & SHT_ALLOW_GPU) && (NLAT % 4 == 0)) {
 		gpu_ok = cushtns_init_gpu(shtns);		// try to initialize cuda gpu
+		if (gpu_ok >= 0) {
+			int err = init_gpu_staging_buffer(shtns);		// initialize staging buffers for auto-offload feature.
+			if (err)  gpu_ok = -1;
+		}
 		#if SHT_VERBOSE > 0
 		if ((verbose)&&(gpu_ok>=0)) printf("        + GPU #%d successfully initialized.\n", gpu_ok);
 		#endif
@@ -1495,7 +1499,7 @@ int shtns_set_grid_auto(shtns_cfg shtns, enum shtns_type flags, double eps, int 
 		for (int j=SHT_GPU1; j<=SHT_GPU4; j++) {
 			memset(sht_func[SHT_STD][j], 0, sizeof(void*)*SHT_NTYP);
 		}
-	}
+	} else 	set_sht_gpu(shtns, 0);		// switch function pointers to "gpu" functions by default
   #endif
 
 	if ((layout & SHT_LOAD_SAVE_CFG) && (!cfg_loaded)) cfg_loaded = (config_load(shtns, req_flags) > 0);
@@ -1519,9 +1523,6 @@ int shtns_set_grid_auto(shtns_cfg shtns, enum shtns_type flags, double eps, int 
 			#endif
 		}
 	}
-
-//	set_sht_fly(shtns, SHT_TYP_VAN);
-	set_sht_gpu(shtns, 0);
 
   #if SHT_VERBOSE > 1
 	if ((omp_threads > 1)&&(verbose>1)) printf(" nthreads = %d\n",shtns->nthreads);
