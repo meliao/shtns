@@ -35,7 +35,7 @@ extern "C" {
 
 /// SHTns interface version (loosely follow versions) allowing simple version checks: (major << 16) | (minor << 8) | patchlevel
 /// should be increased at least each time this file changes.
-#define SHTNS_INTERFACE 0x30500
+#define SHTNS_INTERFACE 0x30600
 
 /// pointer to data structure describing an SHT, returned by shtns_init() or shtns_create().
 typedef struct shtns_info* shtns_cfg;
