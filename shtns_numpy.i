@@ -573,7 +573,7 @@ struct shtns_rot_ {		// describe a rotation matrix
 		PyObject* obj;
 		int n = $self->lmax + 1;
 		cplx a = 0.0;
-		if (check_spectral(1,alm, n*n))	a = SH_to_point_cplx($self, PyArray_Data(alm), cost, phi);
+		if (check_spectral(1,alm, n*n))	SH_to_point_cplx($self, PyArray_Data(alm), cost, phi, &a);
 		obj = PyComplex_FromDoubles(creal(a), cimag(a));
 		return obj;
 	}

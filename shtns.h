@@ -35,7 +35,7 @@ extern "C" {
 
 /// SHTns interface version (loosely follow versions) allowing simple version checks: (major << 16) | (minor << 8) | patchlevel
 /// should be increased at least each time this file changes.
-#define SHTNS_INTERFACE 0x30503
+#define SHTNS_INTERFACE 0x30504
 
 /// pointer to data structure describing an SHT, returned by shtns_init() or shtns_create().
 typedef struct shtns_info* shtns_cfg;
@@ -351,7 +351,7 @@ void SHqst_to_spat_ml(shtns_cfg, int im, cplx *Ql, cplx *Sl, cplx *Tl, cplx *Vr,
 /// Does not require a call to \ref shtns_set_grid_auto
 ///@{
 double SH_to_point(shtns_cfg, cplx *Qlm, double cost, double phi);
-cplx SH_to_point_cplx(shtns_cfg, cplx *alm, double cost, double phi);
+void SH_to_point_cplx(shtns_cfg, cplx *alm, double cost, double phi, cplx* z_out);	///< writes value to z_out.
 void SH_to_grad_point(shtns_cfg, cplx *DrSlm, cplx *Slm,
 					double cost, double phi, double *vr, double *vt, double *vp);
 void SHqst_to_point(shtns_cfg, cplx *Qlm, cplx *Slm, cplx *Tlm,

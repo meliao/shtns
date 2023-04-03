@@ -108,6 +108,8 @@ SHT_ALLOW_GPU = _shtns.SHT_ALLOW_GPU
 
 SHT_ALLOW_PADDING = _shtns.SHT_ALLOW_PADDING
 
+SHT_ROBERT_FORM = _shtns.SHT_ROBERT_FORM
+
 class sht(object):
     r"""Proxy of C shtns_info struct."""
 
