@@ -43,8 +43,7 @@ typedef struct shtns_info* shtns_cfg;
 /// pointer to data structure describing a rotation, returned by shtns_rotation_create().
 typedef struct shtns_rot_* shtns_rot;
 
-/// different Spherical Harmonic normalizations.
-/// see also section \ref norm for details.
+/// Different Spherical Harmonic normalizations. See also section \ref norm for details.
 enum shtns_norm {
 	sht_orthonormal,	///< orthonormalized spherical harmonics (default).
 	sht_fourpi,			///< Geodesy and spectral analysis : 4.pi normalization.
@@ -101,6 +100,7 @@ struct shtns_info {		// allow read-only access to some data (useful for optimiza
  * The following macros give access to single spherical harmonic coefficient or perform loops spanning all of them.
 **/
 ///@{
+
 ///LiM(shtns, l,im) : macro returning array index for given l and im, corresponding to config shtns.
 #define LiM(shtns, l,im) ( (((im)*(2*shtns->lmax + 2 - ((im)+1)*shtns->mres))>>1) + (l) )
 /// LM(shtns, l,m) : macro returning array index for given l and m, corresponding to config shtns.
@@ -146,6 +146,7 @@ void shtns_print_cfg(shtns_cfg);	///< print information about given config to st
 
 /// \name initialization
 ///@{
+
 /// Simple initialization of the spherical harmonic transforms of given size. Calls \ref shtns_create and \ref shtns_set_grid_auto.
 shtns_cfg shtns_init(enum shtns_type flags, int lmax, int mmax, int mres, int nlat, int nphi);
 /// Defines the sizes of the spectral description. Use for advanced initialization.
@@ -158,7 +159,7 @@ int shtns_set_grid_auto(shtns_cfg, enum shtns_type flags, double eps, int nl_ord
 shtns_cfg shtns_create_with_grid(shtns_cfg, int mmax, int nofft);
 /// Enables multi-thread transform using OpenMP with num_threads (if available). Returns number of threads that will be used.
 int shtns_use_threads(int num_threads);
-/// beta: Perform several transforms together (batch). Howmany is the number of transforms, spec_dist the distance between spectral arrays.
+/// beta: Modify plan to perform several transforms together (batch). This is useful to get good performance for small transforms on GPU, but also works on CPU.
 int shtns_set_batch(shtns_cfg shtns, int howmany, long spec_dist);
 
 void shtns_reset(void);				///< destroy all configs, free memory, and go back to initial state.
@@ -168,7 +169,7 @@ void shtns_unset_grid(shtns_cfg);	///< unset the grid.
 /// set the use of Robert form. If robert != 0, the vector synthesis returns a field multiplied by sin(theta), while the analysis divides by sin(theta) before the transform.
 void shtns_robert_form(shtns_cfg, int robert);
 
-void* shtns_malloc(size_t bytes);	///< alloc appropriate memory (pinned for gpu, aligned for avx, ...). Use \ref shtns_free to free it.
+void* shtns_malloc(size_t bytes);	///< allocate appropriate CPU memory (pinned for gpu, aligned for avx, ...). Use \ref shtns_free to free it.
 void shtns_free(void* p);			///< free memory allocated with \ref shtns_malloc
 
 
@@ -187,6 +188,7 @@ int shtns_gauss_wts(shtns_cfg, double *wts);
 
 /// \name Rotation functions
 ///@{
+
 /// Rotate a SH representation Qlm around the z-axis by angle alpha (in radians),
 /// which is the same as rotating the reference frame by angle -alpha.
 /// Result is stored in Rlm (which can be the same array as Qlm).
@@ -222,6 +224,7 @@ void shtns_rotation_apply_real(shtns_rot r, cplx* Qlm, cplx* Rlm);
 
 /// \name Generation of Legendre associated functions
 ///@{
+
 /// Compute values of legendre polynomials noramalized for spherical harmonics,
 /// for a range of l=m..lmax, at given m and x, using stable recurrence.
 /// Requires a previous call to \ref shtns_create().
@@ -236,6 +239,7 @@ int legendre_sphPlm_deriv_array(shtns_cfg shtns, const int lmax, const int im, c
 
 /// \name Special operator functions
 ///@{
+
 /// compute the matrix (stored in mx, a double array of size 2*NLM) required
 /// to multiply an SH representation by cos(theta) using \ref SH_mul_mx.
 void mul_ct_matrix(shtns_cfg, double* mx);
@@ -256,6 +260,7 @@ void SH_mul_mx(shtns_cfg, double* mx, cplx *Qlm, cplx *Rlm);
 
 /// \name Scalar transforms
 ///@{
+
 /// transform the scalar field Vr into its spherical harmonic representation Qlm.
 /// \param[in] shtns = a configuration created by \ref shtns_create with a grid set by \ref shtns_set_grid or \ref shtns_set_grid_auto
 /// \param[in] Vr = spatial scalar field : double array of size shtns->nspat; NOT GUARANTEED TO BE PRESERVED.
@@ -280,6 +285,7 @@ void spat_cplx_to_SH(shtns_cfg shtns, cplx *z, cplx *alm);
 
 /// \name 2D vector transforms
 ///@{
+
 /// transform the theta and phi components (Vt,Vp) of a vector into its spheroidal-toroidal spherical harmonic representation (Slm,Tlm). \see \ref vsh
 void spat_to_SHsphtor(shtns_cfg, double *Vt, double *Vp, cplx *Slm, cplx *Tlm);
 /// transform spheroidal-toroidal spherical harmonic coefficients (Slm,Tlm) to the spatial theta and phi components (Vt,Vp). \see \ref vsh
@@ -299,6 +305,7 @@ void SHsphtor_to_spat_cplx(shtns_cfg, cplx *Slm, cplx *Tlm, cplx *Vt, cplx *Vp);
 
 /// \name 3D transforms (combine scalar and vector)
 ///@{
+
 /// 3D vector transform from spherical coordinates to radial-spheroidal-toroidal spectral components (see \ref vsh_def).
 /// They should be prefered over separate calls to scalar and 2D vector transforms as they can be significantly faster.
 void spat_to_SHqst(shtns_cfg, double *Vr, double *Vt, double *Vp, cplx *Qlm, cplx *Slm, cplx *Tlm);
@@ -311,7 +318,7 @@ void SHqst_to_spat_cplx(shtns_cfg, cplx *Qlm, cplx *Slm, cplx *Tlm, cplx *Vr, cp
 ///@}
 
 /// \name Truncated transforms at given degree l
-/// wiht l <= lmax used for setup.
+/// with ltr <= lmax used for setup.
 ///@{
 void spat_to_SH_l(shtns_cfg, double *Vr, cplx *Qlm, int ltr);
 void SH_to_spat_l(shtns_cfg, cplx *Qlm, double *Vr, int ltr);

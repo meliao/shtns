@@ -63,7 +63,9 @@ void cu_SHqst_to_spat(shtns_cfg, cplx *Qlm, cplx *Slm, cplx *Tlm, double *Vr, do
 ///\name Initialization
 ///@{
  
-/// Perform initialization of given config for GPU, allowing to call GPU transforms cu_* above, working on data residing in GPU memory. This does not enable auto-offload.
+/// Initialize given config to work on the current (or default) GPU, allowing to call GPU transforms cu_* above, working on data residing in the memory of this GPU.
+/// This does not enable auto-offload. Use cudaSetDevice() or hipSetDevice() to set the target GPU before calling this function.
+/// Note that it is the user's responsibility to ensure the current device will be the same for subsequent calls to transform functions with this configuration.
 /// \param[in] shtns is a valid shtns configuration created with \ref shtns_create and with an associated grid (see \ref shtns_set_grid_auto )
 /// \returns device_id on success, or -1 on failure.
 int cushtns_init_gpu(shtns_cfg shtns);

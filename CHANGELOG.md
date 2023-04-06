@@ -1,11 +1,19 @@
 SHTNS CHANGE LOG:
 -----------------
 
+* v3.6  (24 Apr 2023)
+	- Rewrite of GPU transforms, with important performance improvements.
+	- New support for AMD GPU MI100 and MI200 series.
+	- New batch transforms: especially useful on GPU for smaller transforms (lmax<1000).
+	- Removed support for 32bit float on GPU; will be back in a later release.
+	- Remove useless `shtns_use_gpu()` function.
+	- change `SH_to_point_cplx` interface to ensure C and C++ compatibility.
+
 * v3.5.3  (17 Mar 2023)
-    - Allow "Robert form" to be set using the new `SHT_ROBERT_FORM` flag when calling `shtns_set_grid*()`
-    - Fix minor issue in ./configure when CFLAGS is set without -O option.
-    - Fortran: fix call to `shtns_print_cfg()`.
-    - Python: enable analysis with `sht_reg_poles` grid.
+	- Allow "Robert form" to be set using the new `SHT_ROBERT_FORM` flag when calling `shtns_set_grid*()`
+	- Fix minor issue in ./configure when CFLAGS is set without -O option.
+	- Fortran: fix call to `shtns_print_cfg()`.
+	- Python: enable analysis with `sht_reg_poles` grid.
 
 * v3.5.2  (20 Jun 2022)
 	- Fix major bug, leading to rare NaNs in transforms. Results were either NaN, or good.

@@ -22,7 +22,8 @@ FEATURES:
 - support for SSE2, SSE3, **AVX, AVX2, AVX-512** vectorization, as well as 
   Xeon Phi (KNL), AltiVec VSX, and Neon.
 - **parallel transforms with OpenMP**.
-- *Beta*: automatic **GPU off-loading** with nvidia cuda (Kepler, Pascal & Volta).
+- **GPU transforms** for nvidia and AMD devices: transparent auto-offload
+  or working with data already on GPU (using cuda or hip).
 - synthesis (inverse transform) at any coordinate (not constrained to a grid).
 - **on-the-fly transforms** : saving memory and bandwidth, they are even faster
   on modern architectures.

@@ -14,15 +14,15 @@
  * - can be used from <b>Fortran, c/c++, Python, and Java</b> programs.
  * - a highly efficient Gauss algorithm working with <b>Gauss nodes</b> (based on Gauss-Legendre quadrature).
  * - support for <b>regular grids</b> (but they require twice the number of nodes than Gauss grid).
- * - support for SSE2, SSE3 and <b>AVX, AVX2, AVX-512</b> vectorization, as well as Xeon Phi (KNL) and AltiVec VSX.
+ * - support for SSE2, SSE3 and <b>AVX, AVX2, AVX-512</b> vectorization, as well as Xeon Phi (KNL), AltiVec VSX, and Neon.
  * - <b>parallel transforms with OpenMP</b>.
- * - *Beta*: automatic <b>\link gpu GPU off-loading\endlink</b> with nvidia cuda (Kepler, Pascal & Volta).
+ * - <b>\link gpu GPU transforms\endlink</b> for nvidia and AMD devices: transparent auto-offload, or working with data already on GPU (using cuda or hip).
  * - synthesis (inverse transform) at any coordinate (not constrained to a grid) useful for rendering purposes.
  * - <b>on-the-fly transforms</b> : saving memory and bandwidth, they are even faster on modern architecture.
  * - accurate up to spherical harmonic degree l=16383 (at least).
  * - \link rotation rotation functions\endlink to rotate spherical harmonics.
  * - \link operators special spectral operator\endlink functions that do not require a transform (multiply by cos(theta)...) .
- * - scalar transforms and rotations for complex spatial fields.
+ * - transforms and rotations for complex spatial fields.
  * - SHT at fixed m (without fft, aka Legendre transform).
  *
  * Using several \link opt optimizations\endlink, it is intended to be \link bench very fast\endlink.
@@ -181,8 +181,9 @@ In that case, shtns_info#nlat_padded > shtns_info#nlat and shtns_info#nspat > sh
 \section native Native layout
 
 The "native" way of storing spatial field data will help you achieve the best performance with SHTns.
-On CPU, it is the same as the \ref theta_fast layout.
-However, on nvidia GPU, this layout is neither phi-contiguous nor theta-contiguous, but has the following access pattern:
+On both CPU and GPU, it is the same as the \ref theta_fast layout.
+Note that this may be subject to change and the data could be neither phi-contiguous nor theta-contiguous.
+For instance, in an earlier version (prior to v3.6), the GPU "native" layout was using the following access pattern:
 \f$ A(\theta,\phi) \f$ = A[ip*2 + (it%2) + (it/2)*(NPHI*2)] in C.
 
 To instruct \ref shtns_init that your spatial data has been set up using this layout, use \ref SHT_NATIVE_LAYOUT.
@@ -645,23 +646,30 @@ See the \c shtns_jni folder.
 */
 
 
-/** \page gpu Using SHTns with GPU (CUDA)
+/** \page gpu Using SHTns with GPU (nvida and AMD)
 
-SHTns supports nvidia Kepler, Pascal and Volta GPUs, using optimized cuda transforms.
-There are two ways to use GPUs with SHTns: automatic off-loading where the GPU is used transparently (not much to change in your code)
-and SHTns handles all the data transfers between GPU and CPU memory.
-In addition, routines for performing transforms of data residing already on the GPU are provided.
+SHTns can efficiently use a GPU to perform spherical harmonic transforms.
+Supported GPUs include nvidia Kepler, Pascal, Volta, Ampere, as well as AMD MI100 and MI200 series.
 
-In all cases, you must first configure SHTns to use cuda:
+There are two ways to use GPUs with SHTns:
+ - \link offload automatic off-loading \endlink where the GPU is used transparently (not much to change in your code) and SHTns
+   handles all the data transfers between GPU and CPU memory.
+ - \link cushtns transforming data residing already on the GPU \endlink, using specific functions (prefixed by cu_).
+
+In all cases, you must first configure SHTns to use cuda (for nvidia devices) or hip (for AMD devices):
 
 \code ./configure --enable-cuda
 make
 make install \endcode
 
-Optionally, you can specify which GPU you are targetting with \code ./configure --enable-cuda=pascal \endcode for instance.
+For AMD gpus, replace \c --enable-cuda by \c --enable-hip above.
+Optionally, you can specify which GPU you are targetting with \code ./configure --enable-cuda=pascal \endcode or
+\code ./configure --enable-hip=mi200 \endcode for instance.
 
 \section offload Automatic off-loading
 
+Auto-offloading is simple to use, but will benefit only to transforms large enough to amortize the cost of memory transfers between CPU ans GPU.
+What "large enough" means depend on details of your system, but gains can reasonably be expected for Lmax > 1000.
 To enable automatic off-loading (if possible and if faster), simply add \c SHT_ALLOW_GPU to the shtns_type argument of \ref shtns_set_grid_auto.
 
 \code
@@ -669,47 +677,58 @@ sht_mode |= SHT_ALLOW_GPU
 shtns_set_grid_auto(shtns, shtmode, polaropt, nlorder, &NLAT, &NPHI);
 \endcode
 
+If no GPU is found, the transforms will be performed on CPU instead.
+
 \warning the transforms are no more guaranteed to be thread-safe, because the GPU ones are not.
 Please make sure to use different shtns configs (or plans) if you want to call transform functions from multiple threads.
 See also \ref cloning below.
+
+\warning Ressources are allocated on the current (or default) device for each plan.
+In case multiple devices are used, the user is responsible for setting the correct device before calling SHTns.
 
 For best performance, you must also allocate memory for your spatial and spectral arrays using \ref shtns_malloc and subsequently free it with \ref shtns_free.
 This way, so-called "pinned" memory is used when cuda is enabled, allowing faster data transfer between host and device.
 
 If you are not calling transform functions from multiple threads, you have nothing more to do.
 
-Here is a table giving an idea of the performance, comparing intel broadwell, intel KNL, and nvidia Pascal:
-
-<div>
-<table><tr>
-<td><b>machine</b></td>  <td>\ref SH_to_spat</td>  <td>\ref spat_to_SH</td> </tr><tr>
-<td>Broadwell, 20 cores</td>  <td>7.80 ms</td> <td>8.41 ms</td> </tr><tr>
-<td>KNL 7250, 68 cores</td>   <td>3.65 ms</td> <td><b>3.61 ms</b></td> </tr><tr>
-<td>Pascal P100 GPU (including transfer)</td>     <td><b>3.46 ms</b></td> <td>4.24 ms</td> </tr></table>
-
-<i>Average wall time for forward or backward scalar transform on various machines.
-The transform were performed using \c time_SHT with \c lmax=1023 and \c -nlorder=2 (dealiasing for non-linear terms).
-Note that the GPU timings include the time to transfer data (auto-offload mode) from and to the IBM Power8 host through nvlink.
-All timings include the FFT.</i>
-</div>
-
-
-\section cushtns On-device transforms
-
-On device transforms are declared in \ref shtns_cuda.h. Basically the regular transform functions have been prefixed by \c cu_ to indicate that they
-work on device memory. See \ref cuda.
-In principle, it is also possible to use cuda *unified memory* allocated by \c cudaMallocManaged(), but this has not been tested.
-
-As for the automatic off-loading, the \link cuda GPU transforms\endlink are <b>NOT thread-safe</b> 
-and the same shtns config should never been used from simultaneous threads.
-To help the user to create clones of the same shtns config, \link cloning cloning functions\endlink for GPU transforms have been added.
-
-\section cloning Cloning shtns configs
+\subsection cloning Cloning shtns configs
 
 The function \ref cushtns_clone creates a new identical configuration, but with new GPU ressources (temporary buffers, streams, ...).
 The user can give custom cuda streams or let shtns set his own (by passing 0 for each cuda stream).
 
 The resulting shtns config can be used concurently with the original one. Repeat the cloning for each concurrent thread.
+
+
+\section cushtns On-device transforms
+
+On-device transforms are declared in \ref shtns_cuda.h (for both nvidia and AMD gpu).
+Basically the regular transform functions have been prefixed by \c cu_ to indicate that they
+work on device memory. See \ref cuda.
+
+These on-device transforms are usually much faster than CPU transforms (typically 1 GPU performs like 100 CPU cores) provided enough parallelism can
+be exposed. This means for a single transform Lmax > 200, but if many transforms can be grouped together (see \ref shtns_set_batch), Lmax>63 is enough.
+
+It is also possible to use cuda *unified memory* allocated by \c cudaMallocManaged(), but this has not been tested extensively.
+
+As for the automatic off-loading, the \link cuda GPU transforms\endlink are <b>NOT thread-safe</b> 
+and the same shtns config should never been used from simultaneous CPU threads.
+To help the user to create clones of the same shtns config, \link cloning cloning functions\endlink for GPU transforms have been added.
+
+\subsection cushtns_init Initialization of on-device GPU transforms
+
+One a shtns config has been setup normally by calling \ref shtns_create followed by \ref shtns_set_grid or \ref shtns_set_grid_auto, one simply
+calls \ref cushtns_init_gpu to prepare the gpu for on-device transforms.
+
+\warning Initialized that way, auto-offload transforms will NOT work (temporary buffers on GPU not allocated) but less GPU memory is used.
+On the contrary, on-device transforms will work also when auto-offload was allowed (at the expense of a larger memory footprint).
+
+Performance of scalar transforms on GPU (nvidia V100) and CPU (intel SKL) is given in the following plot (excluding memory transfers).
+The benefit of batching is evident.
+See also the conference poster <a href="https://doi.org/10.6084/m9.figshare.14540775">Efficient spherical harmonic transforms on GPU</a>.
+
+\image html timing_v100.png
+\image latex timing_v100.png "Performance of SHTns scalar transform" width=10cm
+
 
 */
 

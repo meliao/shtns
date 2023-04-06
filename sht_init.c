@@ -1556,8 +1556,14 @@ int shtns_set_grid(shtns_cfg shtns, enum shtns_type flags, double eps, int nlat,
 
 /** Batched transforms, with some constraints.
  * Currently only theta-contiguous data is allowed.
- * Spatial data is accessed with data[iphi*shtns->nlat_padded + ibatch*shtns->nlat + itheta].
- * Spectral data is accessed with Qlm[ibatch * spec_dist + lm].
+ * This function must be called before \ref shtns_set_grid or \ref shtns_set_grid_auto, after which the spatial datat layout will be defined
+ * by \c shtns->nlat_padded and \c shtns->nspat as:
+ * \code data[i_phi*shtns->nlat_padded + i_batch*shtns->nlat + i_theta] \endcode
+ * Note that \c shtns->nspat will be the number of spatial points in howmany fields (not in a single field).
+ * \param[in] shtns = a plan created by \ref shtns_create that should handle many transforms at once.
+ * \param[in] howmany = number of transforms in batch.
+ * \param[in] spec_dist = distance between spectral arrays in batch. Spectral data is accessed with \code Qlm[i_batch * spec_dist + lm] \endcode
+ * \returns howmany on success, or -1 on failure.
 */
 int shtns_set_batch(shtns_cfg shtns, const int howmany, long spec_dist)
 {
