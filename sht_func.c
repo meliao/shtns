@@ -513,7 +513,7 @@ void SH_mul_mx(shtns_cfg shtns, double* mx, cplx *Qlm, cplx *Rlm)
 ///@{
 
 /// Evaluate scalar SH representation of complex field \b alm at physical point defined by \b cost = cos(theta) and \b phi
-cplx SH_to_point_cplx(shtns_cfg shtns, cplx *alm, double cost, double phi)
+void SH_to_point_cplx(shtns_cfg shtns, cplx *alm, double cost, double phi, cplx* z_out)
 {
 	double yl[LMAX+1];
 	long int l,m;
@@ -577,7 +577,7 @@ cplx SH_to_point_cplx(shtns_cfg shtns, cplx *alm, double cost, double phi)
 		}
 		z += vcplx_real(vrc) - vcplx_imag(vrs) + I*(vcplx_imag(vrc) + vcplx_real(vrs));
 	}
-	return z;
+	*z_out = z;
 }
 
 

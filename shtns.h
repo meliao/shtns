@@ -73,6 +73,7 @@ enum shtns_type {
 #define SHT_LOAD_SAVE_CFG (256*64)	///< try to load and save the config. (add to flags in shtns_set_grid)
 #define SHT_ALLOW_GPU (256*128)		///< allows to use a GPU. This needs special care because the same plan cannot be used simultaneously by different threads anymore.
 #define SHT_ALLOW_PADDING (256*256)	///< allows SHTns to add extra space between lines of the spatial array to avoid cache bank conflicts.
+#define SHT_ROBERT_FORM (256*512)	///< use Robert form for vector transforms. See also \ref shtns_robert_form
 
 
 #ifndef SHTNS_PRIVATE
@@ -352,7 +353,7 @@ void SHqst_to_spat_ml(shtns_cfg, int im, cplx *Ql, cplx *Sl, cplx *Tl, cplx *Vr,
 /// Does not require a call to \ref shtns_set_grid_auto
 ///@{
 double SH_to_point(shtns_cfg, cplx *Qlm, double cost, double phi);
-cplx SH_to_point_cplx(shtns_cfg, cplx *alm, double cost, double phi);
+void SH_to_point_cplx(shtns_cfg, cplx *alm, double cost, double phi, cplx* z_out);	///< writes value to z_out.
 void SH_to_grad_point(shtns_cfg, cplx *DrSlm, cplx *Slm,
 					double cost, double phi, double *vr, double *vt, double *vp);
 void SHqst_to_point(shtns_cfg, cplx *Qlm, cplx *Slm, cplx *Tlm,

@@ -66,6 +66,8 @@ class _SwigNonDynamicMeta(type):
 
 import numpy as np
 
+SHTNS_INTERFACE = _shtns.SHTNS_INTERFACE
+
 sht_orthonormal = _shtns.sht_orthonormal
 
 sht_fourpi = _shtns.sht_fourpi
@@ -105,6 +107,8 @@ SHT_LOAD_SAVE_CFG = _shtns.SHT_LOAD_SAVE_CFG
 SHT_ALLOW_GPU = _shtns.SHT_ALLOW_GPU
 
 SHT_ALLOW_PADDING = _shtns.SHT_ALLOW_PADDING
+
+SHT_ROBERT_FORM = _shtns.SHT_ROBERT_FORM
 
 class sht(object):
     r"""Proxy of C shtns_info struct."""
@@ -315,7 +319,6 @@ class sht(object):
     	qlm,slm,tlm = synth(vr,vtheta,vphi) : compute the spectral radial/spheroidal/toroidal scalars (qlm,slm,tlm) from 3D vector components (vr,vtheta,vphi)
     	"""
     	if self.nlat == 0: raise RuntimeError("Grid not set. Call .set_grid() mehtod.")
-    	if abs(self.cos_theta[0]) == 1: raise RuntimeError("Analysis not allowed with sht_reg_poles grid.")
     	n = len(arg)
     	if (n>3) or (n<1): raise RuntimeError("1,2 or 3 arguments required.")
     	v = list(arg)

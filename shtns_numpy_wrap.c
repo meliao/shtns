@@ -3172,7 +3172,7 @@ SWIGINTERN PyObject *shtns_info_st_dt_matrix(struct shtns_info *self){
 	}
 SWIGINTERN void shtns_info___spat_shape(struct shtns_info *self,int *dim0,int *dim1){
 		*dim0 = self->nphi;	*dim1 = self->nlat;
-		if (self->fft_mode == FFT_PHI_CONTIG_SPLIT) {	// phi-contiguous
+		if (self->layout & (256*2)) {	// phi-contiguous
 			*dim0 = self->nlat;		*dim1 = self->nphi;
 		}
 	}
@@ -3259,7 +3259,7 @@ SWIGINTERN PyObject *shtns_info_SH_to_point_cplx(struct shtns_info *self,PyObjec
 		PyObject* obj;
 		int n = self->lmax + 1;
 		cplx a = 0.0;
-		if (check_spectral(1,alm, n*n))	a = SH_to_point_cplx(self, PyArray_Data(alm), cost, phi);
+		if (check_spectral(1,alm, n*n))	SH_to_point_cplx(self, PyArray_Data(alm), cost, phi, &a);
 		obj = PyComplex_FromDoubles(creal(a), cimag(a));
 		return obj;
 	}
@@ -7064,6 +7064,7 @@ SWIG_init(void) {
   PyDict_SetItemString(md, "cvar", globals);
   Py_DECREF(globals);
   SWIG_addvarlink(globals, "__version__", Swig_var___version___get, Swig_var___version___set);
+  SWIG_Python_SetConstant(d, "SHTNS_INTERFACE",SWIG_From_int((int)(0x30600)));
   SWIG_Python_SetConstant(d, "sht_orthonormal",SWIG_From_int((int)(sht_orthonormal)));
   SWIG_Python_SetConstant(d, "sht_fourpi",SWIG_From_int((int)(sht_fourpi)));
   SWIG_Python_SetConstant(d, "sht_schmidt",SWIG_From_int((int)(sht_schmidt)));
@@ -7084,6 +7085,7 @@ SWIG_init(void) {
   SWIG_Python_SetConstant(d, "SHT_LOAD_SAVE_CFG",SWIG_From_int((int)((256*64))));
   SWIG_Python_SetConstant(d, "SHT_ALLOW_GPU",SWIG_From_int((int)((256*128))));
   SWIG_Python_SetConstant(d, "SHT_ALLOW_PADDING",SWIG_From_int((int)((256*256))));
+  SWIG_Python_SetConstant(d, "SHT_ROBERT_FORM",SWIG_From_int((int)((256*512))));
 #if PY_VERSION_HEX >= 0x03000000
   return m;
 #else

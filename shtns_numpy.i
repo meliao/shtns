@@ -284,7 +284,7 @@ struct shtns_rot_ {		// describe a rotation matrix
 	%apply int *OUTPUT { int *dim1 };
 	void __spat_shape(int *dim0, int *dim1) {
 		*dim0 = $self->nphi;	*dim1 = $self->nlat;
-		if ($self->fft_mode == FFT_PHI_CONTIG_SPLIT) {	// phi-contiguous
+		if ($self->layout & SHT_PHI_CONTIGUOUS) {	// phi-contiguous
 			*dim0 = $self->nlat;		*dim1 = $self->nphi;
 		}
 	}
@@ -432,7 +432,6 @@ struct shtns_rot_ {		// describe a rotation matrix
 			qlm,slm,tlm = synth(vr,vtheta,vphi) : compute the spectral radial/spheroidal/toroidal scalars (qlm,slm,tlm) from 3D vector components (vr,vtheta,vphi)
 			"""
 			if self.nlat == 0: raise RuntimeError("Grid not set. Call .set_grid() mehtod.")
-			if abs(self.cos_theta[0]) == 1: raise RuntimeError("Analysis not allowed with sht_reg_poles grid.")
 			n = len(arg)
 			if (n>3) or (n<1): raise RuntimeError("1,2 or 3 arguments required.")
 			v = list(arg)
@@ -574,7 +573,7 @@ struct shtns_rot_ {		// describe a rotation matrix
 		PyObject* obj;
 		int n = $self->lmax + 1;
 		cplx a = 0.0;
-		if (check_spectral(1,alm, n*n))	a = SH_to_point_cplx($self, PyArray_Data(alm), cost, phi);
+		if (check_spectral(1,alm, n*n))	SH_to_point_cplx($self, PyArray_Data(alm), cost, phi, &a);
 		obj = PyComplex_FromDoubles(creal(a), cimag(a));
 		return obj;
 	}

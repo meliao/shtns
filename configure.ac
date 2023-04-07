@@ -2,7 +2,7 @@
 # Process this file with autoconf to produce a configure script.
 
 AC_PREREQ([2.69])
-AC_INIT([SHTns],[3.5],[],[shtns],[https://bitbucket.org/nschaeff/shtns])
+AC_INIT([SHTns],[3.6],[],[shtns],[https://bitbucket.org/nschaeff/shtns])
 AC_LANG([C])
 AC_CONFIG_SRCDIR([sht_init.c])
 AC_CONFIG_HEADERS([sht_config.h])
@@ -48,10 +48,7 @@ dnl after our eval magic below.
 AS_IF([test "$prefix" = "NONE"],[prefix=$ac_default_prefix])
 
 # Checks for programs.
-if test "x$CFLAGS" = "x"; then
-	CFLAGS="-O2"
-fi
-CFLAGS="$CFLAGS -I$prefix/include -L$prefix/lib"
+CFLAGS="-O2 $CFLAGS -I$prefix/include -L$prefix/lib"   # we need at least -O2 optimization level here, but it can be everriden by CFLAGS (gcc specifies that the last -O wins)
 FFLAGS="$CFLAGS"
 AC_PROG_CC
 AC_PROG_SED
@@ -260,11 +257,13 @@ libname=$target		# set the libname befor checking for python.
 AS_IF([test "x$enable_mkl" == "xyes"], [
   mkl_found=no
   AX_CHECK_COMPILE_FLAG([-mkl], [
+	LIBS_bak="$LIBS"
+	LIBS="-mkl $LIBS"	# easy way, for intel compiler !
 	AC_CHECK_FUNC(fftw_plan_many_dft, [
 	    AC_MSG_NOTICE(["FFTW interface found in MKL, link with -mkl"])
-	    LIBS="-mkl $LIBS"	# easy way, for intel compiler !
 	    mkl_found=yes
 	],[
+	    LIBS="$LIBS_bak"
 	    AC_MSG_NOTICE(["FFTW interface not found in MKL libraries (-mkl)."])
 	])
   ])

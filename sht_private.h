@@ -213,6 +213,7 @@ struct shtns_info {		// MUST start with "int nlm;"
 	unsigned char grid;		// store grid type.
 	short norm;				// store the normalization of the Spherical Harmonics (enum \ref shtns_norm + \ref SHT_NO_CS_PHASE flag)
 	unsigned fftw_plan_mode;
+	unsigned layout;		// requested data layout
 	double Y00_1, Y10_ct, Y11_st;
 	shtns_cfg next;		// pointer to next sht_setup or NULL (records a chained list of SHT setup).
 	// the end should be aligned on the size of int, to allow the storage of small arrays.
