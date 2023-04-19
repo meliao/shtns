@@ -105,11 +105,6 @@
       integer(C_INT), value :: num_threads
     end function shtns_use_threads
     
-    subroutine shtns_use_gpu(device_id) bind(C, name='shtns_use_gpu')
-      import
-      integer(C_INT), value :: device_id
-    end subroutine shtns_use_gpu
-    
     subroutine shtns_reset() bind(C, name='shtns_reset')
       import
     end subroutine shtns_reset

@@ -79,7 +79,6 @@ int main()
 
 //    shtns_verbose(1);
 //    shtns_print_version();
-    shtns_use_gpu(0);
 
     for (int i=0; i<(nlat*nlon); i++)
         init_x[i] = (1.0 * rand()) / RAND_MAX - 0.5;

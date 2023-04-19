@@ -35,7 +35,7 @@ extern "C" {
 
 /// SHTns interface version (loosely follow versions) allowing simple version checks: (major << 16) | (minor << 8) | patchlevel
 /// should be increased at least each time this file changes.
-#define SHTNS_INTERFACE 0x30600
+#define SHTNS_INTERFACE 0x30601
 
 /// pointer to data structure describing an SHT, returned by shtns_init() or shtns_create().
 typedef struct shtns_info* shtns_cfg;
@@ -158,8 +158,6 @@ int shtns_set_grid_auto(shtns_cfg, enum shtns_type flags, double eps, int nl_ord
 shtns_cfg shtns_create_with_grid(shtns_cfg, int mmax, int nofft);
 /// Enables multi-thread transform using OpenMP with num_threads (if available). Returns number of threads that will be used.
 int shtns_use_threads(int num_threads);
-/// Selects the gpu device (device_id % Num_devices). Must be called BEFORE any initialization. Internally calls cudaSetDevice(). Returns the actual device or -1 when no device found.
-int shtns_use_gpu(int device_id);
 /// beta: Perform several transforms together (batch). Howmany is the number of transforms, spec_dist the distance between spectral arrays.
 int shtns_set_batch(shtns_cfg shtns, int howmany, long spec_dist);
 

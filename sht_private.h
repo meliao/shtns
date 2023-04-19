@@ -63,7 +63,6 @@ extern "C" {
 #endif /* __cplusplus */
 
 /// private gpu functions:
-int cushtns_use_gpu(int);
 int init_gpu_staging_buffer(shtns_cfg shtns);
 #ifdef __cplusplus
 }

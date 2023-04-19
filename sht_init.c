@@ -1616,21 +1616,6 @@ int shtns_use_threads(int num_threads)
 	return omp_threads;
 }
 
-/** Enables parallel transforms on selected GPU device, if available (see \ref compil).
- Call BEFORE any initialization of shtns to select a GPU device. Returns the actual device id used, or -1 if no device found.
- \li If device_id >= 0, try to use device with number device_id % device_count.
- \li If device_d < 0, do not try to use GPU.
- WARNING: Calls cudaSetDevice() internally, so it changes the current device for the entire host thread.
- */
-int shtns_use_gpu(int device_id)
-{
-#ifdef SHTNS_GPU
-	return cushtns_use_gpu(device_id);
-#else
-	return -1;
-#endif
-}
-
 /// fill the given array with Gauss weights. returns the number of weights written, which
 /// may be zero if the grid is not a Gauss grid.
 int shtns_gauss_wts(shtns_cfg shtns, double *wts)
@@ -1670,11 +1655,6 @@ void shtns_verbose_(int *v)
 void shtns_use_threads_(int *num_threads)
 {
 	shtns_use_threads(*num_threads);
-}
-
-void shtns_use_gpu_(int *device_id)
-{
-	shtns_use_gpu(*device_id);
 }
 
 /// Print info

@@ -111,10 +111,8 @@ inline void* align_ptr(void* p, uintptr_t align) {
 	return (void*) ((((uintptr_t) p) + (align-1)) &~ (align-1));
 }
 
-int cuda_gpu_id = 0;	// by default, use gpu device 0
-
 // WARNING! streams should be set BEFORE this routine is called!!
-static int init_cuda_buffer_fft(shtns_cfg shtns)
+static int init_cuda_buffer_fft(shtns_cfg shtns, int cuda_gpu_id)
 {
 	cudaError_t err = cudaSuccess;
 	int err_count = 0;
@@ -555,7 +553,7 @@ int cushtns_init_gpu(shtns_cfg shtns)
 	shtns->d_mx_stdt = d_mx_stdt;
 	shtns->d_mx_van = d_mx_van;
 
-	err_count += init_cuda_buffer_fft(shtns);
+	err_count += init_cuda_buffer_fft(shtns, device_id);
 	err_count += init_cuda_program(shtns, gpu_arch_target);
 
 	if (err_count != 0) {
@@ -564,24 +562,6 @@ int cushtns_init_gpu(shtns_cfg shtns)
 	}
 
 	return device_id;		// success, return device_id
-}
-
-/// \internal Enables parallel transforms on selected GPU device, if available. \see shtns_use_gpu
-extern "C"
-int cushtns_use_gpu(int device_id)
-{
-	int count = 0;
-	if (device_id >= 0) {
-		cudaGetDeviceCount(&count);
-		if (count > 0) {
-			device_id = device_id % count;		// assign actual gpu in a round-robin fashion
-			cudaSetDevice(device_id);
-			cuda_gpu_id = device_id;
-			return cuda_gpu_id;
-		}
-	}
-	cuda_gpu_id = -1;
-	return -1;		// disable gpu.
 }
 
 /// WARNING: cushtns_set_streams must be called BEFORE shtns_set_grid
