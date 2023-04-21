@@ -928,7 +928,10 @@ const char* shtns_get_build_info() {
   #endif
 	__DATE__ ", " __TIME__  ", id: ");
 	if (strlen(SHTNS_GIT) > 0) n += snprintf(s+n, 127-n, SHTNS_GIT ",");
-	snprintf(s+n, 127-n, _SHTNS_ID_);
+	n += snprintf(s+n, 127-n, _SHTNS_ID_);
+  #ifdef SHTNS_GPU
+	snprintf(s+n, 127-n, (SHTNS_GPU == 2) ? ",hip" : ",cuda");
+  #endif
 	s[127]=0;
 	return s;
 }
