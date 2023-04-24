@@ -53,8 +53,10 @@
 	#ifdef HAVE_LIBROCFFT
 	#include <hipfft.h>
 	#endif
-	/// The warp size is always 64 on AMD devices
+	/// The warp size is 64 on supported AMD devices
 	#define WARPSZE 64
+	// convert cuda names to hip names.
+	#include "cuda2hip.h"
 #endif
 #include "shtns_cuda.h"
 

@@ -21,9 +21,10 @@
 
 #ifdef __HIP_PLATFORM_AMD__
 #include <hip/hip_runtime.h>
-#include "cuda2hip.h"		// tanslates cuda API names to HIP
+typedef hipStream_t shtns_gpu_stream_t;
 #else
 #include <cuda_runtime.h>
+typedef cudaStream_t shtns_gpu_stream_t;
 #endif
 
 
@@ -73,10 +74,10 @@ int cushtns_init_gpu(shtns_cfg shtns);
 /// \param[in] compute_stream is a cuda Stream that will be used for transforms. If 0, the default (0) stream will be used.
 /// \param[in] transfer_stream is a cuda Stream that will be used for data transfers between host and device for auto-offload mode. If 0, a new stream will be created and used.
 /// \returns a new \ref shtns_cfg that can safely be used concurrently with the original one.
-shtns_cfg cushtns_clone(shtns_cfg shtns, cudaStream_t compute_stream, cudaStream_t transfer_stream);
+shtns_cfg cushtns_clone(shtns_cfg shtns, shtns_gpu_stream_t compute_stream, shtns_gpu_stream_t transfer_stream);
 
 /// Set user-specified streams for compute (including fft) and transfer.
-void cushtns_set_streams(shtns_cfg shtns, cudaStream_t compute_stream, cudaStream_t transfer_stream);
+void cushtns_set_streams(shtns_cfg shtns, shtns_gpu_stream_t compute_stream, shtns_gpu_stream_t transfer_stream);
 
 /// Release resources needed for GPU transforms, which won't work after this call.
 void cushtns_release_gpu(shtns_cfg);
