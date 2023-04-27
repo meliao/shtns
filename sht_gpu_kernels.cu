@@ -1573,7 +1573,7 @@ static void ilegendre(shtns_cfg shtns, const real *q, real* ql, const int llim, 
 	const int mres = shtns->mres;
 
 	if (spat_dist == 0) spat_dist = shtns->spat_stride;
-	cudaMemsetAsync(ql, 0, sizeof(real) * NFIELDS * shtns->nlm_stride, shtns->comp_stream);		// set to zero before we start.
+	cudaMemsetAsync(ql, 0, sizeof(real) * ((NFIELDS==1) ? 2*shtns->nlm : NFIELDS*shtns->nlm_stride), shtns->comp_stream);		// set to zero before we start.
 	if (llim < mmax*mres) mmax = llim / mres;	// truncate mmax too !
 	if (mmax==0) {
 		ileg_m0<S, NFIELDS, real>(shtns, q, ql, llim, spat_dist, shtns->nlm_stride);
