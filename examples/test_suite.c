@@ -100,7 +100,8 @@ void test_analys()
 	const int nlat = 64;
 	const int nphi = 8;
 	const int lmax = 7;
-	shtns_cfg sht = shtns_init(sht_orthonormal | sht_quick_init, lmax, 3, 1, nlat, nphi);
+	shtns_cfg sht = shtns_init(sht_quick_init | SHT_ALLOW_GPU | SHT_THETA_CONTIGUOUS, lmax, 3, 1, nlat, nphi);
+	shtns_print_cfg(sht);
 	
 	double d[nphi][nlat];
 	complex double q[sht->nlm];
