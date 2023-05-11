@@ -1022,7 +1022,8 @@ leg_m_highllim_kernel(const real *al, const real *ct, const real *ql, real *q, c
 		while (l<llim) {
 			if (ka+4 >= WARPSZE) {		// cache coefficients
 				ak[j] = al[(j&31)];
-				qk[j] = ql[2*l+(j&31)];
+				const int ll = 2*l+(j&31);
+				qk[j] = ((ll>>1) <= llim) ? ql[ll] : 0.0;
 				ka = 0;
 			}
 			y1 = ak[ka+1+ofs]*cost*y0 + ak[ka+ofs]*y1;
