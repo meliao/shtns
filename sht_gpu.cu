@@ -890,16 +890,30 @@ void SH_to_spat_gpu(shtns_cfg shtns, cplx *Qlm, double *Vr, const long int llim)
 	}
 
 	// copy spectral data to GPU
+  if (shtns->sizeof_real == 4) {
+	// convert
+	float* tmp_f = (float*) malloc(2*nlm*sizeof(float) * shtns->howmany);
+	for (int i=0; i<2*nlm*shtns->howmany; i++) tmp_f[i] = ((double*) Qlm)[i];
+	// copy spectral data to GPU
+	err = cudaMemcpy(d_qlm, tmp_f, 2*nlm*sizeof(float) * shtns->howmany, cudaMemcpyHostToDevice);
+	free(tmp_f);
+  } else
 	err = cudaMemcpy(d_qlm, Qlm, 2*nlm*sizeof(double) * shtns->howmany, cudaMemcpyHostToDevice);
 	if (err != cudaSuccess) { CUDA_ERROR_CHECK;	return; }
 
 	// SHT on the GPU
+	if (shtns->sizeof_real == 4) {
+		cuda_SH_to_spat<0,1,float>(shtns, (cplx_f*) d_qlm, (float*)d_q, llim, mmax);	// start with Legendre, d_qlm may be available for Fourier.
+	} else
 	cuda_SH_to_spat<0,1>(shtns, (cplx*) d_qlm, d_q, llim, mmax);	// start with Legendre, d_qlm may be available for Fourier.
 	if (CUDA_ERROR_CHECK) return;
 
 	// copy back spatial data
-	err = cudaMemcpy(Vr, d_q, shtns->nspat * sizeof(double), cudaMemcpyDeviceToHost);
+	err = cudaMemcpy(Vr, d_q, shtns->nspat * shtns->sizeof_real, cudaMemcpyDeviceToHost);
 	if (err != cudaSuccess) { CUDA_ERROR_CHECK;	return; }
+  if (shtns->sizeof_real == 4) {	// convert float to double in-place
+	for (int i=shtns->nspat-1; i>=0; i--) 	Vr[i] = ((float*)Vr)[i];
+  }
 }
 
 
@@ -1053,10 +1067,19 @@ void spat_to_SH_gpu(shtns_cfg shtns, double *Vr, cplx *Qlm, const long int llim)
 	double *d_qlm = d_q;		// "in-place" operation possible
 
 	// copy spatial data to GPU
+	if (shtns->sizeof_real == 4) {		// convert double to float
+		float* tmp_f = (float*) malloc(sizeof(float)*shtns->nspat);
+		for (int i=0; i<shtns->nspat; i++) tmp_f[i] = Vr[i];
+		err = cudaMemcpy(d_q, tmp_f, shtns->nspat * sizeof(float), cudaMemcpyHostToDevice);
+		free(tmp_f);
+	} else
 	err = cudaMemcpy(d_q, Vr, shtns->nspat * sizeof(double), cudaMemcpyHostToDevice);
 	if (err != cudaSuccess) { CUDA_ERROR_CHECK;	return; }
 
 	// SHT on the GPU
+	if (shtns->sizeof_real == 4) {
+		cu_spat_to_SH_float(shtns, (float*) d_q, (cplx_f*) d_qlm, llim);
+	} else
 	cu_spat_to_SH(shtns, d_q, (cplx*) d_qlm, llim);
 	CUDA_ERROR_CHECK;
 
@@ -1069,8 +1092,11 @@ void spat_to_SH_gpu(shtns_cfg shtns, double *Vr, cplx *Qlm, const long int llim)
 		memset(Qlm+nlm, 0, 2*(shtns->nlm - nlm)*sizeof(double));	// zero out on cpu (during the transform on GPU).
 	}
 	// copy back spectral data
-	err = cudaMemcpy(Qlm, d_qlm, 2*nlm*sizeof(double) * shtns->howmany, cudaMemcpyDeviceToHost);
+	err = cudaMemcpy(Qlm, d_qlm, 2*nlm * shtns->howmany * shtns->sizeof_real, cudaMemcpyDeviceToHost);
 	if (err != cudaSuccess) { CUDA_ERROR_CHECK;	return; }
+	if (shtns->sizeof_real == 4) {	// convert float to double in-place
+		for (int i=2*nlm*shtns->howmany-1; i>=0; i--)	((double*)Qlm)[i] = ((float*)Qlm)[i];
+	}
 }
 
 

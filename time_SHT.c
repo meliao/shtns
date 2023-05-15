@@ -48,6 +48,9 @@ int error = 0;
 #define COLOR_ERR "\033[91m"
 #define COLOR_END "\033[0m"
 
+double err_err = 1e-6;
+double err_wrn = 1e-9;
+
 void runerr(const char * error_text)
 {
 	printf("%s\n",error_text);
@@ -137,10 +140,10 @@ void print_error(double err_rms, double err_max, int l_max, int lm_max, int b_ma
 {
 	printf("  %s => max error = %g (l=%d,lm=%d,batch=%d)   rms error = %g   ",	name, err_max, l_max, lm_max, b_max, err_rms);
 
-	if ((err_max > 1e-4) || (err_rms > 1e-6) || isNotFinite(err_rms)) {
+	if ((err_max > 100*err_err) || (err_rms > err_err) || isNotFinite(err_rms)) {
 		printf(COLOR_ERR " **** ERROR **** " COLOR_END "\n");
 		error++;
-	} else if ((err_max > 1e-7) || (err_rms > 1e-9)) {
+	} else if ((err_max > 100*err_wrn) || (err_rms > err_wrn)) {
 		printf(COLOR_WRN "SUSPECT" COLOR_END "\n");
 	} else
 		printf(COLOR_OK "OK" COLOR_END "\n");
@@ -779,11 +782,13 @@ int main(int argc, char *argv[])
 		if (strcmp(name,"robert") == 0) robert_form = t;
 		if (strcmp(name,"nopadding") == 0) layout_opts &= ~SHT_ALLOW_PADDING;		// Disable padding.
 		if (strcmp(name,"nogpu") == 0) layout_opts &= ~SHT_ALLOW_GPU;		// Disable gpu.
+		if (strcmp(name,"float") == 0) layout_opts |= SHT_FP32;		// use float instead of double
 		if (strcmp(name,"accuracy") == 0) accuracy_test = 1;			// Perform an accuracy test instead of a speed test.
 		if (strcmp(name,"batch") == 0) { batch = -1;  layout = SHT_THETA_CONTIGUOUS; }	// Perform several transforms together, this implies a specific layout.
 		if (strcmp(name,"noltr") == 0) noltr = 1;
 	}
 
+	if (layout_opts & SHT_FP32) { err_err = 3e-3;  err_wrn = 3e-5; }
 	if (vector == 0) layout_opts |= SHT_SCALAR_ONLY;
 	printf("loadsave = %d\n", !!(layout_opts & SHT_LOAD_SAVE_CFG));
 	if (MMAX == -1) MMAX=LMAX/MRES;
@@ -978,7 +983,7 @@ int main(int argc, char *argv[])
 			if (err < t) {	err = t;	lm_max = lm;  }
 		}
 		printf("** Test forward transform (analysis) spat_to_SH() :: max err = %g   at lm=%d   ", err, lm_max);
-		if (err > 1e-12) {		printf(COLOR_ERR "**** ERROR ****" COLOR_END "\n");	error++;	}
+		if (err > err_wrn) {		printf(COLOR_ERR "**** ERROR ****" COLOR_END "\n");	error++;	}
 		else printf(COLOR_OK "OK" COLOR_END "\n");
 		//write_vect("spec_analys_test.txt", (double*) Slm, 2*NLM);
 
@@ -996,7 +1001,7 @@ int main(int argc, char *argv[])
 			}
 		}
 		printf("** Test backward transform (synthesis) SH_to_spat() :: max err = %g   ", err);
-		if (err > 1e-12) {		printf(COLOR_ERR "**** ERROR ****" COLOR_END "\n");	error++;	}
+		if (err > err_wrn) {		printf(COLOR_ERR "**** ERROR ****" COLOR_END "\n");	error++;	}
 		else printf(COLOR_OK "OK" COLOR_END "\n");
 	}
 
