@@ -1407,6 +1407,7 @@ int shtns_set_grid_auto(shtns_cfg shtns, enum shtns_type flags, double eps, int 
 		if (flags == sht_reg_poles) shtns_runerr("Grid cannot include poles with MagIC layout.");
 	#endif
 	#if SHTNS_GPU
+		shtns->sizeof_real = (layout & SHT_FP32) ? 4 : 8;
 		if ((layout & SHT_ALLOW_GPU) && (*nlat % 4)) printf("!!! Warning !!! Nlat must be a multiple of 4 to run on GPU\n");
 	#endif
 
@@ -1518,7 +1519,7 @@ int shtns_set_grid_auto(shtns_cfg shtns, enum shtns_type flags, double eps, int 
 		#if SHT_VERBOSE > 0
 			if (verbose) printf("        + SHT accuracy = %.3g\n",t);
 		#endif
-		if ((t > 1.e-6) || isNotFinite(t)) {
+		if (t > ((layout & SHT_FP32) ? 5e-3 : 1.e-6) || isNotFinite(t)) {
 			printf("\033[93m Accuracy test failed. Please file a bug report at https://bitbucket.org/nschaeff/shtns/issues \033[0m\n");
 			#if (VSIZE2 == 8) && (defined __GNUC__) && !(defined __INTEL_COMPILER)
 			printf("\033[93m You may need to upgrade the 'binutils' package, see https://bitbucket.org/nschaeff/shtns/issues/37/ \033[0m\n");

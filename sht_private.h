@@ -183,6 +183,7 @@ struct shtns_info {		// MUST start with "int nlm;"
 	#ifdef SHTNS_GPU
 	/* cuda stuff */
 	short cu_flags;
+	short sizeof_real;		// 4 for float, 8 for double
 	double* d_clm;
 	double* d_xlm;
 	double* d_alm;
@@ -193,8 +194,6 @@ struct shtns_info {		// MUST start with "int nlm;"
 	double* gpu_buf_in;		// inner buffer: can each hold either spectral or spatial fields.
 	size_t nlm_stride, spat_stride;
 	cudaStream_t xfer_stream, comp_stream;		// the cuda streams
-	//float* d_alm_f;
-	//float* d_ct_f;
 	CUfunction gpu_kernels[4];		// 4 kernels (scalar & vector, synth & analys)
 	unsigned short gridDim_x[3];	// third value is for synthesis when nwarp[3] > 0
 	unsigned short gridDim_y[2];
@@ -258,6 +257,7 @@ struct shtns_rot_ {		// describe a rotation matrix
 
 // value for on-the-fly transforms is lower because it allows to optimize some more (don't compute l which are not significant).
 #define SHT_L_RESCALE_FLY 1000
+#define SHT_L_RESCALE_FLY_FLOAT 128
 // set to a value close to the machine accuracy, it allows to speed-up on-the-fly SHTs with very large l (lmax > SHT_L_RESCALE_FLY).
 #define SHT_ACCURACY 1.0e-20
 // scale factor for extended range numbers (used in on-the-fly transforms to compute recurrence)

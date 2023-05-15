@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2010-2022 Centre National de la Recherche Scientifique.
+ * Copyright (c) 2010-2023 Centre National de la Recherche Scientifique.
  * written by Nathanael Schaeffer (CNRS, ISTerre, Grenoble, France).
  * 
  * nathanael.schaeffer@univ-grenoble-alpes.fr
@@ -36,9 +36,6 @@
 // TODO: some parameters can be made compile-time constants!
 // 		nlat_2, nphi, m_inc, mpos_scale
 
-#define SHT_ACCURACY 1.0e-40
-#define SHT_SCALE_FACTOR 2.0370359763344860863e+90
-
 // define our own suffle macros, to accomodate cuda<9 and cuda>=9
 #if __CUDACC_VER_MAJOR__ < 9
 	#define shfl_xor(...) __shfl_xor(__VA_ARGS__)
@@ -69,18 +66,18 @@
 #endif
 
 #if (__CUDACC_VER_MAJOR__ < 8) || ( defined(__CUDA_ARCH__) && __CUDA_ARCH__ < 600 )
-__device__ __forceinline__ double atomicAdd_sht(double* address, double val)
+__device__ __forceinline__ void atomicAdd_sht(double* address, double val)
 {
-	unsigned long long int* address_as_ull =
-							 (unsigned long long int*)address;
-	unsigned long long int old = *address_as_ull, assumed;
+	unsigned long long* address_as_ull = (unsigned long long*)address;
+	unsigned long long old = *address_as_ull, assumed;
 	do {
 		assumed = old;
-	old = atomicCAS(address_as_ull, assumed,
-						__double_as_longlong(val +
-							   __longlong_as_double(assumed)));
+		old = atomicCAS(address_as_ull, assumed,
+						__double_as_longlong(val + __longlong_as_double(assumed)));
 	} while (assumed != old);
-	return __longlong_as_double(old);
+}
+__device__ __forceinline__ void atomicAdd_sht(float* address, float val) {
+	atomicAdd(adress,val);
 }
 #else
 	#define atomicAdd_sht atomicAdd
@@ -97,6 +94,9 @@ __device__ __forceinline__ bool polar_skip_sint(double sint, int llim, int m)
 		return (m - 80 > x);
 	#endif
 }
+__device__ __forceinline__ bool polar_skip_sint(float sint, int llim, int m) {
+	return false;
+}
 
 __device__ __forceinline__ bool polar_skip_sint2(double sint2, int llim, int m)
 {
@@ -104,11 +104,14 @@ __device__ __forceinline__ bool polar_skip_sint2(double sint2, int llim, int m)
 	int mm = m - ((LMAX > 10350) ? max(80, llim>>7) : 80);
 	return (mm>0) && (mm*mm > (int) (sint2*(llim*llim)));
 }
+__device__ __forceinline__ bool polar_skip_sint2(float sint2, int llim, int m) {
+	return false;
+}
 
 #if BLKSZE_SH2ISH > 0
-__device__ double qish(const double* __restrict__ xlm, const double* __restrict__ ql, const int llim_m, int ll)
+__device__ real qish(const real* __restrict__ xlm, const real* __restrict__ ql, const int llim_m, int ll)
 {
-	double q = ql[ll];
+	real q = ql[ll];
 	const int x_ofs = 3*(ll >> 2) + (ll&2);
 	q *= xlm[x_ofs];
 	if (((ll&2)==0) && (ll+2 <2*llim_m))	// l-m even
@@ -124,11 +127,11 @@ template<int S> __global__
 __launch_bounds__(64, 1)	// leads to better performance for small transforms on MI250
 #endif
 void leg_m_kernel(
-	const double* __restrict__ al, const double* __restrict__ ct, const double* __restrict__ ql, double *q,
+	const real* __restrict__ al, const real* __restrict__ ct, const real* __restrict__ ql, real *q,
 	const int llim, const int nlat_2, const int nphi, const int m_inc,
 	const int ql_dist, const int q_dist
 #if BLKSZE_SH2ISH > 0
-	,const double* __restrict__ xlm
+	,const real* __restrict__ xlm
 #endif
 )
 
@@ -145,20 +148,20 @@ void leg_m_kernel(
 	const int LSPAN = (WARPSZE==32 && BLOCKSIZE >= 2*WARPSZE) ? BLOCKSIZE/2 : WARPSZE;		// always WARPSZE for amd
 	static_assert(LSPAN <= BLOCKSIZE, "LSPAN must not exceed BLOCKSIZE");
 	static_assert(LSPAN % 4 == 0, "LSPAN must be a multiple of 4");
-	__shared__ double ak[LSPAN];
-	__shared__ double qk[NFIELDS][(M0_ONLY) ? LSPAN : LSPAN*2];
+	__shared__ real ak[LSPAN];
+	__shared__ real qk[NFIELDS][(M0_ONLY) ? LSPAN : LSPAN*2];
 
 	static_assert( (!HI_LLIM) || ( NW==1 || (NW&1)==0 ), "high llim works with NW=1 or NW even" );
 
 	#define COST_CACHE		// optional: store cos(theta) into shared memory to reduce register pressure
-	double y0[NW];
-	double y1[NW];
-	double ct2[NW];
+	real y0[NW];
+	real y1[NW];
+	real ct2[NW];
 	#ifndef COST_CACHE
-	double cost_[NW];
+	real cost_[NW];
 	#define COST(i,j) cost_[i]
 	#else
-	__shared__ double cost_[NW][BLOCKSIZE];
+	__shared__ real cost_[NW][BLOCKSIZE];
 	#define COST(i,j) cost_[i][j]
 	#endif
 	#pragma unroll
@@ -183,7 +186,7 @@ void leg_m_kernel(
 		#pragma unroll
 		for (int i=0; i<NW; i++) {	COST(i,j) = ct2[i];		ct2[i] *= ct2[i];	}	// cos(theta)^2
 
-		double re[NFIELDS][NW], ro[NFIELDS][NW];
+		real re[NFIELDS][NW], ro[NFIELDS][NW];
 		#pragma unroll
 		for (int f=0; f<NFIELDS; f++) {
 			#pragma unroll
@@ -252,7 +255,7 @@ void leg_m_kernel(
 			}
 			#pragma unroll
 			for (int i=0; i<NW; i++) {
-				double tmp = (ak[k+1]*ct2[i] + ak[k]) * y1[i] + y0[i];
+				real tmp = (ak[k+1]*ct2[i] + ak[k]) * y1[i] + y0[i];
 				y0[i] = y1[i];
 				y1[i] = tmp;
 			}
@@ -283,7 +286,7 @@ void leg_m_kernel(
 	}
 #if M0_ONLY==0
 	else { 	// m>0
-		double rer[NFIELDS][NW], ror[NFIELDS][NW], rei[NFIELDS][NW], roi[NFIELDS][NW];
+		real rer[NFIELDS][NW], ror[NFIELDS][NW], rei[NFIELDS][NW], roi[NFIELDS][NW];
 		const int m = im*MRES;
 		int l = (im*(2*(LMAX+1)-MRES-m))>>1;
 		#if BLKSZE_SH2ISH > 0
@@ -347,43 +350,46 @@ void leg_m_kernel(
 		} else if (BLOCKSIZE > WARPSZE) { __syncthreads(); } else { _syncwarp; }
 		// at this point, block is in sync (consistent view of shared memory).
 	if (!skip_block) {
-		l = m - S;
-		if (S==1 && ROBERT_FORM) l = m;		// multiply vectors by sin(theta) with robert_form
-		if (l&1) {	// square-root needed
-			#pragma unroll
-			for (int i=0; i<NW; i++)	y0[i] = sqrt(y1[i]);
-		}
-		l >>= 1;
 		#if HI_LLIM==1
-		int nsint = 0;
-		int ny = 0;
+		int ny = 0;		// only used for HI_LLIM
 		#else
-		const int ny = 0;
+		constexpr int ny = 0;
 		#endif
-		do {		// sin(theta)^(m-S)
-			if (l&1) {
+		{	// compute sin(theta)^(m-S)
+			l = (S==1 && ROBERT_FORM) ? m : m-S;		// multiply vectors by sin(theta) with robert_form
+			if (l&1) {	// square-root needed
 				#pragma unroll
-				for (int i=0; i<NW; i++) y0[i] *= y1[i];
+				for (int i=0; i<NW; i++)	y0[i] = sqrt(y1[i]);
+			}
+			l >>= 1;
+			#if HI_LLIM==1
+			int nsint = 0;
+			#endif
+			do {
+				if (l&1) {
+					#pragma unroll
+					for (int i=0; i<NW; i++) y0[i] *= y1[i];
+					#if HI_LLIM==1
+						ny += nsint;
+						if (y0[NW-1] < (SHT_ACCURACY+1.0/SHT_SCALE_FACTOR)) {
+							#pragma unroll
+							for (int i=0; i<NW; i++) y0[i] *= SHT_SCALE_FACTOR;
+							ny--;
+						}
+					#endif
+				}
+				#pragma unroll
+				for (int i=0; i<NW; i++) y1[i] *= y1[i];
 				#if HI_LLIM==1
-					ny += nsint;
-					if (y0[NW-1] < (SHT_ACCURACY+1.0/SHT_SCALE_FACTOR)) {
+					nsint += nsint;
+					if (y1[NW-1] < 1.0/SHT_SCALE_FACTOR) {
+						nsint--;
 						#pragma unroll
-						for (int i=0; i<NW; i++) y0[i] *= SHT_SCALE_FACTOR;
-						ny--;
+						for (int i=0; i<NW; i++) y1[i] *= SHT_SCALE_FACTOR;
 					}
 				#endif
-			}
-			#pragma unroll
-			for (int i=0; i<NW; i++) y1[i] *= y1[i];
-			#if HI_LLIM==1
-				nsint += nsint;
-				if (y1[NW-1] < 1.0/SHT_SCALE_FACTOR) {
-					nsint--;
-					#pragma unroll
-					for (int i=0; i<NW; i++) y1[i] *= SHT_SCALE_FACTOR;
-				}
-			#endif
-		} while(l >>= 1);
+			} while(l >>= 1);
+		}
 
 		#pragma unroll
 		for (int i=0; i<NW; i++) y1[i] = (al[1]*ct2[i] + al[0])*y0[i];
@@ -391,7 +397,7 @@ void leg_m_kernel(
 		l=m;		al+=2;
 		while (l<=llim - LSPAN) {	// compute even and odd parts
 			for (int k = 0; k<LSPAN; k+=4) {
-				double tmp[NW];
+				real tmp[NW];
 				#pragma unroll
 				for (int i=0; i<NW; i++)	tmp[i] = ak[k+1]*ct2[i] + ak[k];
 				if ((!HI_LLIM) || (ny==0)) {
@@ -464,7 +470,7 @@ void leg_m_kernel(
 		}
 		int k=0;
 		while (l<llim) {	// compute even and odd parts
-			double tmp[NW];
+			real tmp[NW];
 			#pragma unroll
 			for (int i=0; i<NW; i++)	tmp[i] = ak[k+1]*ct2[i] + ak[k];
 			if ((!HI_LLIM) || (ny==0)) {
@@ -538,7 +544,7 @@ void leg_m_kernel(
 
 		#pragma unroll
 		for (int i=0; i<NW; i++) {
-			const double sgn = (HI_LLIM && NW>1) ? (i^1)-i : (j^1)-j; 	//(it^1) - it;	// 1 - 2*(j&1);		// 1 for even j, -1 for odd j.
+			const real sgn = (HI_LLIM && NW>1) ? (i^1)-i : (j^1)-j; 	//(it^1) - it;	// 1 - 2*(j&1);		// 1 for even j, -1 for odd j.
 			const int it = BLOCKSIZE*NW * blockIdx.x + ((HI_LLIM) ? NW*j+i : j+i*BLOCKSIZE);
 			const int i2 = (HI_LLIM && NW>1) ? i^1 : i;
 			if (it < nlat_2) {
@@ -565,7 +571,7 @@ template<int S> __global__
 #ifdef __gfx90a__
 __launch_bounds__(64,1)
 #endif
-void ileg_m_kernel(const double* __restrict__ al, const double* __restrict__ ct, const double* __restrict__ q, double *ql, const int llim, 
+void ileg_m_kernel(const real* __restrict__ al, const real* __restrict__ ct, const real* __restrict__ q, real *ql, const int llim, 
 	const int nlat_2, const int nphi, const int m_inc, const int q_dist, const int ql_dist)
 {
 	const int BLOCKSIZE=BLKSZE_A;
@@ -584,26 +590,26 @@ void ileg_m_kernel(const double* __restrict__ al, const double* __restrict__ ct,
 
 	const int padding = 2;		// padding = 0 is very bad for performance (shared-memory bank conflicts).
 	const int l_inc = BLOCKSIZE+padding;
-	__shared__ double ak[LSPAN+2];	// cache
+	__shared__ real ak[LSPAN+2];	// cache
 	const int NROWS = M0_ONLY ? ( (LSPAN>4*NFIELDS) ? LSPAN/2 : 2*NFIELDS ) : ( (LSPAN>8*NFIELDS) ? LSPAN/2 : 4*NFIELDS );
-	__shared__ double yl[NROWS*l_inc - padding];		// yl is also used for even/odd computation.
+	__shared__ real yl[NROWS*l_inc - padding];		// yl is also used for even/odd computation.
 
-	double cost = (it < nlat_2) ? ct[it] : 0.0;
-	double y0, y1;
+	real cost = (it < nlat_2) ? ct[it] : 0.0;
+	real y0, y1;
 
 	if (im == 0) {
 		const int NW = NFIELDS*LSPAN;
 		// re-assign each thread an l (transposed view)
 		const int ll = (j % (BLOCKSIZE/NFIELDS)) / (BLOCKSIZE/NW);
-		double my_reo[NW];			// in registers
+		real my_reo[NW];			// in registers
 
 		q += b*NFIELDS*q_dist;
 		if (j < LSPAN+2) ak[j] = al[j];
 
 		#pragma unroll
 		for (int f=0; f<NFIELDS; f++) {
-			double x0 = (it < nlat_2) ? q[it              + f*q_dist] : 0.0;	// north
-			double x1 = (it < nlat_2) ? q[nlat_2*2-1 - it + f*q_dist] : 0.0;	// south
+			real x0 = (it < nlat_2) ? q[it              + f*q_dist] : 0.0;	// north
+			real x1 = (it < nlat_2) ? q[nlat_2*2-1 - it + f*q_dist] : 0.0;	// south
 			yl[f*2*l_inc +j]     = x0+x1;			// even
 			yl[(f*2+1)*l_inc +j] = (x0-x1)*cost;	// odd
 		}
@@ -628,8 +634,8 @@ void ileg_m_kernel(const double* __restrict__ al, const double* __restrict__ ct,
 			if (BLOCKSIZE > WARPSZE) {	__syncthreads(); } else { _syncwarp_fence; }
 				#pragma unroll
 				for (int k=0; k<LSPAN/2; k+=2) {		// compute a block of the matrix, write it in shared mem.
-					double c0 = ak[2*k+3]*cost + ak[2*k+2];
-					double c1 = ak[2*k+5]*cost + ak[2*k+4];
+					real c0 = ak[2*k+3]*cost + ak[2*k+2];
+					real c1 = ak[2*k+5]*cost + ak[2*k+4];
 					yl[k*l_inc +j]     = y0;		// l and l+1
 					yl[(k+1)*l_inc +j] = y1;		// l+2 and l+3
 					y0 += c0 * y1;
@@ -641,7 +647,7 @@ void ileg_m_kernel(const double* __restrict__ al, const double* __restrict__ ct,
 			if (BLOCKSIZE > WARPSZE) {	__syncthreads(); } else { _syncwarp_fence; }
 
 			const int NACC = 4;		// number of independent accumulators per NFIELD. 4 is good for V100
-			double qll[NACC];		// accumulators
+			real qll[NACC];		// accumulators
 			#pragma unroll
 			for (int a=0; a<NACC; a++) 	qll[a] = my_reo[a] * yl[itl + a*(BLOCKSIZE/NW)];	// first element of sum
 			const int ql_ofs = (l+ll) + (b*NFIELDS+f0)*ql_dist;		// compute destination ofset in parallel with reduce!
@@ -687,7 +693,7 @@ void ileg_m_kernel(const double* __restrict__ al, const double* __restrict__ ct,
 		const int NW = NFIELDS*LSPAN*2;
 		// re-assign each thread an l (transposed view)
 		const int ll = (j % (BLOCKSIZE/NFIELDS)) / (BLOCKSIZE/NW);		// actualy ll = 2*l + (imag ? 1 : 0)
-		double my_reo[NW];			// in registers
+		real my_reo[NW];			// in registers
 		const int m = im*MRES;
 		y0 = cost * cost;			// cos(theta)^2
 		int l = (im*(2*(LMAX+1)-MRES-m))>>1;
@@ -716,16 +722,16 @@ void ileg_m_kernel(const double* __restrict__ al, const double* __restrict__ ct,
 		#endif
 
 		q += b*NFIELDS*q_dist;
-		const double sgn = (j^1)-j;	//	1-2*(j&1);	// +/-
-		const double costx = shfl_xor(cost, 1)*sgn;		// neighboor cost for "reverse" exchange
+		const real sgn = (j^1)-j;	//	1-2*(j&1);	// +/-
+		const real costx = shfl_xor(cost, 1)*sgn;		// neighboor cost for "reverse" exchange
 		#pragma unroll
 		for (int f=0; f<NFIELDS; f++) {
-			double qer = (it < nlat_2) ? q[im*m_inc        + it            + f*q_dist] : 0.0;	// north imag (ani)
-			double t0  = (it < nlat_2) ? q[(nphi-im)*m_inc + it            + f*q_dist] : 0.0;	// north real (an)
-			double qor = (it < nlat_2) ? q[im*m_inc        + nlat_2*2-1-it + f*q_dist] : 0.0;	// south imag (asi)
-			double t1  = (it < nlat_2) ? q[(nphi-im)*m_inc + nlat_2*2-1-it + f*q_dist] : 0.0;	// south real (as)
-			double qei = t0-qer;		qer += t0;		// ani = -qei[lane+1],   bni = qei[lane-1]
-			double qoi = t1-qor;		qor += t1;		// bsi = -qoi[lane-1],   asi = qoi[lane+1];
+			real qer = (it < nlat_2) ? q[im*m_inc        + it            + f*q_dist] : 0.0;	// north imag (ani)
+			real t0  = (it < nlat_2) ? q[(nphi-im)*m_inc + it            + f*q_dist] : 0.0;	// north real (an)
+			real qor = (it < nlat_2) ? q[im*m_inc        + nlat_2*2-1-it + f*q_dist] : 0.0;	// south imag (asi)
+			real t1  = (it < nlat_2) ? q[(nphi-im)*m_inc + nlat_2*2-1-it + f*q_dist] : 0.0;	// south real (as)
+			real qei = t0-qer;		qer += t0;		// ani = -qei[lane+1],   bni = qei[lane-1]
+			real qoi = t1-qor;		qor += t1;		// bsi = -qoi[lane-1],   asi = qoi[lane+1];
 
 			yl[(f*4+3)*l_inc +(j^1)] = (qei + qoi)*costx;	// roi, exchange even and odd lanes
 			yl[(f*4+2)*l_inc + j]    = (qer - qor)*cost;	// ror
@@ -742,41 +748,44 @@ void ileg_m_kernel(const double* __restrict__ al, const double* __restrict__ ct,
 			}
 
 		cost = y0;		// cos(theta)^2
-		y0 = MPOS_SCALE;	// y0
-		l = m - S;		// exponent of sin(theta)
-		if (ROBERT_FORM && S==1) {
-			if (MRES==1 && l==0) {
-				y0 *= rsqrt(y1);	// division by sin(theta) only for m=1 in Robert form
-			} else --l;		// otherwise we just reduce the exponent of sin(theta)^l
-		}
-		if (l&1) y0 *= sqrt(y1);	// sqrt only computed when needed
-		l>>=1;
 		#if HI_LLIM==1
 		int ny = 0;
-		int nsint = 0;
-		#else
-		const int ny = 0;
 		#endif
-		do {		// sin(theta)^(m-S)
-			if (l&1) {
-				y0 *= y1;
+		{	// compute sin(theta)^(m-S)
+			y0 = MPOS_SCALE;	// y0
+			l = m - S;		// exponent of sin(theta)
+			if (ROBERT_FORM && S==1) {
+				if (MRES==1 && l==0) {
+					y0 *= rsqrt(y1);	// division by sin(theta) only for m=1 in Robert form
+				} else --l;		// otherwise we just reduce the exponent of sin(theta)^l
+			}
+			if (l&1) y0 *= sqrt(y1);	// sqrt only computed when needed
+			l>>=1;
+			#if HI_LLIM==1
+			int nsint = 0;
+			#endif
+			do {		// sin(theta)^(m-S)
+				if (l&1) {
+					y0 *= y1;
+					#if HI_LLIM==1
+						ny += nsint;
+						if (y0 < (SHT_ACCURACY+1.0/SHT_SCALE_FACTOR)) {
+							ny--;
+							y0 *= SHT_SCALE_FACTOR;
+						}
+					#endif
+				}
+				y1 *= y1;
 				#if HI_LLIM==1
-					ny += nsint;
-					if (y0 < (SHT_ACCURACY+1.0/SHT_SCALE_FACTOR)) {
-						ny--;
-						y0 *= SHT_SCALE_FACTOR;
+					nsint += nsint;
+					if (y1 < 1.0/SHT_SCALE_FACTOR) {
+						nsint--;
+						y1 *= SHT_SCALE_FACTOR;
 					}
 				#endif
-			}
-			y1 *= y1;
-			#if HI_LLIM==1
-				nsint += nsint;
-				if (y1 < 1.0/SHT_SCALE_FACTOR) {
-					nsint--;
-					y1 *= SHT_SCALE_FACTOR;
-				}
-			#endif
-		} while(l >>= 1);
+			} while(l >>= 1);
+		}
+
 		if (it < nlat_2)     y0 *= ct[it + nlat_2];		// include quadrature weights.
 		y1 = (ak[1]*cost + ak[0]) * y0;
 
@@ -794,8 +803,8 @@ void ileg_m_kernel(const double* __restrict__ al, const double* __restrict__ ct,
 			if (BLOCKSIZE > WARPSZE) {	__syncthreads(); } else { _syncwarp_fence; }
 			#pragma unroll 4
 			for (int k=0; k<LSPAN/2; k+=2) {		// compute a block of the matrix, write it in shared mem.
-				double c0 = ak[2*k+3]*cost + ak[2*k+2];
-				double c1 = ak[2*k+5]*cost + ak[2*k+4];
+				real c0 = ak[2*k+3]*cost + ak[2*k+2];
+				real c1 = ak[2*k+5]*cost + ak[2*k+4];
 					if (fabs(y0) > SHT_ACCURACY*SHT_SCALE_FACTOR + 1.0)
 					{	// rescale when value is significant
 						++ny;
@@ -818,7 +827,7 @@ void ileg_m_kernel(const double* __restrict__ al, const double* __restrict__ ct,
 				#else
 				const int NACC = 4;		// number of independent accumulators (4 is the sweetspot for MI200 / CDNA2).
 				#endif
-				double qlri[NACC];		// accumulators
+				real qlri[NACC];		// accumulators
 
 				#pragma unroll
 				for (int a=0; a<NACC; a++) {	// NACC independent accumulators
@@ -864,8 +873,8 @@ void ileg_m_kernel(const double* __restrict__ al, const double* __restrict__ ct,
 			if (BLOCKSIZE > WARPSZE) {	__syncthreads(); } else { _syncwarp_fence; }
 			#pragma unroll 4
 			for (int k=0; k<LSPAN/2; k+=2) {		// compute a block of the matrix, write it in shared mem.
-				double c0 = ak[2*k+3]*cost + ak[2*k+2];
-				double c1 = ak[2*k+5]*cost + ak[2*k+4];
+				real c0 = ak[2*k+3]*cost + ak[2*k+2];
+				real c1 = ak[2*k+5]*cost + ak[2*k+4];
 				yl[k*l_inc +j]     = y0;		// l and l+1
 				yl[(k+1)*l_inc +j] = y1;		// l+2 and l+3
 				y0 += c0 * y1;
@@ -883,7 +892,7 @@ void ileg_m_kernel(const double* __restrict__ al, const double* __restrict__ ct,
 				#else
 				const int NACC = 4;		// number of independent accumulators (4 is the sweetspot for MI200 / CDNA2).
 				#endif
-				double qlri[NACC];		// accumulators
+				real qlri[NACC];		// accumulators
 
 				#pragma unroll
 				for (int a=0; a<NACC; a++) {	// NACC independent accumulators

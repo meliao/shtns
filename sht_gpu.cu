@@ -107,12 +107,12 @@ static void destroy_cuda_buffer_fft(shtns_cfg shtns)
 }
 
 #define CACHE_LINE_GPU 128
-inline void* align_ptr(void* p, uintptr_t align) {
-	return (void*) ((((uintptr_t) p) + (align-1)) &~ (align-1));
+inline void align_ptr(void** p, size_t ofs, uintptr_t align) {
+	*p = (void*) ((((uintptr_t) (*p)) + (ofs+align-1)) &~ (align-1));
 }
 
 // WARNING! streams should be set BEFORE this routine is called!!
-static int init_cuda_buffer_fft(shtns_cfg shtns, int cuda_gpu_id)
+static int init_cuda_buffer_fft(shtns_cfg shtns, int cuda_gpu_id, int sizeof_real)
 {
 	cudaError_t err = cudaSuccess;
 	int err_count = 0;
@@ -128,7 +128,7 @@ static int init_cuda_buffer_fft(shtns_cfg shtns, int cuda_gpu_id)
 		if ((shtns->fft_mode & FFT_PHI_CONTIG_CPLX) && (nfft % 16 == 0) && (shtns->nlat_2 % 16 == 0)) {	// DEPRECATED: use the fastest data-layout for large sizes in CUFFT
 			printf("!!! Use phi-contiguous FFT +transpose: WARNING, the spatial data is neither phi-contiguous nor theta-contiguous !!!\n");
 			#if defined(HAVE_LIBCUFFT) || defined(HAVE_LIBROCFFT)
-				res = cufftPlanMany(&shtns->cufft_plan, 1, &nfft, &nfft, 1, shtns->nphi, &nfft, 1, shtns->nphi, CUFFT_Z2Z, shtns->nlat_2);
+				res = cufftPlanMany(&shtns->cufft_plan, 1, &nfft, &nfft, 1, shtns->nphi, &nfft, 1, shtns->nphi, (sizeof_real==4) ? CUFFT_C2C : CUFFT_Z2Z, shtns->nlat_2);
 			#else
 				printf("WARNING: layout not available without cuFFT/rocFFT.\n");
 				err_count ++;
@@ -139,7 +139,7 @@ static int init_cuda_buffer_fft(shtns_cfg shtns, int cuda_gpu_id)
 			int howmany = shtns->nlat_2 * shtns->howmany;		// support batched transforms
 			int dist = shtns->nlat_padded / 2;
 			#if defined(HAVE_LIBCUFFT) || defined(HAVE_LIBROCFFT)
-				res = cufftPlanMany(&shtns->cufft_plan, 1, &nfft, &nfft, dist, 1, &nfft, dist, 1, CUFFT_Z2Z, howmany);
+				res = cufftPlanMany(&shtns->cufft_plan, 1, &nfft, &nfft, dist, 1, &nfft, dist, 1, (sizeof_real==4) ? CUFFT_C2C : CUFFT_Z2Z, howmany);
 			#endif
 			#ifdef VKFFT_BACKEND
 				CUdevice vkfft_device_struct;
@@ -150,7 +150,7 @@ static int init_cuda_buffer_fft(shtns_cfg shtns, int cuda_gpu_id)
 				config.bufferStride[0] = dist;
 				config.bufferStride[1] = dist * nfft;
 				config.omitDimension[0] = 1;		// no FFT on the first dimension.
-				config.doublePrecision = 1;
+				config.doublePrecision = sizeof_real / 8;
 				if (2*(shtns->mmax+1) <= nfft) {	// let vkFFT perform the zero-padding (saves memory bandwidth)
 					config.performZeropadding[1] = 1;
 					config.frequencyZeroPadding = 1;
@@ -185,7 +185,7 @@ static int init_cuda_buffer_fft(shtns_cfg shtns, int cuda_gpu_id)
 			size_t worksize = 0;
 			cufftGetSize(shtns->cufft_plan, &worksize);
 			#if SHT_VERBOSE > 1
-				printf("cufft work-area size: %ld \t nlat*nphi = %d\n", worksize/8, shtns->nlat * shtns->nphi);
+				printf("cufft work-area size: %ld \t nlat*nphi = %d\n", worksize/sizeof_real, shtns->nlat * shtns->nphi);
 			#endif
 		#endif
 	}
@@ -202,7 +202,7 @@ static int init_cuda_buffer_fft(shtns_cfg shtns, int cuda_gpu_id)
 	if (shtns->fft_mode & FFT_PHI_CONTIG_CPLX) {
 		if (spat_stride > sze) sze = spat_stride;		// one spatial buffer for FFT -OR- 2 spectral buffers should fit in.
 	}
-	err = cudaMalloc( (void **)&shtns->gpu_buf_in,  sze*sizeof(double) * howmany );
+	err = cudaMalloc( (void **)&shtns->gpu_buf_in,  sze * sizeof_real * howmany );
 	if (err != cudaSuccess)	{	err_count++;	CUDA_ERROR_CHECK;  }
 
 	shtns->nlm_stride = nlm_stride;
@@ -225,7 +225,7 @@ int init_gpu_staging_buffer(shtns_cfg shtns)
 	double* gpu_mem = 0;
 	size_t sze = shtns->spat_stride;		// 1 spatial or spectral buffer
 	if (shtns->mx_stdt) sze *= 3;		// for vector transform: 3 spatial or spectral buffers.
-	err = cudaMalloc( (void **)&gpu_mem, sze*sizeof(double) );		// maximum GPU memory required for SHT auto-offloading
+	err = cudaMalloc( (void **)&gpu_mem, sze * shtns->sizeof_real );		// maximum GPU memory required for SHT auto-offloading
 	if (err != cudaSuccess)	{	CUDA_ERROR_CHECK;  return 1; }
 	shtns->gpu_staging_mem = gpu_mem;
 	return 0;
@@ -254,10 +254,11 @@ static int optimize_nwarp(int* nwarp, int n_target, int nw, float loss_max, cons
 	return nb;
 }
 
-int init_cuda_program(shtns_cfg shtns, const char* gpu_arch_target)
+int init_cuda_program(shtns_cfg shtns, const char* gpu_arch_target, const int sizeof_real = 8)
 {
 	const int nwarp_target = (shtns->nlat_2 + WARPSZE-1)/WARPSZE;		// number of 'warps' needed for nlat_2 points
-	const bool hi_llim = (shtns->mmax > 0  &&  shtns->lmax > SHT_L_RESCALE_FLY);	// special rescaling needed
+	const bool hi_llim = (shtns->mmax > 0  &&  
+		shtns->lmax > ((sizeof_real == 4) ? SHT_L_RESCALE_FLY_FLOAT : SHT_L_RESCALE_FLY));	// special rescaling needed
 	bool sh2ish_fuse = (SHT_ALLOW_SH2ISH_FUSE  &&  !hi_llim);		// never fuse hi_llim
 	int nwarp_s=4;		// 1 to 4 warps is a good choice on V100 for vector or when sh2ish is disabled. Usually, 4 is a bit better.
 	int nwarp_a=1;		// 1 WARP is by far the best choice here, at least on V100
@@ -355,6 +356,9 @@ int init_cuda_program(shtns_cfg shtns, const char* gpu_arch_target)
 	s += sprintf(s, "#define NW_S %d\n", nw_s);
 	s += sprintf(s, "#define MPOS_SCALE %g\n", shtns->mpos_scale_analys);
 	s += sprintf(s, "#define NLAT_2 %d\n", shtns->nlat_2);
+	if (sizeof_real == 4)
+		 s += sprintf(s, "#define SHT_ACCURACY 1.0e-15f\n#define SHT_SCALE_FACTOR 7.2057594037927936e16f\ntypedef float real;\n");		// for single-precision
+	else s += sprintf(s, "#define SHT_ACCURACY 1.0e-33\n#define SHT_SCALE_FACTOR 2.0370359763344860863e90\ntypedef double real;\n");	// for double-precision
 	#if SHT_VERBOSE > 1
 		printf("%s", src);		// displays the defines for debug purposes
 	#endif
@@ -472,14 +476,28 @@ void cushtns_release_gpu(shtns_cfg shtns)
 	shtns->cu_flags = 0;
 }
 
+int gpu_upload_convert(void* dst, double* src, size_t n_real, int dst_sizeof_real)
+{
+	float* tmp_f = 0;
+	if (dst_sizeof_real == 4) {		// convert from double to float
+		tmp_f = (float*) malloc(n_real * sizeof(float));
+		for (int i=0; i<n_real; i++) tmp_f[i] = src[i];
+		src = (double*) &tmp_f[0];
+	}
+	cudaError_t err = cudaMemcpy(dst, src, n_real * dst_sizeof_real, cudaMemcpyHostToDevice);
+	if (tmp_f) free(tmp_f);
+	return (err != cudaSuccess);
+}
+
 extern "C"
 int cushtns_init_gpu(shtns_cfg shtns)
 {
 	cudaError_t err = cudaSuccess;
 	const long nlm = shtns->nlm;
 	const long nlat_2 = shtns->nlat_2;
+	const int sizeof_real = shtns->sizeof_real;
 
-	double *buf = 0;
+	void *buf = 0;
 	double *d_alm = 0;
 	double *d_ct  = 0;
 	double *d_mx_stdt = 0;
@@ -509,41 +527,33 @@ int cushtns_init_gpu(shtns_cfg shtns)
 
 	const long nlm0 = nlm_calc(LMAX+4, MMAX, MRES);
 	// Allocate the coefficients vectors alm, ...
-	size_t sze = 2*nlm + nlm0 + 3*nlm0/2 + 4*nlat_2  +  (CACHE_LINE_GPU/sizeof(double)-1)*3;
-	if( shtns->mx_stdt) sze += 2*nlm + 2*nlm + (CACHE_LINE_GPU/sizeof(double)-1)*2;
-	err = cudaMalloc((void **)&buf, (sze + MAX_THREADS_PER_BLOCK-1)*sizeof(double));	// allow some overflow.
+	size_t sze = 2*nlm + nlm0 + 3*nlm0/2 + 4*nlat_2  +  (CACHE_LINE_GPU/sizeof_real-1)*3;
+	if( shtns->mx_stdt) sze += 2*nlm + 2*nlm + (CACHE_LINE_GPU/sizeof_real-1)*2;
+	sze += (3*nlm0/2 +1)/2 + (CACHE_LINE_GPU/sizeof_real-1);		// float buffers, in double units
+	err = cudaMalloc(&buf, (sze + MAX_THREADS_PER_BLOCK-1)*sizeof_real);	// allow some overflow.
 	if (err != cudaSuccess) err_count ++;
 	if (err_count == 0) {
-		d_alm = buf;		buf = (double*) align_ptr(buf + 2*nlm, CACHE_LINE_GPU);
-		d_clm = buf;		buf = (double*) align_ptr(buf + nlm0,  CACHE_LINE_GPU);
-		d_xlm = buf;		buf = (double*) align_ptr(buf + 3*nlm0/2, CACHE_LINE_GPU);
+		d_alm = (double*) buf;		align_ptr(&buf, 2*nlm*sizeof_real, CACHE_LINE_GPU);
+		d_clm = (double*) buf;		align_ptr(&buf, nlm0*sizeof_real,  CACHE_LINE_GPU);
+		d_xlm = (double*) buf;		align_ptr(&buf, 3*nlm0/2 * sizeof_real, CACHE_LINE_GPU);
 
-		err = cudaMemcpy(d_alm, shtns->alm, 2*nlm*sizeof(double), cudaMemcpyHostToDevice);
-		if (err != cudaSuccess)  err_count ++;
-		err = cudaMemcpy(d_clm, shtns->clm, nlm0*sizeof(double), cudaMemcpyHostToDevice);
-		if (err != cudaSuccess)  err_count ++;
-		err = cudaMemcpy(d_xlm, shtns->xlm, 3*nlm0/2*sizeof(double), cudaMemcpyHostToDevice);
-		if (err != cudaSuccess)  err_count ++;
+		err_count += gpu_upload_convert(d_alm, shtns->alm, 2*nlm, sizeof_real);
+		err_count += gpu_upload_convert(d_clm, shtns->clm, nlm0, sizeof_real);
+		err_count += gpu_upload_convert(d_xlm, shtns->xlm, 3*nlm0/2, sizeof_real);
 		if (shtns->mx_stdt) {
-			d_mx_stdt = buf;	buf = (double*) align_ptr(buf + 2*nlm, CACHE_LINE_GPU);	// Allocate the device matrix for d(sin(t))/dt
-			d_mx_van  = buf;	buf = (double*) align_ptr(buf + 2*nlm, CACHE_LINE_GPU);	// Same thing for analysis
+			d_mx_stdt = (double*) buf;	align_ptr(&buf, 2*nlm*sizeof_real, CACHE_LINE_GPU);	// Allocate the device matrix for d(sin(t))/dt
+			d_mx_van  = (double*) buf;	align_ptr(&buf, 2*nlm*sizeof_real, CACHE_LINE_GPU);	// Same thing for analysis
 
-			err = cudaMemcpy(d_mx_stdt, shtns->mx_stdt, 2*nlm*sizeof(double), cudaMemcpyHostToDevice);
-			if (err != cudaSuccess)  err_count ++;
-			err = cudaMemcpy(d_mx_van, shtns->mx_van, 2*nlm*sizeof(double), cudaMemcpyHostToDevice);
-			if (err != cudaSuccess)  err_count ++;
+			err_count += gpu_upload_convert(d_mx_stdt, shtns->mx_stdt, 2*nlm, sizeof_real);
+			err_count += gpu_upload_convert(d_mx_van, shtns->mx_van, 2*nlm, sizeof_real);
 		}
 		// Allocate the device input vector cos(theta) and gauss weights, sin(theta) and 1/sin(theta)
-		d_ct = buf;			//buf = (double*) align_ptr(buf + 4*nlat_2, CACHE_LINE_GPU);
+		d_ct = (double*) buf;			align_ptr(&buf, 4*nlat_2*sizeof_real, CACHE_LINE_GPU);
 
-		err = cudaMemcpy(d_ct, shtns->ct, nlat_2*sizeof(double), cudaMemcpyHostToDevice);
-		if (err != cudaSuccess)  err_count ++;
-		err = cudaMemcpy(d_ct + nlat_2, shtns->wg, nlat_2*sizeof(double), cudaMemcpyHostToDevice);
-		if (err != cudaSuccess)  err_count ++;
-		err = cudaMemcpy(d_ct + 2*nlat_2, shtns->st, nlat_2*sizeof(double), cudaMemcpyHostToDevice);
-		if (err != cudaSuccess)  err_count ++;
-		err = cudaMemcpy(d_ct + 3*nlat_2, shtns->st_1, nlat_2*sizeof(double), cudaMemcpyHostToDevice);
-		if (err != cudaSuccess)  err_count ++;
+		err_count += gpu_upload_convert(d_ct, shtns->ct, nlat_2, sizeof_real);
+		err_count += gpu_upload_convert(((char*)d_ct) +   nlat_2*sizeof_real, shtns->wg, nlat_2, sizeof_real);
+		err_count += gpu_upload_convert(((char*)d_ct) + 2*nlat_2*sizeof_real, shtns->st, nlat_2, sizeof_real);
+		err_count += gpu_upload_convert(((char*)d_ct) + 3*nlat_2*sizeof_real, shtns->st_1, nlat_2, sizeof_real);
 	}
 
 	shtns->d_xlm = d_xlm;
@@ -553,8 +563,8 @@ int cushtns_init_gpu(shtns_cfg shtns)
 	shtns->d_mx_stdt = d_mx_stdt;
 	shtns->d_mx_van = d_mx_van;
 
-	err_count += init_cuda_buffer_fft(shtns, device_id);
-	err_count += init_cuda_program(shtns, gpu_arch_target);
+	err_count += init_cuda_buffer_fft(shtns, device_id, sizeof_real);
+	err_count += init_cuda_program(shtns, gpu_arch_target, sizeof_real);
 
 	if (err_count != 0) {
 		cushtns_release_gpu(shtns);
@@ -605,65 +615,54 @@ shtns_cfg cushtns_clone(shtns_cfg shtns, cudaStream_t compute_stream, cudaStream
 	}
 }
 
-void fourier_to_spat_gpu(shtns_cfg shtns, double* q, const int mmax)
+void fourier_to_spat_gpu(shtns_cfg shtns, void* q, const int mmax, const int sizeof_real = 8)
 {
 	const int nphi = shtns->nphi;
 	if (nphi > 1) {
-	#if defined(HAVE_LIBCUFFT) || defined(HAVE_LIBROCFFT)
+	#ifndef VKFFT_BACKEND
 		cufftResult res = CUFFT_SUCCESS;
+		void* xfft = q;
 		if (shtns->fft_mode & FFT_PHI_CONTIG_CPLX) {
-			double* xfft = shtns->gpu_buf_in;
-			transpose_cplx_zero(shtns->comp_stream, q, xfft, shtns->nlat_2, nphi, mmax);		// zero out m>mmax during transpose
-			res = cufftExecZ2Z(shtns->cufft_plan, (cufftDoubleComplex*) xfft, (cufftDoubleComplex*) q, CUFFT_INVERSE);
-		} else
-	#endif
-		{	// THETA_CONTIGUOUS:
-			#ifndef VKFFT_BACKEND
-			if (2*(mmax+1) <= nphi) {
-				const int nlat = shtns->nlat_padded;
-				cudaMemsetAsync( q + (mmax+1)*nlat, 0, sizeof(double)*(nphi-2*mmax-1)*nlat, shtns->comp_stream );		// zero out m>mmax before fft
-			}
-			res = cufftExecZ2Z(shtns->cufft_plan, (cufftDoubleComplex*) q, (cufftDoubleComplex*) q, CUFFT_INVERSE);
-			#else
-				// rely on vkfft to avoid reading the unused Fourier modes above shtns->mmax
-				if (mmax < shtns->mmax) {	// some zero must be added, only if more than nominal
-					const int nlat = shtns->nlat_padded;
-					cudaMemsetAsync( q + (mmax+1)*nlat, 0, sizeof(double)*(nphi-2*mmax-1)*nlat, shtns->comp_stream );		// zero out m>mmax before fft
-				}
-				VkFFTLaunchParams launchParams = {};
-				launchParams.buffer = (void**) &q;
-				VkFFTAppend(&shtns->vkfft_plan, 1, &launchParams);
-			#endif
+			xfft = shtns->gpu_buf_in;
+			transpose_cplx_zero(shtns->comp_stream, q, xfft, shtns->nlat_2, nphi, mmax, sizeof_real);		// zero out m>mmax during transpose
+		} else if (2*(mmax+1) <= nphi) {
+			const int nlat = shtns->nlat_padded;
+			cudaMemsetAsync( ((char*)q) + sizeof_real*(mmax+1)*nlat, 0, sizeof_real*(nphi-2*mmax-1)*nlat, shtns->comp_stream );		// zero out m>mmax before fft
 		}
-	#if defined(HAVE_LIBCUFFT) || defined(HAVE_LIBROCFFT)
-		if (res != CUFFT_SUCCESS) printf("cufft error %d\n", res);
+		res = (sizeof_real==8) ? cufftExecZ2Z(shtns->cufft_plan, (cufftDoubleComplex*) xfft, (cufftDoubleComplex*) q, CUFFT_INVERSE) :
+								 cufftExecC2C(shtns->cufft_plan, (cufftComplex*)       xfft, (cufftComplex*)       q, CUFFT_INVERSE);
+		if (res != CUFFT_SUCCESS) printf("[fourier_to_spat_gpu] cufft error %d\n", res);
+	#else
+		// VkFFT: always THETA_CONTIGUOUS
+		// rely on vkfft to avoid reading the unused Fourier modes above shtns->mmax
+		if (mmax < shtns->mmax) {	// some zero must be added, only if more than nominal
+			const int nlat = shtns->nlat_padded;
+			cudaMemsetAsync( ((char*)q) + sizeof_real*(mmax+1)*nlat, 0, sizeof_real*(nphi-2*mmax-1)*nlat, shtns->comp_stream );		// zero out m>mmax before fft
+		}
+		VkFFTLaunchParams launchParams = {};
+		launchParams.buffer = (void**) &q;
+		VkFFTAppend(&shtns->vkfft_plan, 1, &launchParams);
 	#endif
 	}
 }
 
-void spat_to_fourier_gpu(shtns_cfg shtns, double* q, const int mmax)
+void spat_to_fourier_gpu(shtns_cfg shtns, void* q, const int mmax, const int sizeof_real = 8)
 {
 	const int nphi = shtns->nphi;
 	if (nphi > 1) {
-	#if defined(HAVE_LIBCUFFT) || defined(HAVE_LIBROCFFT)
+	#ifndef VKFFT_BACKEND
 		cufftResult res = CUFFT_SUCCESS;
-		if (shtns->fft_mode & FFT_PHI_CONTIG_CPLX) {
-			double* xfft = shtns->gpu_buf_in;
-			res = cufftExecZ2Z(shtns->cufft_plan, (cufftDoubleComplex*) q, (cufftDoubleComplex*) xfft, CUFFT_FORWARD);
-			transpose_cplx_skip(shtns->comp_stream, xfft, q, nphi, shtns->nlat_2, mmax);		// ignore m > mmax during transpose
-		} else
-	#endif
-		{	// THETA_CONTIGUOUS:
-			#ifndef VKFFT_BACKEND
-			res = cufftExecZ2Z(shtns->cufft_plan, (cufftDoubleComplex*) q, (cufftDoubleComplex*) q, CUFFT_FORWARD);
-			#else
-				VkFFTLaunchParams launchParams = {};
-				launchParams.buffer = (void**) &q;
-				VkFFTAppend(&shtns->vkfft_plan, -1, &launchParams);
-			#endif
-		}
-	#if defined(HAVE_LIBCUFFT) || defined(HAVE_LIBROCFFT)
-		if (res != CUFFT_SUCCESS) printf("cufft error %d\n", res);
+		void* xfft = (shtns->fft_mode & FFT_PHI_CONTIG_CPLX) ? shtns->gpu_buf_in : q;
+		res = (sizeof_real==8) ? cufftExecZ2Z(shtns->cufft_plan, (cufftDoubleComplex*) q, (cufftDoubleComplex*) xfft, CUFFT_FORWARD) :
+								 cufftExecC2C(shtns->cufft_plan, (cufftComplex*) q, (cufftComplex*) xfft, CUFFT_FORWARD);
+		if (res != CUFFT_SUCCESS) printf("[spat_to_fourier_gpu] cufft error %d\n", res);
+		if (q != xfft)
+			transpose_cplx_skip(shtns->comp_stream, xfft, q, nphi, shtns->nlat_2, mmax, sizeof_real);		// ignore m > mmax during transpose
+	#else
+		// VkFFT: always THETA_CONTIGUOUS
+		VkFFTLaunchParams launchParams = {};
+		launchParams.buffer = (void**) &q;
+		VkFFTAppend(&shtns->vkfft_plan, -1, &launchParams);
 	#endif
 	}
 }
@@ -672,13 +671,12 @@ void spat_to_fourier_gpu(shtns_cfg shtns, double* q, const int mmax)
  * TRANSFORMS ON DEVICE *
  ************************/
 
-
-static void legendre(shtns_cfg shtns, const int S, const double *ql, double *q, const int llim, const int mmax, long spat_dist = 0)
+static void legendre(shtns_cfg shtns, const int S, const void *ql, void *q, const int llim, const int mmax, long spat_dist = 0)
 {
 	int nlat_2 = shtns->nlat_2;
 	int nphi = shtns->nphi;
-	double *d_alm = shtns->d_clm;
-	double *d_ct = shtns->d_ct;
+	void *d_alm = shtns->d_clm;
+	void *d_ct  = shtns->d_ct;
 	cudaStream_t stream = shtns->comp_stream;
 	if (spat_dist == 0) spat_dist = shtns->spat_stride;
 
@@ -698,7 +696,7 @@ static void legendre(shtns_cfg shtns, const int S, const double *ql, double *q, 
 
 /// Perform SH transform on data that is already on the GPU. d_Qlm and d_Vr are pointers to GPU memory (obtained by cudaMalloc() for instance)
 template<int NFIELDS>
-static void ilegendre(shtns_cfg shtns, const int S, const double *q, double* ql, const int llim, long spat_dist = 0)
+static void ilegendre(shtns_cfg shtns, const int S, const void *q, void* ql, const int llim, long spat_dist = 0)
 {
 	int mmax = shtns->mmax;
 	int mres = shtns->mres;
@@ -710,7 +708,7 @@ static void ilegendre(shtns_cfg shtns, const int S, const double *q, double* ql,
 
 	int ql_dist = shtns->nlm_stride;
 	if (spat_dist == 0) spat_dist = shtns->spat_stride;
-	cudaMemsetAsync(ql, 0, sizeof(double) * NFIELDS * shtns->nlm_stride * shtns->howmany, stream);		// set to zero before we start.
+	cudaMemsetAsync(ql, 0, shtns->sizeof_real * NFIELDS * shtns->nlm_stride * shtns->howmany, stream);		// set to zero before we start.
 
 	if (llim < mmax*mres) mmax = llim / mres;	// truncate mmax too !
 
@@ -725,28 +723,28 @@ static void ilegendre(shtns_cfg shtns, const int S, const double *q, double* ql,
 
 
 /// Perform SH transform on data that is already on the GPU. d_Qlm and d_Vr are pointers to GPU memory (obtained by cudaMalloc() for instance)
-template<int S, int NFIELDS>
-void cuda_SH_to_spat(shtns_cfg shtns, cplx* d_Qlm, double *d_Vr, const long int llim, const int mmax, long spat_dist = 0)
+template<int S, int NFIELDS, typename real=double>
+void cuda_SH_to_spat(shtns_cfg shtns, std::complex<real>* d_Qlm, real *d_Vr, const long int llim, const int mmax, long spat_dist = 0)
 {
 	static_assert(NFIELDS==1, "only NFIELDS=1 is supported in batch mode");
 	//if (spat_dist == 0) spat_dist = shtns->spat_stride;
 
-	cplx* d_qlm = d_Qlm;
+	std::complex<real>* d_qlm = d_Qlm;
 
 		if (S==0  &&  (SHT_ALLOW_SH2ISH_FUSE==0 || shtns->nwarp[2]==0)) {
-			d_qlm = (cplx*) shtns->gpu_buf_in;
+			d_qlm = (std::complex<real>*) shtns->gpu_buf_in;
 			//for (int f=0; f<NFIELDS; f++)
 			//	sh2ishioka_gpu(shtns, d_Qlm + f * shtns->nlm_stride, d_qlm + f * shtns->nlm_stride, llim, mmax, S);
 			sh2ishioka_gpu(shtns, d_Qlm, d_qlm, llim, mmax, S);
 		} else
-	if (d_Vr == (double*) d_Qlm) { printf("ERROR: cuda_SH_to_spat must have distinct in and out fields");	exit(1); }
-	legendre(shtns, S, (double*) d_qlm, d_Vr, llim, mmax, shtns->nlat);
-	for (int f=0; f<NFIELDS; f++)  fourier_to_spat_gpu(shtns, d_Vr + f*spat_dist, mmax);	// in-place
+	if (d_Vr == (real*) d_Qlm) { printf("ERROR: cuda_SH_to_spat must have distinct in and out fields");	exit(1); }
+	legendre(shtns, S, (real*) d_qlm, d_Vr, llim, mmax, shtns->nlat);
+	for (int f=0; f<NFIELDS; f++)  fourier_to_spat_gpu(shtns, d_Vr + f*spat_dist, mmax, sizeof(real));	// in-place
 }
 
 /// Perform SH transform on data that is already on the GPU. d_Qlm and d_Vr are pointers to GPU memory (obtained by cudaMalloc() for instance)
-template<int S, int NFIELDS>
-void cuda_spat_to_SH(shtns_cfg shtns, double *d_Vr, cplx* d_Qlm, const long int llim, long spat_dist = 0)
+template<int S, int NFIELDS, typename real=double>
+void cuda_spat_to_SH(shtns_cfg shtns, real *d_Vr, std::complex<real>* d_Qlm, const long int llim, long spat_dist = 0)
 {
 	static_assert(NFIELDS==1, "only NFIELDS=1 is supported in batch mode");
 
@@ -755,19 +753,19 @@ void cuda_spat_to_SH(shtns_cfg shtns, double *d_Vr, cplx* d_Qlm, const long int 
 	//if (spat_dist == 0) spat_dist = shtns->spat_stride;
 	if (llim < mmax*mres)	mmax = llim / mres;		// truncate mmax too !
 
-	for (int f=0; f<NFIELDS; f++) spat_to_fourier_gpu(shtns, d_Vr + f*spat_dist, mmax);
+	for (int f=0; f<NFIELDS; f++) spat_to_fourier_gpu(shtns, d_Vr + f*spat_dist, mmax, sizeof(real));
 
 		if (S==0) {
-			cplx* d_Qlm_ish = (cplx*) shtns->gpu_buf_in;
-			ilegendre<NFIELDS>(shtns, S, d_Vr, (double*) d_Qlm_ish, llim, shtns->nlat);
+			std::complex<real>* d_Qlm_ish = (std::complex<real>*) shtns->gpu_buf_in;
+			ilegendre<NFIELDS>(shtns, S, d_Vr, (real*) d_Qlm_ish, llim, shtns->nlat);
 			ishioka2sh_gpu(shtns, d_Qlm_ish, d_Qlm, llim, mmax, S);
 			//for (int f=0; f<NFIELDS; f++)
 			//	ishioka2sh_gpu(shtns, d_Qlm_ish + f * shtns->nlm_stride, d_Qlm + f * shtns->nlm_stride, llim, mmax, S);
 			return;
 		 } else
 	{
-		if (d_Vr == (double*) d_Qlm) { printf("ERROR: cuda_spat_to_SH must have distinct in and out fields");	exit(1); }
-		ilegendre<NFIELDS>(shtns, S, d_Vr, (double*) d_Qlm, llim, shtns->nlat);
+		if (d_Vr == (real*) d_Qlm) { printf("ERROR: cuda_spat_to_SH must have distinct in and out fields");	exit(1); }
+		ilegendre<NFIELDS>(shtns, S, d_Vr, (real*) d_Qlm, llim, shtns->nlat);
 	}
 }
 
@@ -779,6 +777,16 @@ void cu_SH_to_spat(shtns_cfg shtns, cplx* d_Qlm, double *d_Vr, int llim)
 	const int mres = shtns->mres;
 	if (llim < mmax*mres)	mmax = llim / mres;	// truncate mmax too !
 	cuda_SH_to_spat<0,1>(shtns, d_Qlm, d_Vr, llim, mmax);
+}
+
+extern "C"
+void cu_SH_to_spat_float(shtns_cfg shtns, cplx_f* d_Qlm, float *d_Vr, int llim)
+{
+	int mmax = shtns->mmax;
+	const int mres = shtns->mres;
+	if (llim < mmax*mres)	mmax = llim / mres;	// truncate mmax too !
+	if (shtns->sizeof_real != 4) { printf("ERROR: SHTns plan not prepared for float");	exit(1); }
+	cuda_SH_to_spat<0,1,float>(shtns, d_Qlm, d_Vr, llim, mmax);
 }
 
 
@@ -827,6 +835,13 @@ extern "C"
 void cu_spat_to_SH(shtns_cfg shtns, double *d_Vr, cplx* d_Qlm, int llim)
 {
 	cuda_spat_to_SH<0,1>(shtns, d_Vr, d_Qlm, llim);
+}
+
+extern "C"
+void cu_spat_to_SH_float(shtns_cfg shtns, float *d_Vr, cplx_f* d_Qlm, int llim)
+{
+	if (shtns->sizeof_real != 4) { printf("ERROR: SHTns plan not prepared for float");	exit(1); }
+	cuda_spat_to_SH<0,1,float>(shtns, d_Vr, d_Qlm, llim);
 }
 
 extern "C"

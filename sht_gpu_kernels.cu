@@ -44,11 +44,11 @@ bool cuda_error_check(const char* fname, int l)
 
 /// dim0, dim1 : size in complex numbers !
 /// BLOCK_DIM_Y must be between 1 and 16
-template<int BLOCK_DIM_Y> __global__ void
-transpose_cplx_kernel(const double* in, double* out, const int dim0, const int dim1)
+template<int BLOCK_DIM_Y, typename real=double> __global__ void
+transpose_cplx_kernel(const real* in, real* out, const int dim0, const int dim1)
 {
 	const int TILE_DIM = WARPSZE/2;		// 16 double2 per warp, read as 32 doubles.
-	__shared__ double shrdMem[TILE_DIM][TILE_DIM+1][2];		// avoid shared mem conflicts
+	__shared__ real shrdMem[TILE_DIM][TILE_DIM+1][2];		// avoid shared mem conflicts
 
 	const int lx = threadIdx.x >> 1;
 	const int ly = threadIdx.y;
@@ -80,11 +80,11 @@ transpose_cplx_kernel(const double* in, double* out, const int dim0, const int d
 
 /// dim0, dim1 : size in complex numbers !
 /// BLOCK_DIM_Y must be a power of 2 between 1 and 16
-template<int BLOCK_DIM_Y> __global__ void
-transpose_cplx_zero_kernel(const double* in, double* out, const int dim0, const int dim1, const int mmax)
+template<int BLOCK_DIM_Y, typename real=double> __global__ void
+transpose_cplx_zero_kernel(const real* in, real* out, const int dim0, const int dim1, const int mmax)
 {
 	const int TILE_DIM = WARPSZE/2;		// 16 double2 per warp, read as 32 doubles.
-	__shared__ double shrdMem[TILE_DIM][TILE_DIM+1][2];		// avoid shared mem conflicts
+	__shared__ real shrdMem[TILE_DIM][TILE_DIM+1][2];		// avoid shared mem conflicts
 
 	const int ly = threadIdx.y;
 	const int lx = threadIdx.x >> 1;
@@ -128,11 +128,11 @@ transpose_cplx_zero_kernel(const double* in, double* out, const int dim0, const 
 
 /// dim0, dim1 : size in complex numbers !
 /// BLOCK_DIM_Y must be a power of 2 between 1 and 16
-template<int BLOCK_DIM_Y> __global__ void
-transpose_cplx_skip_kernel(const double* in, double* out, const int dim0, const int dim1, const int mmax)
+template<int BLOCK_DIM_Y, typename real=double> __global__ void
+transpose_cplx_skip_kernel(const real* in, real* out, const int dim0, const int dim1, const int mmax)
 {
 	const int TILE_DIM = WARPSZE/2;		// 16 double2 per warp, read as 32 doubles.
-	__shared__ double shrdMem[TILE_DIM][TILE_DIM+1][2];		// avoid shared mem conflicts
+	__shared__ real shrdMem[TILE_DIM][TILE_DIM+1][2];		// avoid shared mem conflicts
 
 	const int lx = threadIdx.x >> 1;
 	const int ly = threadIdx.y;
@@ -169,37 +169,46 @@ transpose_cplx_skip_kernel(const double* in, double* out, const int dim0, const 
 
 /// dim0, dim1 must be multiple of 16.
 static void
-transpose_cplx(cudaStream_t stream, const double* in, double* out, const int dim0, const int dim1)
+transpose_cplx(cudaStream_t stream, const void* in, void* out, const int dim0, const int dim1, int sizeof_real = 8)
 {
 	const int block_dim_y = 4;		// good performance with 4 (MUST be power of 2 between 1 and 16)
 	dim3 blocks(dim0/16, dim1/16);
 	dim3 threads(32, block_dim_y);
-	transpose_cplx_kernel<block_dim_y> <<<blocks, threads, 0, stream>>>(in, out, dim0, dim1);
+	if (sizeof_real==8)
+		transpose_cplx_kernel<block_dim_y> <<<blocks, threads, 0, stream>>>((double*)in, (double*)out, dim0, dim1);
+	else
+		transpose_cplx_kernel<block_dim_y,float> <<<blocks, threads, 0, stream>>>((float*)in, (float*)out, dim0, dim1);
 }
 
 /// dim0, dim1 must be multiple of 16.
 static void
-transpose_cplx_zero(cudaStream_t stream, const double* in, double* out, const int dim0, const int dim1, const int mmax)
+transpose_cplx_zero(cudaStream_t stream, const void* in, void* out, const int dim0, const int dim1, const int mmax, int sizeof_real = 8)
 {
 	const int block_dim_y = 4;		// good performance with 4 (MUST be power of 2 between 1 and 16)
 	dim3 blocks(dim0/16, dim1/16);
 	dim3 threads(32, block_dim_y);
-	transpose_cplx_zero_kernel<block_dim_y> <<<blocks, threads, 0, stream>>>(in, out, dim0, dim1, mmax);
+	if (sizeof_real==8)
+		transpose_cplx_zero_kernel<block_dim_y> <<<blocks, threads, 0, stream>>>((double*)in, (double*)out, dim0, dim1, mmax);
+	else
+		transpose_cplx_zero_kernel<block_dim_y,float> <<<blocks, threads, 0, stream>>>((float*)in, (float*)out, dim0, dim1, mmax);
 }
 
 /// dim0, dim1 must be multiple of 16.
 static void
-transpose_cplx_skip(cudaStream_t stream, const double* in, double* out, const int dim0, const int dim1, const int mmax)
+transpose_cplx_skip(cudaStream_t stream, const double* in, double* out, const int dim0, const int dim1, const int mmax, int sizeof_real = 8)
 {
 	const int block_dim_y = 4;		// good performance with 4 (MUST be power of 2 between 1 and 16)
 	dim3 blocks(dim0/16, dim1/16);
 	dim3 threads(32, block_dim_y);
-	transpose_cplx_skip_kernel<block_dim_y> <<<blocks, threads, 0, stream>>>(in, out, dim0, dim1, mmax);
+	if (sizeof_real==8)
+		transpose_cplx_skip_kernel<block_dim_y> <<<blocks, threads, 0, stream>>>((double*)in, (double*)out, dim0, dim1, mmax);
+	else
+		transpose_cplx_skip_kernel<block_dim_y,float> <<<blocks, threads, 0, stream>>>((float*)in, (float*)out, dim0, dim1, mmax);
 }
 
 
-__global__ void
-sh2ishioka_kernel_alt(const int NFIELDS, const double* __restrict__ xlm, const double* __restrict__ ql, double* ql_ish,
+template<typename real> __global__ void
+sh2ishioka_kernel_alt(const int NFIELDS, const real* __restrict__ xlm, const real* __restrict__ ql, real* ql_ish,
 		const int llim, const int lmax, const int mres, const int S, const int ql_dist=0, const int ql_ish_dist=0)
 {
 	const int im = blockIdx.y;
@@ -212,8 +221,8 @@ sh2ishioka_kernel_alt(const int NFIELDS, const double* __restrict__ xlm, const d
 
 	// first load matrix coefficients into registers
 	const int x_ofs = 3*im*(2*(lmax+4) -m+mres)/4 + 3*(ll >> 2);
-	double x0 = xlm[x_ofs + (ll&2)];
-	double x1 = xlm[x_ofs + 1];
+	real x0 = xlm[x_ofs + (ll&2)];
+	real x1 = xlm[x_ofs + 1];
 
 	// address calculation
 	const int q_ofs = im*(((lmax+1+S)*2) -m+mres);
@@ -225,7 +234,7 @@ sh2ishioka_kernel_alt(const int NFIELDS, const double* __restrict__ xlm, const d
 	const bool add2 = ((l&1)==0) && (l+1 <llim_m);
 	// loop over NFIELDS different fields
 	for (int k=NFIELDS-1; k>=0; k--) {
-		double q = ql[k*ql_dist] * x0;
+		real q = ql[k*ql_dist] * x0;
 		if (add2) {	// l-m even
 			q += ql[k*ql_dist +4] * x1;		// contribution of l+2
 		}
@@ -278,8 +287,8 @@ sh2ishioka_kernel(const double* __restrict__ xlm, const double* __restrict__ ql,
 
 /// performs: Ql[2*l] = qq[2*l]*xlm[3*l] + qq[2*l-2]*xlm[3*l+1];   Ql[2*l+1] = qq[2*l+1] * xlm[3*l+2];
 /// includes zero-out for unused modes.
-__global__ void
-ishioka2sh_kernel_alt(const int NFIELDS, const double* __restrict__ xlm, const double* __restrict__ ql_ish, double* ql,
+template<typename real> __global__ void
+ishioka2sh_kernel_alt(const int NFIELDS, const real* __restrict__ xlm, const real* __restrict__ ql_ish, real* ql,
 	const int llim, const int lmax, const int mmax, const int mres, const int S, const int ql_ish_dist=0, const int ql_dist=0)
 {
 	const int im = blockIdx.y;
@@ -291,13 +300,13 @@ ishioka2sh_kernel_alt(const int NFIELDS, const double* __restrict__ xlm, const d
 	// first load matrix coefficients into registers
 	xlm += 3*im*(2*(lmax+4) -m+mres)/4;
 	const int x_ofs = 3*(ll>>2);
-	double x0 = xlm[x_ofs + (ll&2)];
-	double x1;
+	real x0 = xlm[x_ofs + (ll&2)];
+	real x1;
 	if (x_ofs>0) x1 = xlm[x_ofs-2];
 
 	const int b = (blockIdx.z*blockDim.z + threadIdx.z) * NFIELDS;
 	int q_ofs = ll;
-	double q = 0.0;
+	real q = 0.0;
 	if (im==0) {
 		ql_ish += b*ql_ish_dist + (ll>>1);
 		ql += q_ofs + b*ql_dist;
@@ -645,7 +654,8 @@ void set_block_size_ish(int n_elem_x, int howmany_z, int& blksze_x, int& blksze_
 	}
 }
 
-void sh2ishioka_gpu(shtns_cfg shtns, cplx* d_Qlm, cplx* d_Qlm_ish, int llim, int mmax, int S=0)
+template<typename real=double>
+void sh2ishioka_gpu(shtns_cfg shtns, std::complex<real>* d_Qlm, std::complex<real>* d_Qlm_ish, int llim, int mmax, int S=0)
 {
 #ifndef SHT_ISH_ALT
 	int blksze = (((llim+2)*2+WARPSZE-1)/WARPSZE) * WARPSZE;
@@ -669,13 +679,15 @@ void sh2ishioka_gpu(shtns_cfg shtns, cplx* d_Qlm, cplx* d_Qlm_ish, int llim, int
 	}
 	dim3 blocks((nelem_max+blksze-1)/blksze, mmax+1, nblk_z);
 	dim3 threads(blksze, 1, blksze_z);
+	const real* xlm = (real*) shtns->d_xlm;
 	sh2ishioka_kernel_alt <<< blocks, threads, 0, shtns->comp_stream >>>
-		(nfields, shtns->d_xlm, (double*) d_Qlm, (double*) d_Qlm_ish, llim, shtns->lmax, shtns->mres, S, shtns->spec_dist*2, shtns->nlm_stride);
+		(nfields, xlm, (real*) d_Qlm, (real*) d_Qlm_ish, llim, shtns->lmax, shtns->mres, S, shtns->spec_dist*2, shtns->nlm_stride);
 #endif
 	CUDA_ERROR_CHECK;
 }
 
-void ishioka2sh_gpu(shtns_cfg shtns, cplx* d_Qlm_ish, cplx* d_Qlm, int llim, int mmax, int S=0)
+template<typename real=double>
+void ishioka2sh_gpu(shtns_cfg shtns, std::complex<real>* d_Qlm_ish, std::complex<real>* d_Qlm, int llim, int mmax, int S=0)
 {
 #ifndef SHT_ISH_ALT
 	int blksze = (((shtns->lmax+3)*2+WARPSZE-1)/WARPSZE) * WARPSZE;
@@ -700,8 +712,9 @@ void ishioka2sh_gpu(shtns_cfg shtns, cplx* d_Qlm_ish, cplx* d_Qlm, int llim, int
 
 	dim3 blocks((nelem_max+blksze-1)/blksze, shtns->mmax+1, nblk_z);
 	dim3 threads(blksze, 1, blksze_z);
+	const real* xlm = (real*) shtns->d_xlm;
 	ishioka2sh_kernel_alt <<< blocks, threads, 0, shtns->comp_stream >>>
-		(nfields, shtns->d_xlm, (double*) d_Qlm_ish, (double*) d_Qlm, llim, shtns->lmax, mmax, shtns->mres, S, shtns->nlm_stride, shtns->spec_dist*2);
+		(nfields, xlm, (real*) d_Qlm_ish, (real*) d_Qlm, llim, shtns->lmax, mmax, shtns->mres, S, shtns->nlm_stride, shtns->spec_dist*2);
 #endif
 	CUDA_ERROR_CHECK;
 }
