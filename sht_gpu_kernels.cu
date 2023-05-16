@@ -550,10 +550,10 @@ scal2sphtor_kernel(const double* __restrict__ mx, const double* __restrict__ vlm
 		if ((ll <= llim) && (ll>0)) {
 			const double mimag = m * ((j^1) -j);
 			double ll_1 = 1.0 / (ll*(ll+1));
-			double ml = M[2*(j>>1)+1];
-			double mu = M[2*(j>>1)+2];
-			double s = mimag*wl[(j+2)^1]  -  (ml*vl[j] + mu*vl[j+4]);
-			double t = mimag*vl[(j+2)^1]  +  (ml*wl[j] + mu*wl[j+4]);
+			double ml = M[2*(j>>1)];
+			double mu = M[2*(j>>1)+3];
+			double s = mimag*wl[(j+2)^1]  +  (ml*vl[j] + mu*vl[j+4]);
+			double t = mimag*vl[(j+2)^1]  -  (ml*wl[j] + mu*wl[j+4]);
 			slm[ofs+2] = s * ll_1;
 			tlm[ofs+2] = t * ll_1;
 		} else if (ll <= lmax) {	// fill with zeros up to lmax (and l=0 too).
@@ -615,8 +615,8 @@ ish2sphtor_kernel(const double* __restrict__ mx, const double* __restrict__ xlm,
 	double ml,mu, ll_1;
 	if ((l <= llim) && (l>0)) {
 		ll_1 = 1.0 / (l*(l+1));
-		ml = mx[q_ofs + l0 + 2*(j>>1)-1]; //M[2*(j>>1)+1];
-		mu = mx[q_ofs + l0 + 2*(j>>1)];   //M[2*(j>>1)+2];
+		mu = mx[q_ofs + l0 + (j|1)];    //M[2*(j>>1)+3];
+		ml = mx[q_ofs + l0 + (j|1) -3];	//M[2*(j>>1)+0];
 	}
 
 	__syncthreads();
@@ -626,8 +626,8 @@ ish2sphtor_kernel(const double* __restrict__ mx, const double* __restrict__ xlm,
 		double w2 = 0.0;
 		if ((l <= llim) && (l>0)) {
 			const double mimag = m * ((j^1) -j);
-			v2 = mimag*w  -  (ml*vl[j] + mu*vl[j+4]);
-			w2 = mimag*v  +  (ml*wl[j] + mu*wl[j+4]);
+			v2 = mimag*w  +  (ml*vl[j] + mu*vl[j+4]);
+			w2 = mimag*v  -  (ml*wl[j] + mu*wl[j+4]);
 			v2 *= ll_1;
 			w2 *= ll_1;
 		}

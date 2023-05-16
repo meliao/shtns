@@ -1292,8 +1292,9 @@ void shtns_destroy(shtns_cfg shtns)
 	if (shtns->ifft_cplx) fftw_destroy_plan(shtns->ifft_cplx);
 	if (shtns->fft_cplx != shtns->ifft_cplx) fftw_destroy_plan(shtns->fft_cplx);
 
+	if (shtns->mx_van == shtns->mx_stdt) shtns->mx_van = NULL;
+	else  free_unused(shtns, &shtns->mx_van);
 	free_unused(shtns, &shtns->mx_stdt);
-	free_unused(shtns, &shtns->mx_van);
 
 	shtns_unset_grid(shtns);
 
@@ -1415,10 +1416,16 @@ int shtns_set_grid_auto(shtns_cfg shtns, enum shtns_type flags, double eps, int 
 		// initialize sin(theta).d/dtheta matrix (for vector transforms)
 		shtns->mx_stdt = (double*) malloc( 2*NLM*sizeof(double) );		// for vector synthesis
 		st_dt_matrix_shifted(shtns, shtns->mx_stdt);
-		shtns->mx_van = (double*) malloc( 2*NLM*sizeof(double) );		// for vector analysis
-		mul_ct_matrix_shifted(shtns, shtns->mx_van);
-		for (long lm=0; lm<2*NLM; lm++) {		// 2*cos(theta) + sin(theta) d./dtheta = 1/sin(theta). d/dtheta(sin^2(theta) .)
-			shtns->mx_van[lm] = 2.*shtns->mx_van[lm] + shtns->mx_stdt[lm];
+		shtns->mx_van = shtns->mx_stdt;		//  matrices share the same coefficients, namely mx_van[lm] = - mx_stdt[lm^1]  ...
+		if (SHT_NORM == sht_schmidt) {	// ... except for Schmidt normalization
+			shtns->mx_van = (double*) malloc( 2*NLM*sizeof(double) );		// for vector synthesis
+			mul_ct_matrix_shifted(shtns, shtns->mx_van);
+			for (long lm=0; lm<NLM; lm++) {		// 2*cos(theta) + sin(theta) d./dtheta = 1/sin(theta). d/dtheta(sin^2(theta) .)
+				double ml = 2.*shtns->mx_van[2*lm] + shtns->mx_stdt[2*lm];
+				double mu = 2.*shtns->mx_van[2*lm+1] + shtns->mx_stdt[2*lm+1];
+				shtns->mx_van[2*lm] = -mu;
+				shtns->mx_van[2*lm+1] = -ml;
+			}
 		}
 	}
 

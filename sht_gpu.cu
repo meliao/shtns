@@ -528,7 +528,7 @@ int cushtns_init_gpu(shtns_cfg shtns)
 	const long nlm0 = nlm_calc(LMAX+4, MMAX, MRES);
 	// Allocate the coefficients vectors alm, ...
 	size_t sze = 2*nlm + nlm0 + 3*nlm0/2 + 4*nlat_2  +  (CACHE_LINE_GPU/sizeof_real-1)*3;
-	if( shtns->mx_stdt) sze += 2*nlm + 2*nlm + (CACHE_LINE_GPU/sizeof_real-1)*2;
+	if (shtns->mx_stdt) sze += ( 2*nlm + (CACHE_LINE_GPU/sizeof_real-1) ) * ((shtns->mx_van == shtns->mx_stdt) ? 1 : 2);
 	sze += (3*nlm0/2 +1)/2 + (CACHE_LINE_GPU/sizeof_real-1);		// float buffers, in double units
 	err = cudaMalloc(&buf, (sze + MAX_THREADS_PER_BLOCK-1)*sizeof_real);	// allow some overflow.
 	if (err != cudaSuccess) err_count ++;
@@ -541,11 +541,12 @@ int cushtns_init_gpu(shtns_cfg shtns)
 		err_count += gpu_upload_convert(d_clm, shtns->clm, nlm0, sizeof_real);
 		err_count += gpu_upload_convert(d_xlm, shtns->xlm, 3*nlm0/2, sizeof_real);
 		if (shtns->mx_stdt) {
-			d_mx_stdt = (double*) buf;	align_ptr(&buf, 2*nlm*sizeof_real, CACHE_LINE_GPU);	// Allocate the device matrix for d(sin(t))/dt
-			d_mx_van  = (double*) buf;	align_ptr(&buf, 2*nlm*sizeof_real, CACHE_LINE_GPU);	// Same thing for analysis
-
+			d_mx_van = d_mx_stdt = (double*) buf;	align_ptr(&buf, 2*nlm*sizeof_real, CACHE_LINE_GPU);	// Allocate the device matrix for d(sin(t))/dt
 			err_count += gpu_upload_convert(d_mx_stdt, shtns->mx_stdt, 2*nlm, sizeof_real);
-			err_count += gpu_upload_convert(d_mx_van, shtns->mx_van, 2*nlm, sizeof_real);
+			if (shtns->mx_stdt != shtns->mx_van) {		// may be the same array
+				d_mx_van = (double*) buf;	align_ptr(&buf, 2*nlm*sizeof_real, CACHE_LINE_GPU);  // Same thing for analysis
+				err_count += gpu_upload_convert(d_mx_van, shtns->mx_van, 2*nlm, sizeof_real);
+			}
 		}
 		// Allocate the device input vector cos(theta) and gauss weights, sin(theta) and 1/sin(theta)
 		d_ct = (double*) buf;			align_ptr(&buf, 4*nlat_2*sizeof_real, CACHE_LINE_GPU);

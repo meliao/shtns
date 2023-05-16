@@ -307,16 +307,16 @@ static void SH_2scal_to_vect_reduce(const double *mx, const double* l_2, int lli
 	v2d sl1 = vdup( 0.0 );
 	v2d tl1 = vdup( 0.0 );
 	for (int l=0; l<=llim-m; l++) {
-		s2d mxu = vdup( mx[2*l] );
-		s2d mxl = vdup( mx[2*l+1] );		// mxl for next iteration
+		s2d mxl = vdup( mx[2*l] );		// mxl for next iteration
+		s2d mxu = vdup( mx[2*l+1] );
 		v2d sl = sl1 + IxKxZ(em, wl);		// sl1 + I*em*wl
 		v2d tl = tl1 + IxKxZ(em, vl);		// tl1 + I*em*vl
-		sl1 =  mxl*vl;			// vs for next iter
-		tl1 = -mxl*wl;			// wt for next iter
+		sl1 = -mxl*vl;			// vs for next iter
+		tl1 =  mxl*wl;			// wt for next iter
 		vl = v2d_reduce(vw[4*l+4], vw[4*l+5]);		// kept for next iteration
 		wl = v2d_reduce(vw[4*l+6], vw[4*l+7]);
-		sl += mxu*vl;
-		tl -= mxu*wl;
+		sl -= mxu*vl;
+		tl += mxu*wl;
 		Sl[l] = -sl * vdup(l_2[l+m]);
 		Tl[l] = -tl * vdup(l_2[l+m]);
 	}
@@ -336,17 +336,17 @@ static void SH_2scal_to_vect(const double *mx, const double* l_2, int llim, int 
 	v2d sl1 = vdup( 0.0 );
 	v2d tl1 = vdup( 0.0 );
 	for (int l=0; l<=llim-m; l++) {
-		s2d mxu = vdup( mx[2*l] );
-		s2d mxl = vdup( mx[2*l+1] );		// mxl for next iteration
-		v2d sl = sl1 + IxKxZ(em, wl);	// sl1 + I*em*wl;
-		v2d tl = tl1 - IxKxZ(em, vl);	// sl1 - I*em*vl;
+		s2d mxl = vdup( mx[2*l] );		// mxl for next iteration
+		s2d mxu = vdup( mx[2*l+1] );
+		v2d sl = sl1 - IxKxZ(em, wl);	// sl1 + I*em*wl;
+		v2d tl = -tl1 - IxKxZ(em, vl);	// sl1 - I*em*vl;
 		sl1 =  mxl*vl;			// vs for next iter
 		tl1 =  mxl*wl;			// wt for next iter
 		vl = vw[2*l+2];		// kept for next iteration
 		wl = vw[2*l+3];
 		sl += mxu*vl;
-		tl += mxu*wl;
-		Sl[l] = -sl * vdup(l_2[l+m]);
+		tl -= mxu*wl;
+		Sl[l] = sl * vdup(l_2[l+m]);
 		Tl[l] = tl * vdup(l_2[l+m]);
 	}
   #else
@@ -358,12 +358,12 @@ static void SH_2scal_to_vect(const double *mx, const double* l_2, int llim, int 
 			// SH_vect_to_2scal :: 2 full permutes, 1 mul, 2 fma, 2 128-bit stores, 2 64-bit broadcasts, 1 256-bit load
 			// here :: 1 full permutes, 2 mul, 2 fma, 2 128bit-stores, 3 64-bit broadcasts, 1 256-bit load
 		v4d vwu = vread4(vw+2*l+2, 0);		// kept for next iteration
-		v4d mxu = vall4( mx[2*l] );
-		stl += mxu * vwu;
+		v4d mxu = vall4( mx[2*l+1] );
+		stl -= mxu * vwu;
 		stl *= vall4(l_2[l+m]);
 		Sl[l] = - (v2d) _mm256_castpd256_pd128(stl);
 		Tl[l] = _mm256_extractf128_pd(stl, 1);
-		stl = em * vreverse4(vwu) + vwl * vall4( mx[2*l+1] );
+		stl = em * vreverse4(vwu) - vwl * vall4( mx[2*l] );
 		vwl = vwu;
 	}
   #endif
