@@ -186,7 +186,7 @@ struct shtns_info {		// MUST start with "int nlm;"
 	short sizeof_real;		// 4 for float, 8 for double
 	double* d_clm;
 	double* d_xlm;
-	double* d_alm;
+	double* d_x2lm;
 	double* d_ct;
 	double* d_mx_stdt;
 	double* d_mx_van;

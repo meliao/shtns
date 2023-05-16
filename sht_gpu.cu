@@ -471,8 +471,8 @@ void cushtns_release_gpu(shtns_cfg shtns)
 	if (shtns->cu_flags & CUSHT_OWN_XFER_STREAM) cudaStreamDestroy(shtns->xfer_stream);
 	destroy_cuda_buffer_fft(shtns);
 	// TODO: arrays possibly shared between different shtns_cfg should be deallocated ONLY if not used by other shtns_cfg.
-	if (shtns->d_alm) cudaFree(shtns->d_alm);
-	shtns->d_alm = 0;		// disable gpu.
+	if (shtns->d_clm) cudaFree(shtns->d_clm);
+	shtns->d_clm = 0;		// disable gpu.
 	shtns->cu_flags = 0;
 }
 
@@ -498,11 +498,11 @@ int cushtns_init_gpu(shtns_cfg shtns)
 	const int sizeof_real = shtns->sizeof_real;
 
 	void *buf = 0;
-	double *d_alm = 0;
 	double *d_ct  = 0;
 	double *d_mx_stdt = 0;
 	double *d_mx_van = 0;
 	double *d_xlm = 0;
+	double *d_x2lm = 0;
 	double *d_clm = 0;
 	int err_count = 0;
 	int device_id = -1;
@@ -527,19 +527,22 @@ int cushtns_init_gpu(shtns_cfg shtns)
 
 	const long nlm0 = nlm_calc(LMAX+4, MMAX, MRES);
 	// Allocate the coefficients vectors alm, ...
-	size_t sze = 2*nlm + nlm0 + 3*nlm0/2 + 4*nlat_2  +  (CACHE_LINE_GPU/sizeof_real-1)*3;
+	size_t sze = nlm0 + 3*nlm0/2 + 4*nlat_2  +  (CACHE_LINE_GPU/sizeof_real-1)*2;
+	if (shtns->x2lm != shtns->xlm)  sze += 3*nlm0/2 +  (CACHE_LINE_GPU/sizeof_real-1);		// reserve space for x2lm
 	if (shtns->mx_stdt) sze += ( 2*nlm + (CACHE_LINE_GPU/sizeof_real-1) ) * ((shtns->mx_van == shtns->mx_stdt) ? 1 : 2);
 	sze += (3*nlm0/2 +1)/2 + (CACHE_LINE_GPU/sizeof_real-1);		// float buffers, in double units
 	err = cudaMalloc(&buf, (sze + MAX_THREADS_PER_BLOCK-1)*sizeof_real);	// allow some overflow.
 	if (err != cudaSuccess) err_count ++;
 	if (err_count == 0) {
-		d_alm = (double*) buf;		align_ptr(&buf, 2*nlm*sizeof_real, CACHE_LINE_GPU);
 		d_clm = (double*) buf;		align_ptr(&buf, nlm0*sizeof_real,  CACHE_LINE_GPU);
 		d_xlm = (double*) buf;		align_ptr(&buf, 3*nlm0/2 * sizeof_real, CACHE_LINE_GPU);
-
-		err_count += gpu_upload_convert(d_alm, shtns->alm, 2*nlm, sizeof_real);
 		err_count += gpu_upload_convert(d_clm, shtns->clm, nlm0, sizeof_real);
 		err_count += gpu_upload_convert(d_xlm, shtns->xlm, 3*nlm0/2, sizeof_real);
+		if (shtns->x2lm != shtns->xlm) {		// different arrays for Schmidt normalization
+			d_x2lm = (double*) buf;		align_ptr(&buf, 3*nlm0/2 * sizeof_real, CACHE_LINE_GPU);
+			err_count += gpu_upload_convert(d_x2lm, shtns->x2lm, 3*nlm0/2, sizeof_real);
+		} else d_x2lm = d_xlm;
+
 		if (shtns->mx_stdt) {
 			d_mx_van = d_mx_stdt = (double*) buf;	align_ptr(&buf, 2*nlm*sizeof_real, CACHE_LINE_GPU);	// Allocate the device matrix for d(sin(t))/dt
 			err_count += gpu_upload_convert(d_mx_stdt, shtns->mx_stdt, 2*nlm, sizeof_real);
@@ -558,8 +561,8 @@ int cushtns_init_gpu(shtns_cfg shtns)
 	}
 
 	shtns->d_xlm = d_xlm;
+	shtns->d_x2lm = d_x2lm;
 	shtns->d_clm = d_clm;
-	shtns->d_alm = d_alm;
 	shtns->d_ct  = d_ct;
 	shtns->d_mx_stdt = d_mx_stdt;
 	shtns->d_mx_van = d_mx_van;

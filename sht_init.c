@@ -961,7 +961,7 @@ void shtns_print_cfg(shtns_cfg shtns)
 {
 	printf("Lmax=%d, Mmax*Mres=%d, Mres=%d, Nlm=%d  [%d threads, ",LMAX, MMAX*MRES, MRES, NLM, shtns->nthreads);
 	#ifdef SHTNS_GPU
-		if (shtns->d_alm) printf("gpu ready, ");
+		if (shtns->d_clm) printf("gpu ready, ");
 	#endif
 	if (shtns->norm & SHT_REAL_NORM) printf("'real' norm, ");
 	if (shtns->norm & SHT_NO_CS_PHASE) printf("no Condon-Shortley phase, ");
@@ -1119,7 +1119,7 @@ shtns_cfg shtns_create(int lmax, int mmax, int mres, enum shtns_norm norm)
 		shtns->nphi = 0;	shtns->nlat = 0;	shtns->nlat_2 = 0;		shtns->nspat = 0;	// public data
 		shtns->ylm_lat = NULL;	shtns->ct_lat = 2.0;	shtns->ifft_lat = NULL;		shtns->nphi_lat = 0;	// _to_lat data
 		#ifdef SHTNS_GPU
-		shtns->d_alm = NULL;		// this marks the gpu as disabled.
+		shtns->d_clm = NULL;		// this marks the gpu as disabled.
 		#endif
 		#ifdef SHTNS4MAGIC
 		shtns->robert_form = 1;		// Robert form by default for MagIC (multiply spatial vector fields by sin(theta))
@@ -1275,7 +1275,7 @@ void shtns_unset_grid(shtns_cfg shtns)
 void shtns_destroy(shtns_cfg shtns)
 {
 	#ifdef SHTNS_GPU
-	if (shtns->d_alm) cushtns_release_gpu(shtns);
+	if (shtns->d_clm) cushtns_release_gpu(shtns);
 	#endif
 	free_unused(shtns, &shtns->l_2);
 	if (shtns->blm != shtns->alm)
@@ -1606,7 +1606,7 @@ shtns_cfg shtns_init(enum shtns_type flags, int lmax, int mmax, int mres, int nl
 void shtns_robert_form(shtns_cfg shtns, int robert)
 {
 	#ifdef SHTNS_GPU
-	if (robert != shtns->robert_form  &&  shtns->d_alm) shtns_runerr("[shtns_robert_form] ERROR: must be called before shtns_set_grid!");
+	if (robert != shtns->robert_form  &&  shtns->d_clm) shtns_runerr("[shtns_robert_form] ERROR: must be called before shtns_set_grid!");
 	#endif
 	shtns->robert_form = robert;
 }
