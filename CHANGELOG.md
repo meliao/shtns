@@ -1,13 +1,20 @@
 SHTNS CHANGE LOG:
 -----------------
 
-* v3.6  (24 Apr 2023)
+* v3.6
 	- Rewrite of GPU transforms, with important performance improvements.
 	- New support for AMD GPU MI100 and MI200 series.
 	- New batch transforms: especially useful on GPU for smaller transforms (lmax<1000).
 	- Removed support for 32bit float on GPU; will be back in a later release.
 	- Remove useless `shtns_use_gpu()` function.
-	- change `SH_to_point_cplx` interface to ensure C and C++ compatibility.
+
+* v3.5.5  (16 May 2023)
+	- Fix array overflow in gpu synthesis `cu_SH_to_spat*()`.
+
+* v3.5.4  (28 Apr 2023)
+	- Fix array overflow in gpu analysis `cu_spat_to_SH*()`.
+	- API change: `SH_to_point_cplx` now writes return value to a pointer, for better C/C++ compatibility.
+	- other minor fixes
 
 * v3.5.3  (17 Mar 2023)
 	- Allow "Robert form" to be set using the new `SHT_ROBERT_FORM` flag when calling `shtns_set_grid*()`

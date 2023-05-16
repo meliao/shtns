@@ -25,8 +25,8 @@
 	typedef std::complex<float> cplx_f;		///< single precision (float) complex number data type
 #else
 	#include <complex.h>
-	typedef complex double cplx;			///< double precision complex number data type
-	typedef complex float cplx_f;			///< single precision (float) complex number data type
+	typedef _Complex double cplx;			///< double precision complex number data type
+	typedef _Complex float cplx_f;			///< single precision (float) complex number data type
 #endif
 
 #ifdef __cplusplus
