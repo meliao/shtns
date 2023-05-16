@@ -1,6 +1,9 @@
 SHTNS CHANGE LOG:
 -----------------
 
+* v3.5.5 (16 May 2023)
+	- Fix array overflow in gpu synthesis `cu_SH_to_spat*()`.
+
 * v3.5.4 (28 Apr 2023)
 	- Fix array overflow in gpu analysis `cu_spat_to_SH*()`.
 	- API change: `SH_to_point_cplx` now writes return value to a pointer, for better C/C++ compatibility.
