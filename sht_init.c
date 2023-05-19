@@ -1409,6 +1409,7 @@ int shtns_set_grid_auto(shtns_cfg shtns, enum shtns_type flags, double eps, int 
 	#endif
 	#if SHTNS_GPU
 		shtns->sizeof_real = (layout & SHT_FP32) ? 4 : 8;
+		if ((layout & SHT_FP32) && (layout & SHT_ALLOW_GPU)) vector = 0;	// for now, only scalar transform is available in FP32.
 		if ((layout & SHT_ALLOW_GPU) && (*nlat % 4)) printf("!!! Warning !!! Nlat must be a multiple of 4 to run on GPU\n");
 	#endif
 
