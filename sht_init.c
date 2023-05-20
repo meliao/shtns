@@ -1409,7 +1409,10 @@ int shtns_set_grid_auto(shtns_cfg shtns, enum shtns_type flags, double eps, int 
 	#endif
 	#if SHTNS_GPU
 		shtns->sizeof_real = (layout & SHT_FP32) ? 4 : 8;
-		if ((layout & SHT_FP32) && (layout & SHT_ALLOW_GPU)) vector = 0;	// for now, only scalar transform is available in FP32.
+		if ((layout & SHT_FP32) && (layout & SHT_ALLOW_GPU)) {
+			vector = 0;			// for now, only scalar transform is available in FP32.
+			quick_init = 1;		// for now, FP32 only works on GPU anyway, no need to compare to cpu.
+		}
 		if ((layout & SHT_ALLOW_GPU) && (*nlat % 4)) printf("!!! Warning !!! Nlat must be a multiple of 4 to run on GPU\n");
 	#endif
 
@@ -1521,7 +1524,7 @@ int shtns_set_grid_auto(shtns_cfg shtns, enum shtns_type flags, double eps, int 
 		choose_best_sht(shtns, &nloop, vector);
 		if (layout & SHT_LOAD_SAVE_CFG) config_save(shtns, req_flags);
 	}
-	double t_estimate = 5e-10*LMAX*NLAT*MMAX/VSIZE2;		// very rough cost estimate (in seconds for 1 core @ 1Ghz).
+	double t_estimate = 5e-10*LMAX*NLAT*MMAX/VSIZE2 * shtns->howmany;		// very rough cost estimate (in seconds for 1 core @ 1Ghz).
 	if ((t_estimate < 0.3*shtns->nthreads) || ((quick_init == 0) && (!cfg_loaded))) {	// don't perform accuracy checks for too large transforms (takes too much time).
 		t = SHT_error(shtns, vector);		// compute SHT accuracy.
 		#if SHT_VERBOSE > 0
