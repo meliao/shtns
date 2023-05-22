@@ -323,18 +323,14 @@ ishioka2sh_kernel_alt(const int NFIELDS, const real* __restrict__ xlm, const rea
 		q_ofs += im*(((lmax+1+S)*2) -m+mres);
 		ql_ish += b*ql_ish_dist + q_ofs;
 		ql += q_ofs + b*ql_dist;
-		if (im<=mmax) {
-			const bool read = (ll>>1) <= llim-m;
-			const bool add2 = ((ll&2)==0) && (ll >= 4) && read;
-			for (int k=NFIELDS-1; k>=0; k--) {
-				if (read)  q = ql_ish[k*ql_ish_dist] * x0;
-				if (add2) {	// l-m even
-					q += ql_ish[k*ql_ish_dist -4] * x1;		// contribution of l-2
-				}
-				ql[k*ql_dist] = q;	// coalesced store
+		const bool read = (ll>>1) <= llim-m;
+		const bool add2 = ((ll&2)==0) && (ll >= 4) && read;
+		for (int k=NFIELDS-1; k>=0; k--) {
+			if (read)  q = ql_ish[k*ql_ish_dist] * x0;
+			if (add2) {	// l-m even
+				q += ql_ish[k*ql_ish_dist -4] * x1;		// contribution of l-2
 			}
-		} else {
-			for (int k=NFIELDS-1; k>=0; k--)  ql[k*ql_dist] = 0.0;	// coalesced store
+			ql[k*ql_dist] = q;	// coalesced store
 		}
 	}
 }
