@@ -153,13 +153,14 @@ double scal_error(complex double *Slm, complex double *Slm0, int ltr)
 {
 	long int jj,i, nlm_cplx, ib;
 	double tmax,t,n2;
+	const long nlm0 = shtns->nlm;
 
-	nlm_cplx = (MMAX*2 == NPHI) ? LiM(shtns, MRES*MMAX,MMAX) : NLM;
+	nlm_cplx = (MMAX*2 == NPHI) ? LiM(shtns, MRES*MMAX,MMAX) : nlm0;
 // compute error :
 	tmax = 0;	n2 = 0;		jj=0;	ib=0;
 //	if (!allFinite((double*)Slm, 2*NLM)) printf("NaN, Inf or Denormal detected\n");
 	for (int b=0;b<batch;b++) {
-		for (i=0;i<NLM;i++) {
+		for (i=0;i<nlm0;i++) {
 			//if ((isNaN(creal(Slm[i]))) || (isNaN(cimag(Slm[i])))) printf("NaN @ lm=%ld (l=%d)\n",i,shtns->li[i]);
 			if ((i <= LMAX)||(i >= nlm_cplx)) {		// m=0, and 2*m=nphi is real
 				if (shtns->li[i] <= ltr)	Slm[i+b*NLM] = creal(Slm[i+b*NLM]-Slm0[i+b*NLM]);
@@ -173,17 +174,17 @@ double scal_error(complex double *Slm, complex double *Slm0, int ltr)
 			if (t>tmax) { tmax = t; jj = i; ib=b; }
 		}
 	}
-	print_error(sqrt(n2/(NLM*batch)), tmax, shtns->li[jj],jj,ib, "");
-	if ((tmax > 1e-7) && (NLM < 15)) {
+	print_error(sqrt(n2/(nlm0*batch)), tmax, shtns->li[jj],jj,ib, "");
+	if ((tmax > 1e-7) && (nlm0 < 15)) {
 		printf(" orig:");
-		for (i=0; i<NLM;i++)
+		for (i=0; i<nlm0;i++)
 			if ((i <= LMAX)||(i >= nlm_cplx)) {		// m=0, and 2*m=nphi is real
 				printf("  %g",creal(Slm0[i+ib*NLM]));
 			} else {
 				printf("  %g,%g",creal(Slm0[i+ib*NLM]),cimag(Slm0[i+ib*NLM]));
 			}
 		printf("\n diff:");
-		for (i=0; i<NLM;i++)
+		for (i=0; i<nlm0;i++)
 			if ((i <= LMAX)||(i >= nlm_cplx)) {		// m=0, and 2*m=nphi is real
 				printf("  %g",creal(Slm[i+ib*NLM]));
 			} else {
@@ -198,11 +199,12 @@ double vect_error(complex double *Slm, complex double *Tlm, complex double *Slm0
 {
 	long int jj,i,ib;
 	double tmax0, tmax,t,n2;
+	const long nlm0 = shtns->nlm;
 
 // compute error :
 	tmax = 0;	n2 = 0;		jj=0;	ib=0;
 	for (int b=0;b<batch;b++) {
-		for (i=0;i<NLM;i++) {
+		for (i=0;i<nlm0;i++) {
 			if ((i <= LMAX)||(i >= LiM(shtns, MRES*(NPHI+1)/2,(NPHI+1)/2))) {
 				if (shtns->li[i] <= ltr)	Slm[i+b*NLM] = creal(Slm[i+b*NLM]-Slm0[i+b*NLM]);
 				t = fabs(creal(Slm[i+b*NLM]));
@@ -214,18 +216,18 @@ double vect_error(complex double *Slm, complex double *Tlm, complex double *Slm0
 			if (t>tmax) { tmax = t; jj = i; ib = b; }
 		}
 	}
-	print_error(sqrt(n2/(NLM*batch)), tmax, shtns->li[jj],jj,ib, "Spheroidal");
-	if ((tmax > 1e-4) && (NLM < 15)) {
+	print_error(sqrt(n2/(nlm0*batch)), tmax, shtns->li[jj],jj,ib, "Spheroidal");
+	if ((tmax > 1e-4) && (nlm0 < 15)) {
 		printf(" orig:");
-		for (i=0; i<NLM;i++)
-			if ((i <= LMAX)||(i >= NLM)) {		// m=0, and 2*m=nphi is real
+		for (i=0; i<nlm0;i++)
+			if ((i <= LMAX)||(i >= nlm0)) {		// m=0, and 2*m=nphi is real
 				printf("  %g",creal(Slm0[i]));
 			} else {
 				printf("  %g,%g",creal(Slm0[i]),cimag(Slm0[i]));
 			}
 		printf("\n diff:");
-		for (i=0; i<NLM;i++)
-			if ((i <= LMAX)||(i >= NLM)) {		// m=0, and 2*m=nphi is real
+		for (i=0; i<nlm0;i++)
+			if ((i <= LMAX)||(i >= nlm0)) {		// m=0, and 2*m=nphi is real
 				printf("  %g",creal(Slm[i]));
 			} else {
 				printf("  %g,%g",creal(Slm[i]),cimag(Slm[i]));
@@ -238,7 +240,7 @@ double vect_error(complex double *Slm, complex double *Tlm, complex double *Slm0
 // compute error :
 	tmax = 0;	n2 = 0;		jj=0;	ib=0;
 	for (int b=0;b<batch;b++) {
-		for (i=0;i<NLM;i++) {
+		for (i=0;i<nlm0;i++) {
 			if ((i <= LMAX)||(i >= LiM(shtns, MRES*(NPHI+1)/2,(NPHI+1)/2))) {
 				if (shtns->li[i] <= ltr)	Tlm[i+b*NLM] = creal(Tlm[i+b*NLM]- Tlm0[i+b*NLM]);
 				t = fabs(creal(Tlm[i+b*NLM]));
@@ -250,18 +252,18 @@ double vect_error(complex double *Slm, complex double *Tlm, complex double *Slm0
 			if (t>tmax) { tmax = t; jj = i; ib=b; }
 		}
 	}
-	print_error(sqrt(n2/(NLM*batch)), tmax, shtns->li[jj],jj,ib, "Toroidal");
-	if ((tmax > 1e-4) && (NLM < 15)) {
+	print_error(sqrt(n2/(nlm0*batch)), tmax, shtns->li[jj],jj,ib, "Toroidal");
+	if ((tmax > 1e-4) && (nlm0 < 15)) {
 		printf(" orig:");
-		for (i=0; i<NLM;i++)
-			if ((i <= LMAX)||(i >= NLM)) {		// m=0, and 2*m=nphi is real
+		for (i=0; i<nlm0;i++)
+			if ((i <= LMAX)||(i >= nlm0)) {		// m=0, and 2*m=nphi is real
 				printf("  %g",creal(Tlm0[i]));
 			} else {
 				printf("  %g,%g",creal(Tlm0[i]),cimag(Tlm0[i]));
 			}
 		printf("\n diff:");
-		for (i=0; i<NLM;i++)
-			if ((i <= LMAX)||(i >= NLM)) {		// m=0, and 2*m=nphi is real
+		for (i=0; i<nlm0;i++)
+			if ((i <= LMAX)||(i >= nlm0)) {		// m=0, and 2*m=nphi is real
 				printf("  %g",creal(Tlm[i]));
 			} else {
 				printf("  %g,%g",creal(Tlm[i]),cimag(Tlm[i]));
@@ -795,10 +797,10 @@ int main(int argc, char *argv[])
 	shtns_use_threads(nthreads);		// 0 : means automatically chooses the number of threads.
 	shtns = shtns_create(LMAX, MMAX, MRES, shtnorm);
 	if (robert_form >= 0) shtns_robert_form(shtns, robert_form);		// keep the default robert_form, unless specified on command line (usefull when built4magic)
-	NLM = shtns->nlm;
+	NLM = ((shtns->nlm + 3)/4) *4;		// align on 64 bytes (cache line)
 	if (batch == -1) {
 		batch = SHT_ITER;		SHT_ITER = 1;
-		int r = shtns_set_batch(shtns, batch, shtns->nlm);
+		int r = shtns_set_batch(shtns, batch, NLM);
 		if (r<0) printf("ERROR batch\n");
 	}
 	shtns_set_grid_auto(shtns, shtmode | layout | layout_opts, polaropt, nlorder, &NLAT, &NPHI);
@@ -975,7 +977,7 @@ int main(int argc, char *argv[])
 		spat_to_SH(shtns, Sh, Slm);
 		double err = 0.0;
 		int lm_max = -1;
-		for (int lm=0; lm<NLM; lm++) {
+		for (int lm=0; lm<shtns->nlm; lm++) {
 			double t = cabs(Slm[lm]);
 			if (lm==LiM(shtns,1,1)) {	t = cabs(Slm[lm] - a11);	if (t>1e-12) printf(COLOR_ERR "l=1,m=1 error = %g" COLOR_END "\n", t);  }
 			if (lm==0) {  t = cabs(Slm[lm] - a00);	if (t>1e-12) printf(COLOR_ERR "l=0,m=0 error = %g" COLOR_END "\n", t);  }

@@ -850,8 +850,9 @@ void SH_to_spat_gpu(shtns_cfg shtns, cplx *Qlm, double *Vr, const long int llim)
 {
 	cudaError_t err = cudaSuccess;
 	const int mres = shtns->mres;
-	long nlm = shtns->nlm;
+	const int howmany = shtns->howmany;
 	int mmax = shtns->mmax;
+	long nlm_pad = (howmany==1) ? shtns->nlm : shtns->spec_dist*howmany;
 
 	double *d_q   = shtns->gpu_staging_mem;		// buffer for transfer (safe)
 	double *d_qlm = d_q;		// "in-place" operation possible with ishioka
@@ -859,19 +860,21 @@ void SH_to_spat_gpu(shtns_cfg shtns, cplx *Qlm, double *Vr, const long int llim)
 
 	if (llim < mmax*mres) {
 		mmax = llim / mres;	// truncate mmax too !
-		if (shtns->howmany == 1) nlm = nlm_calc( shtns->lmax, mmax, mres);		// transfer less data
+		if (shtns->howmany == 1) nlm_pad = nlm_calc( shtns->lmax, mmax, mres);		// transfer less data
 	}
+
+	if (howmany > 1  &&  2*shtns->spec_dist > shtns->nlm_stride) { printf("ERROR: distance between field too large, unsupported\n."); return; }
 
 	// copy spectral data to GPU
   if (shtns->sizeof_real == 4) {
 	// convert
-	float* tmp_f = (float*) malloc(2*nlm*sizeof(float) * shtns->howmany);
-	for (int i=0; i<2*nlm*shtns->howmany; i++) tmp_f[i] = ((double*) Qlm)[i];
+	float* tmp_f = (float*) malloc(2*nlm_pad*sizeof(float));
+	for (int i=0; i<2*nlm_pad; i++) tmp_f[i] = ((double*) Qlm)[i];
 	// copy spectral data to GPU
-	err = cudaMemcpy(d_qlm, tmp_f, 2*nlm*sizeof(float) * shtns->howmany, cudaMemcpyHostToDevice);
+	err = cudaMemcpy(d_qlm, tmp_f, 2*nlm_pad*sizeof(float), cudaMemcpyHostToDevice);
 	free(tmp_f);
   } else
-	err = cudaMemcpy(d_qlm, Qlm, 2*nlm*sizeof(double) * shtns->howmany, cudaMemcpyHostToDevice);
+	err = cudaMemcpy(d_qlm, Qlm, 2*nlm_pad*sizeof(double), cudaMemcpyHostToDevice);
 	if (err != cudaSuccess) { CUDA_ERROR_CHECK;	return; }
 
 	// SHT on the GPU
@@ -895,33 +898,34 @@ void SHsphtor_to_spat_gpu(shtns_cfg shtns, cplx *Slm, cplx *Tlm, double *Vt, dou
 {
 	cudaError_t err = cudaSuccess;
 	cudaEvent_t ev_sht;
-	int nlm = shtns->nlm;
 	int mmax = shtns->mmax;
 	const int mres = shtns->mres;
 	const int howmany = shtns->howmany;
 	const long nspat = shtns->nspat;
 	const long nlm_stride = shtns->nlm_stride * howmany;
 	const long spat_stride = shtns->spat_stride;
-	cudaStream_t xfer_stream = shtns->xfer_stream;
+	long nlm_pad = (howmany==1) ? shtns->nlm : shtns->spec_dist*howmany;
 
 	double* d_vwlm = shtns->gpu_buf_in;
 	double* d_vtp = shtns->gpu_staging_mem;
 
 	if (llim < mmax*mres) {
 		mmax = llim / mres;	// truncate mmax too !
-		if (howmany == 1) nlm = nlm_calc( shtns->lmax, mmax, mres);		// transfer less data
+		if (howmany == 1) nlm_pad = nlm_calc( shtns->lmax, mmax, mres);		// transfer less data
 	}
+	if (howmany > 1  &&  2*nlm_pad > nlm_stride) { printf("ERROR: distance between field too large, unsupported\n."); return; }
+
 	// transfer and convert on gpu
 	double* d_Slm = 0;
 	double* d_Tlm = 0;
 	if (Slm) {
 		d_Slm = d_vtp;
-		err = cudaMemcpy(d_Slm, Slm, 2*nlm*sizeof(double) * howmany, cudaMemcpyHostToDevice);
+		err = cudaMemcpy(d_Slm, Slm, 2*nlm_pad*sizeof(double), cudaMemcpyHostToDevice);
 		if (err != cudaSuccess) { CUDA_ERROR_CHECK;	return; }
 	}
 	if (Tlm) {
 		d_Tlm = d_vtp + nlm_stride;
-		err = cudaMemcpy(d_Tlm, Tlm, 2*nlm*sizeof(double) * howmany, cudaMemcpyHostToDevice);
+		err = cudaMemcpy(d_Tlm, Tlm, 2*nlm_pad*sizeof(double), cudaMemcpyHostToDevice);
 		if (err != cudaSuccess) { CUDA_ERROR_CHECK;	return; }
 	}
 
@@ -942,7 +946,7 @@ void SHsphtor_to_spat_gpu(shtns_cfg shtns, cplx *Slm, cplx *Tlm, double *Vt, dou
 
 	if (Vt) {	// copy back spatial data (theta)
 		if (Vp) {
-			cudaStreamWaitEvent(xfer_stream, ev_sht, 0);					// xfer stream waits for end of scalar SH (theta).
+			cudaStreamWaitEvent(shtns->xfer_stream, ev_sht, 0);					// xfer stream waits for end of scalar SH (theta).
 			cudaMemcpyAsync(Vt, d_vtp, nspat*sizeof(double), cudaMemcpyDeviceToHost, shtns->xfer_stream);
 			cudaEventDestroy(ev_sht);
 		} else {
@@ -972,7 +976,6 @@ void SHqst_to_spat_gpu(shtns_cfg shtns, cplx *Qlm, cplx *Slm, cplx *Tlm, double 
 {
 	cudaError_t err = cudaSuccess;
 	cudaEvent_t ev_sht0, ev_sht1, ev_up;
-	int nlm = shtns->nlm;
 	int mmax = shtns->mmax;
 	const int mres = shtns->mres;
 	const int howmany = shtns->howmany;
@@ -981,24 +984,27 @@ void SHqst_to_spat_gpu(shtns_cfg shtns, cplx *Qlm, cplx *Slm, cplx *Tlm, double 
 	const long spat_stride = shtns->spat_stride;
 	cudaStream_t xfer_stream = shtns->xfer_stream;
 	cudaStream_t comp_stream = shtns->comp_stream;
+	long nlm_pad = (howmany==1) ? shtns->nlm : shtns->spec_dist*howmany;
 
 	double* d_qvwlm = shtns->gpu_buf_in;
 	double* d_vrtp = shtns->gpu_staging_mem;
 
 	if (llim < mmax*mres) {
 		mmax = llim / mres;	// truncate mmax too !
-		if (howmany == 1) nlm = nlm_calc( shtns->lmax, mmax, mres);		// transfer less data
+		if (howmany == 1) nlm_pad = nlm_calc( shtns->lmax, mmax, mres);		// transfer less data
 	}
+	if (howmany > 1  &&  2*nlm_pad > nlm_stride) { printf("ERROR: distance between field too large, unsupported\n."); return; }
+
 	/// 1) start scalar SH for radial component.
-	err = cudaMemcpy(d_qvwlm + nlm_stride, Qlm, 2*nlm*sizeof(double) * howmany, cudaMemcpyHostToDevice);
+	err = cudaMemcpy(d_qvwlm + nlm_stride, Qlm, 2*nlm_pad*sizeof(double), cudaMemcpyHostToDevice);
 	if (err != cudaSuccess) { CUDA_ERROR_CHECK;	return; }
 	// SHT on the GPU
 	cuda_SH_to_spat<0>(shtns, (cplx*) (d_qvwlm+nlm_stride), d_vrtp + 2*spat_stride, llim, mmax);		// may use gpu_buf_in = d_qvwlm internally
 
 	// OR transfer and convert on gpu
-	err = cudaMemcpyAsync(d_vrtp, Slm, 2*nlm*sizeof(double) * howmany, cudaMemcpyHostToDevice, xfer_stream);
+	err = cudaMemcpyAsync(d_vrtp, Slm, 2*nlm_pad*sizeof(double), cudaMemcpyHostToDevice, xfer_stream);
 	if (err != cudaSuccess) { CUDA_ERROR_CHECK;	return; }
-	err = cudaMemcpyAsync(d_vrtp + nlm_stride, Tlm, 2*nlm*sizeof(double) * howmany, cudaMemcpyHostToDevice, xfer_stream);
+	err = cudaMemcpyAsync(d_vrtp + nlm_stride, Tlm, 2*nlm_pad*sizeof(double), cudaMemcpyHostToDevice, xfer_stream);
 	if (err != cudaSuccess) { CUDA_ERROR_CHECK;	return; }
 
 	cudaEventCreateWithFlags(&ev_sht0, cudaEventDisableTiming );
@@ -1039,6 +1045,8 @@ void spat_to_SH_gpu(shtns_cfg shtns, double *Vr, cplx *Qlm, const long int llim)
 	double *d_q   = shtns->gpu_staging_mem;
 	double *d_qlm = d_q;		// "in-place" operation possible
 
+	if (shtns->howmany > 1  &&  2*shtns->spec_dist > shtns->nlm_stride) { printf("ERROR: distance between field too large, unsupported\n."); return; }
+
 	// copy spatial data to GPU
 	if (shtns->sizeof_real == 4) {		// convert double to float
 		float* tmp_f = (float*) malloc(sizeof(float)*shtns->nspat);
@@ -1058,17 +1066,17 @@ void spat_to_SH_gpu(shtns_cfg shtns, double *Vr, cplx *Qlm, const long int llim)
 
 	int mmax = shtns->mmax;
 	int mres = shtns->mres;
-	int nlm = shtns->nlm;
+	long nlm_pad = (shtns->howmany==1) ? shtns->nlm : shtns->spec_dist*shtns->howmany;
 	if ((llim < mmax*mres) && (shtns->howmany == 1)) {
 		mmax = llim / mres;	// truncate mmax too !
-		nlm = nlm_calc( shtns->lmax, mmax, mres);		// transfer less data
-		memset(Qlm+nlm, 0, 2*(shtns->nlm - nlm)*sizeof(double));	// zero out on cpu (during the transform on GPU).
+		nlm_pad = nlm_calc( shtns->lmax, mmax, mres);		// transfer less data
+		memset(Qlm+nlm_pad, 0, 2*(shtns->nlm - nlm_pad)*sizeof(double));	// zero out on cpu (during the transform on GPU).
 	}
 	// copy back spectral data
-	err = cudaMemcpy(Qlm, d_qlm, 2*nlm * shtns->howmany * shtns->sizeof_real, cudaMemcpyDeviceToHost);
+	err = cudaMemcpy(Qlm, d_qlm, 2*nlm_pad * shtns->sizeof_real, cudaMemcpyDeviceToHost);
 	if (err != cudaSuccess) { CUDA_ERROR_CHECK;	return; }
 	if (shtns->sizeof_real == 4) {	// convert float to double in-place
-		for (int i=2*nlm*shtns->howmany-1; i>=0; i--)	((double*)Qlm)[i] = ((float*)Qlm)[i];
+		for (int i=2*nlm_pad-1; i>=0; i--)	((double*)Qlm)[i] = ((float*)Qlm)[i];
 	}
 }
 
@@ -1090,6 +1098,8 @@ void spat_to_SHsphtor_gpu(shtns_cfg shtns, double *Vt, double *Vp, cplx *Slm, cp
 	d_vtp = shtns->gpu_staging_mem;
 	d_vwlm = shtns->gpu_buf_in;
 
+	if (howmany > 1  &&  2*shtns->spec_dist > shtns->nlm_stride) { printf("ERROR: distance between field too large, unsupported\n."); return; }
+
 	// copy spatial data to gpu
 	err = cudaMemcpy(d_vtp, Vt, nspat*sizeof(double), cudaMemcpyHostToDevice);
 	if (err != cudaSuccess) { CUDA_ERROR_CHECK;	return; }
@@ -1108,16 +1118,16 @@ void spat_to_SHsphtor_gpu(shtns_cfg shtns, double *Vt, double *Vp, cplx *Slm, cp
 
 	int mmax = shtns->mmax;
 	int mres = shtns->mres;
-	int nlm = shtns->nlm;
+	long nlm_pad = (howmany==1) ? shtns->nlm : shtns->spec_dist*howmany;
 	if ((llim < mmax*mres) && (howmany == 1)) {
 		mmax = llim / mres;	// truncate mmax too !
-		nlm = nlm_calc( shtns->lmax, mmax, mres);		// transfer less data
-		memset(Slm+nlm, 0, 2*(shtns->nlm - nlm)*sizeof(double));	// zero out on cpu (during the transform on GPU).
-		memset(Tlm+nlm, 0, 2*(shtns->nlm - nlm)*sizeof(double));	// zero out on cpu (during the transform on GPU).
+		nlm_pad = nlm_calc( shtns->lmax, mmax, mres);		// transfer less data
+		memset(Slm+nlm_pad, 0, 2*(shtns->nlm - nlm_pad)*sizeof(double));	// zero out on cpu (during the transform on GPU).
+		memset(Tlm+nlm_pad, 0, 2*(shtns->nlm - nlm_pad)*sizeof(double));	// zero out on cpu (during the transform on GPU).
 	}
 
-	err = cudaMemcpy(Slm, d_vtp, 2*nlm*sizeof(double) * howmany, cudaMemcpyDeviceToHost);
-	err = cudaMemcpy(Tlm, d_vtp+nlm_stride, 2*nlm*sizeof(double) * howmany, cudaMemcpyDeviceToHost);
+	err = cudaMemcpy(Slm, d_vtp, 2*nlm_pad*sizeof(double), cudaMemcpyDeviceToHost);
+	err = cudaMemcpy(Tlm, d_vtp+nlm_stride, 2*nlm_pad*sizeof(double), cudaMemcpyDeviceToHost);
 
 	cudaEventDestroy(ev_up);
 }
@@ -1139,6 +1149,8 @@ void spat_to_SHqst_gpu(shtns_cfg shtns, double *Vr, double *Vt, double *Vp, cplx
 
 	d_qvwlm = shtns->gpu_buf_in;
 	d_vrtp = shtns->gpu_staging_mem;	//d_qvwlm + 2*nlm_stride;
+
+	if (howmany > 1  &&  2*shtns->spec_dist > shtns->nlm_stride) { printf("ERROR: distance between field too large, unsupported\n."); return; }
 
 	// copy spatial data to gpu
 	err = cudaMemcpy(d_vrtp, Vt, nspat*sizeof(double), cudaMemcpyHostToDevice);
@@ -1168,20 +1180,20 @@ void spat_to_SHqst_gpu(shtns_cfg shtns, double *Vr, double *Vt, double *Vp, cplx
 
 	int mmax = shtns->mmax;
 	int mres = shtns->mres;
-	int nlm = shtns->nlm;
-	if ((llim < mmax*mres) & (shtns->howmany ==1)) {
+	long nlm_pad = (howmany==1) ? shtns->nlm : shtns->spec_dist*howmany;
+	if ((llim < mmax*mres) && (howmany ==1)) {
 		mmax = llim / mres;	// truncate mmax too !
-		nlm = nlm_calc( shtns->lmax, mmax, mres);		// transfer less data
-		memset(Slm+nlm, 0, 2*(shtns->nlm - nlm)*sizeof(double));	// zero out on cpu (during the transform on GPU).
-		memset(Tlm+nlm, 0, 2*(shtns->nlm - nlm)*sizeof(double));	// zero out on cpu (during the transform on GPU).
-		memset(Qlm+nlm, 0, 2*(shtns->nlm - nlm)*sizeof(double));	// zero out on cpu (during the transform on GPU).
+		nlm_pad = nlm_calc( shtns->lmax, mmax, mres);		// transfer less data
+		memset(Slm+nlm_pad, 0, 2*(shtns->nlm - nlm_pad)*sizeof(double));	// zero out on cpu (during the transform on GPU).
+		memset(Tlm+nlm_pad, 0, 2*(shtns->nlm - nlm_pad)*sizeof(double));	// zero out on cpu (during the transform on GPU).
+		memset(Qlm+nlm_pad, 0, 2*(shtns->nlm - nlm_pad)*sizeof(double));	// zero out on cpu (during the transform on GPU).
 	}
 
 	cudaStreamWaitEvent(xfer_stream, ev_sh2, 0);					// xfer stream waits for end of vector sht.
-	err = cudaMemcpyAsync(Slm, d_vrtp, 2*nlm*sizeof(double) * howmany, cudaMemcpyDeviceToHost, xfer_stream);
-	err = cudaMemcpyAsync(Tlm, d_vrtp+nlm_stride, 2*nlm*sizeof(double) * howmany, cudaMemcpyDeviceToHost, xfer_stream);
+	err = cudaMemcpyAsync(Slm, d_vrtp, 2*nlm_pad*sizeof(double), cudaMemcpyDeviceToHost, xfer_stream);
+	err = cudaMemcpyAsync(Tlm, d_vrtp+nlm_stride, 2*nlm_pad*sizeof(double), cudaMemcpyDeviceToHost, xfer_stream);
 
-	err = cudaMemcpy(Qlm, d_qvwlm+nlm_stride, 2*nlm*sizeof(double) * howmany, cudaMemcpyDeviceToHost);
+	err = cudaMemcpy(Qlm, d_qvwlm+nlm_stride, 2*nlm_pad*sizeof(double), cudaMemcpyDeviceToHost);
 
 	cudaEventDestroy(ev_up);	cudaEventDestroy(ev_up2);	cudaEventDestroy(ev_sh2);
 }
