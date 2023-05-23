@@ -726,6 +726,7 @@ enable_f77
 enable_simd
 enable_ishioka
 enable_kernel_compiler
+enable_march
 '
       ac_precious_vars='build_alias
 host_alias
@@ -1380,6 +1381,9 @@ Optional Features:
   --enable-kernel-compiler=gcc
                           Use a different compiler for CPU kernels
                           (default=gcc)
+  --enable-march=native   select target cpu architecture with a -march=XXX
+                          compiler option (for gcc, icc and clang) (default:
+                          XXX=native for best performance)
   --disable-openmp        do not use OpenMP
 
 Some influential environment variables:
@@ -2547,6 +2551,14 @@ else $as_nop
   enable_kernel_compiler=gcc
 fi
 
+# Check whether --enable-march was given.
+if test ${enable_march+y}
+then :
+  enableval=$enable_march;
+else $as_nop
+  enable_march=native
+fi
+
 
 
 if test "$prefix" = "NONE"
@@ -3649,11 +3661,13 @@ if test "x$enable_knl" != "xyes"
 then :
 
 	# add gcc compile options if supported.
+	if test "x$enable_march" != "xno"
+then :
 
-  { printf "%s\n" "$as_me:${as_lineno-$LINENO}: checking whether $CC accepts -march=native" >&5
-printf %s "checking whether $CC accepts -march=native... " >&6; }
+  { printf "%s\n" "$as_me:${as_lineno-$LINENO}: checking whether $CC accepts -march=$enable_march" >&5
+printf %s "checking whether $CC accepts -march=$enable_march... " >&6; }
   ax_check_save_flags=$CFLAGS
-  CFLAGS="$CFLAGS -march=native"
+  CFLAGS="$CFLAGS -march=$enable_march"
   cat confdefs.h - <<_ACEOF >conftest.$ac_ext
 /* end confdefs.h.  */
 
@@ -3670,7 +3684,7 @@ then :
   CFLAGS=$ax_check_save_flags
      { printf "%s\n" "$as_me:${as_lineno-$LINENO}: result: yes" >&5
 printf "%s\n" "yes" >&6; }
-     CFLAGS="$CFLAGS -march=native"
+     CFLAGS="$CFLAGS -march=$enable_march"
 else $as_nop
   CFLAGS=$ax_check_save_flags
      { printf "%s\n" "$as_me:${as_lineno-$LINENO}: result: no" >&5
@@ -3679,6 +3693,7 @@ printf "%s\n" "no" >&6; }
 fi
 rm -f core conftest.err conftest.$ac_objext conftest.beam conftest.$ac_ext
 
+fi
 	# tune for skylake, it gives significantly better performance on Haswell with gcc 9.2
 
   { printf "%s\n" "$as_me:${as_lineno-$LINENO}: checking whether $CC accepts -mtune=skylake" >&5
@@ -4076,11 +4091,13 @@ if test "x$enable_knl" != "xyes"
 then :
 
 	# add gcc compile options if supported.
+	if test "x$enable_march" != "xno"
+then :
 
-  { printf "%s\n" "$as_me:${as_lineno-$LINENO}: checking whether $CC accepts -march=native" >&5
-printf %s "checking whether $CC accepts -march=native... " >&6; }
+  { printf "%s\n" "$as_me:${as_lineno-$LINENO}: checking whether $CC accepts -march=$enable_march" >&5
+printf %s "checking whether $CC accepts -march=$enable_march... " >&6; }
   ax_check_save_flags=$CFLAGS
-  CFLAGS="$CFLAGS -march=native"
+  CFLAGS="$CFLAGS -march=$enable_march"
   cat confdefs.h - <<_ACEOF >conftest.$ac_ext
 /* end confdefs.h.  */
 
@@ -4097,7 +4114,7 @@ then :
   CFLAGS=$ax_check_save_flags
      { printf "%s\n" "$as_me:${as_lineno-$LINENO}: result: yes" >&5
 printf "%s\n" "yes" >&6; }
-     CFLAGS="$CFLAGS -march=native"
+     CFLAGS="$CFLAGS -march=$enable_march"
 else $as_nop
   CFLAGS=$ax_check_save_flags
      { printf "%s\n" "$as_me:${as_lineno-$LINENO}: result: no" >&5
@@ -4106,6 +4123,7 @@ printf "%s\n" "no" >&6; }
 fi
 rm -f core conftest.err conftest.$ac_objext conftest.beam conftest.$ac_ext
 
+fi
 	# tune for skylake, it gives significantly better performance on Haswell with gcc 9.2
 
   { printf "%s\n" "$as_me:${as_lineno-$LINENO}: checking whether $CC accepts -mtune=skylake" >&5

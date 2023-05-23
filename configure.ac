@@ -40,6 +40,8 @@ AC_ARG_ENABLE([ishioka],
 	AS_HELP_STRING([--disable-ishioka], [Do not use the new and faster recursion]), [], [enable_ishioka=yes])
 AC_ARG_ENABLE([kernel-compiler],
 	AS_HELP_STRING([--enable-kernel-compiler=gcc], [Use a different compiler for CPU kernels (default=gcc)]), [], [enable_kernel_compiler=gcc])
+AC_ARG_ENABLE([march],
+	AS_HELP_STRING([--enable-march=native], [select target cpu architecture with a -march=XXX compiler option (for gcc, icc and clang) (default: XXX=native for best performance)]), [], [enable_march=native])
 
 
 dnl Sanitize $prefix. Autoconf does this by itself, but so late in the
@@ -92,7 +94,7 @@ CC=$CC2
 #### setup the kernel compiler
 AS_IF([test "x$enable_knl" != "xyes"], [
 	# add gcc compile options if supported.
-	AX_CHECK_COMPILE_FLAG([-march=native])
+	AS_IF([test "x$enable_march" != "xno"], [AX_CHECK_COMPILE_FLAG([-march=$enable_march])])
 	# tune for skylake, it gives significantly better performance on Haswell with gcc 9.2
 	AX_CHECK_COMPILE_FLAG([-mtune=skylake])
 	# this is an icc compile option, try if it is supported:
@@ -134,7 +136,7 @@ CFLAGS=$backup_cflags
 
 AS_IF([test "x$enable_knl" != "xyes"], [
 	# add gcc compile options if supported.
-	AX_CHECK_COMPILE_FLAG([-march=native])
+	AS_IF([test "x$enable_march" != "xno"], [AX_CHECK_COMPILE_FLAG([-march=$enable_march])])
 	# tune for skylake, it gives significantly better performance on Haswell with gcc 9.2
 	AX_CHECK_COMPILE_FLAG([-mtune=skylake])
 	# this is an icc compile option, try if it is supported:
