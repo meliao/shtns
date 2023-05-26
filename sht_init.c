@@ -1029,13 +1029,13 @@ int config_load(shtns_cfg shtns, int req_flags)
 
 	FILE *fcfg = fopen("shtns_cfg","r");
 	if (fcfg != NULL) {
-		int i=0;
 		while(1) {
-			fscanf(fcfg, "%30s %30s %d %d %d %d %d %d %d %d %d %d",version, simd, &lmax2, &mmax2, &mres2, &nphi2, &nlat2, &grid2, &nthreads2, &req_flags2, &nlorder2, &mtr_dct2);
+			int i=fscanf(fcfg, "%30s %30s %d %d %d %d %d %d %d %d %d %d",version, simd, &lmax2, &mmax2, &mres2, &nphi2, &nlat2, &grid2, &nthreads2, &req_flags2, &nlorder2, &mtr_dct2);
+			if (i<12) break;
 			for (int iv=0; iv<SHT_NVAR; iv++) {
-				fscanf(fcfg, "%7s", alg);
+				if ( fscanf(fcfg, "%7s", alg) == 0 ) break;
 				for (int it=0; it<SHT_NTYP; it++) {
-					fscanf(fcfg, "%7s", alg),
+					if ( fscanf(fcfg, "%7s", alg) == 0 ) break;
 					ft2[iv][it] = 0;
 					for (int ia=0; ia<SHT_NALG; ia++) {
 						if (strcmp(alg, sht_name[ia]) == 0) {
@@ -1492,7 +1492,8 @@ int shtns_set_grid_auto(shtns_cfg shtns, enum shtns_type flags, double eps, int 
 	switch(flags) {
 		case sht_gauss : 	 shtns->grid = GRID_GAUSS;	break;
 		case sht_reg_poles : shtns->grid = GRID_POLES;	break;
-		case sht_reg_fast :  shtns->grid = GRID_REGULAR;
+		case sht_reg_fast :  shtns->grid = GRID_REGULAR;  break;
+		default:  shtns_runerr("unknown grid (should not happen)");
 	}
 	grid_weights(shtns, latdir);
 

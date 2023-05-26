@@ -567,7 +567,7 @@
 #else
 	inline static void* VMALLOC(size_t s) {
 		void* ptr = 0;		// return value will be zero on failure.
-		posix_memalign(&ptr, 64, s);
+		int err = posix_memalign(&ptr, 64, s);
 		return ptr;
 	}
 	#define VFREE(s)	free(s)

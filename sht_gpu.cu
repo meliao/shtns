@@ -713,7 +713,7 @@ void cuda_SH_to_spat(shtns_cfg shtns, std::complex<real>* d_Qlm, real *d_Vr, con
 {
 	std::complex<real>* d_qlm = d_Qlm;
 	
-	if (sizeof(real) != shtns->sizeof_real) { printf("ERROR: SHTns plan not prepared for fp%d data\n", sizeof(real)*8);	exit(1); }
+	if (sizeof(real) != shtns->sizeof_real) { printf("ERROR: SHTns plan not prepared for fp%ld data\n", sizeof(real)*8);	exit(1); }
 
 	if (S==0  &&  (SHT_ALLOW_SH2ISH_FUSE==0 || shtns->nwarp[2]==0)) {
 		d_qlm = (std::complex<real>*) shtns->gpu_buf_in;
@@ -732,7 +732,7 @@ void cuda_spat_to_SH(shtns_cfg shtns, real *d_Vr, std::complex<real>* d_Qlm, con
 	const int mres = shtns->mres;
 	if (llim < mmax*mres)	mmax = llim / mres;		// truncate mmax too !
 
-	if (sizeof(real) != shtns->sizeof_real) { printf("ERROR: SHTns plan not prepared for fp%d data\n", sizeof(real)*8);	exit(1); }
+	if (sizeof(real) != shtns->sizeof_real) { printf("ERROR: SHTns plan not prepared for fp%ld data\n", sizeof(real)*8);	exit(1); }
 
 	spat_to_fourier_gpu(shtns, d_Vr, mmax, sizeof(real));
 	if (S==0) {
