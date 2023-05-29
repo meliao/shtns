@@ -74,3 +74,13 @@ DOCUMENTATION:
           doi = {10.2151/jmsj.2018-019}, volume={96}, number={2}, pages={241--249},
           year={2018},
         }
+
+  If you use the GPU transforms, VkFFT is used for FFTs (since v3.6), and you may cite the paper:
+
+        @article {vkfft,
+          author={Tolmachev, Dmitrii},
+          title={VkFFT-A Performant, Cross-Platform and Open-Source GPU FFT Library},
+          journal={IEEE Access},
+          doi={10.1109/ACCESS.2023.3242240}, volume={11}, number={}, pages={12039--12058},
+          year={2023},
+        }

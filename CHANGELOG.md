@@ -1,11 +1,11 @@
 SHTNS CHANGE LOG:
 -----------------
 
-* v3.6
+* v3.6  (30 May 2023)
 	- Rewrite of GPU transforms, with important performance improvements.
 	- New support for AMD GPU MI100 and MI200 series.
+	- Switch to VkFFT for the FFTs on GPU by default.
 	- New batch transforms: especially useful on GPU for smaller transforms (lmax<1000).
-	- Removed support for 32bit float on GPU; will be back in a later release.
 	- Remove useless `shtns_use_gpu()` function.
 
 * v3.5.5  (16 May 2023)
