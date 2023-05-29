@@ -1,4 +1,4 @@
-image: nvidia/cuda:10.2-devel-ubuntu18.04
+image: nvidia/cuda:12.1.1-devel-ubuntu22.04
 
 before_script:
   - apt-get update -qq && apt-get install -y -qq libfftw3-dev python3-numpy python3-dev swig

@@ -124,7 +124,7 @@ _shtns.so : shtns_numpy_wrap.c Makefile $(hfiles) $(objs)
 
 # generate python and c glue code with SWIG.
 shtns_numpy_wrap.c : shtns_numpy.i sht_private.h shtns.h
-	swig -python shtns_numpy.i
+	-swig -python shtns_numpy.i
 
 install-py : _shtns.so
 	$(PYTHON) setup.py install
