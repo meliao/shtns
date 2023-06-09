@@ -110,7 +110,6 @@ V			memset(BpF + m_inc*im, 0, sizeof(cplx)* m_inc );
 	}
   #endif
   }
-    #pragma omp barrier
 
   #ifndef SHT_AXISYM
     // NPHI > 1 as SHT_AXISYM is not defined.

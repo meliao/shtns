@@ -108,7 +108,6 @@ V					memset(Tlm+l+spec_ofs, 0, (shtns->nlm - l)*sizeof(cplx));
 			}
 		#endif
 	}
-	#pragma omp barrier
 
   #ifndef SHT_AXISYM
   	if (shtns->fft_mode & FFT_OOP) {		// free memory
