@@ -783,6 +783,25 @@ void cu_SHsphtor_to_spat(shtns_cfg shtns, cplx* d_Slm, cplx* d_Tlm, double* d_Vt
 }
 
 extern "C"
+void cu_SHsphtor_to_spat_float(shtns_cfg shtns, cplx_f* d_Slm, cplx_f* d_Tlm, float* d_Vt, float* d_Vp, int llim)
+{
+	int mmax = shtns->mmax;
+	const int mres = shtns->mres;
+	const long nlm_stride = shtns->nlm_stride * shtns->howmany;
+	float* d_vwlm = (float*) shtns->gpu_buf_in;
+
+	if (llim < mmax*mres)	mmax = llim / mres;	// truncate mmax too !
+
+	sphtor2scal_gpu<float>(shtns, d_Slm, d_Tlm, (cplx_f*) d_vwlm, (cplx_f*) (d_vwlm+nlm_stride), llim, mmax);
+
+	// SHT on the GPU
+	cuda_SH_to_spat<1,float>(shtns, (cplx_f*) d_vwlm, d_Vt, llim+1, mmax);
+	cuda_SH_to_spat<1,float>(shtns, (cplx_f*) (d_vwlm + nlm_stride), d_Vp, llim+1, mmax);
+}
+
+
+
+extern "C"
 void cu_SHqst_to_spat(shtns_cfg shtns, cplx* d_Qlm, cplx* d_Slm, cplx* d_Tlm, double* d_Vr, double* d_Vt, double* d_Vp, int llim)
 {
 	int mmax = shtns->mmax;
@@ -791,6 +810,17 @@ void cu_SHqst_to_spat(shtns_cfg shtns, cplx* d_Qlm, cplx* d_Slm, cplx* d_Tlm, do
 
 	cuda_SH_to_spat<0>(shtns, d_Qlm, d_Vr, llim, mmax);
 	cu_SHsphtor_to_spat(shtns, d_Slm, d_Tlm, d_Vt, d_Vp, llim);
+}
+
+extern "C"
+void cu_SHqst_to_spat_float(shtns_cfg shtns, cplx_f* d_Qlm, cplx_f* d_Slm, cplx_f* d_Tlm, float* d_Vr, float* d_Vt, float* d_Vp, int llim)
+{
+	int mmax = shtns->mmax;
+	const int mres = shtns->mres;
+	if (llim < mmax*mres)	mmax = llim / mres;	// truncate mmax too !
+
+	cuda_SH_to_spat<0,float>(shtns, d_Qlm, d_Vr, llim, mmax);
+	cu_SHsphtor_to_spat_float(shtns, d_Slm, d_Tlm, d_Vt, d_Vp, llim);
 }
 
 extern "C"
@@ -832,6 +862,20 @@ void cu_spat_to_SHsphtor(shtns_cfg shtns, double *Vt, double *Vp, cplx *Slm, cpl
 	CUDA_ERROR_CHECK;
 }
 
+extern "C"
+void cu_spat_to_SHsphtor_float(shtns_cfg shtns, float *Vt, float *Vp, cplx_f *Slm, cplx_f *Tlm, int llim)
+{
+	const long nlm_stride = shtns->nlm_stride * shtns->howmany;
+	float* d_vwlm = (float*)shtns->gpu_buf_in;
+
+	// SHT on the GPU
+	cuda_spat_to_SH<1,float>(shtns, Vt, (cplx_f*) d_vwlm, llim+1);
+	cuda_spat_to_SH<1,float>(shtns, Vp, (cplx_f*) (d_vwlm + nlm_stride), llim+1);
+	if (CUDA_ERROR_CHECK) return;
+	scal2sphtor_gpu<float>(shtns, (cplx_f*) d_vwlm, (cplx_f*) (d_vwlm+nlm_stride), Slm, Tlm, llim);
+	CUDA_ERROR_CHECK;
+}
+
 
 extern "C"
 void cu_spat_to_SHqst(shtns_cfg shtns, double *Vr, double *Vt, double *Vp, cplx *Qlm, cplx *Slm, cplx *Tlm, int llim)
@@ -840,10 +884,33 @@ void cu_spat_to_SHqst(shtns_cfg shtns, double *Vr, double *Vt, double *Vp, cplx 
 	cu_spat_to_SHsphtor(shtns, Vt,Vp, Slm,Tlm, llim);
 }
 
+extern "C"
+void cu_spat_to_SHqst_float(shtns_cfg shtns, float *Vr, float *Vt, float *Vp, cplx_f *Qlm, cplx_f *Slm, cplx_f *Tlm, int llim)
+{
+	cuda_spat_to_SH<0,float>(shtns, Vr, Qlm, llim);
+	cu_spat_to_SHsphtor_float(shtns, Vt,Vp, Slm,Tlm, llim);
+}
+
 
 /*******************************************************
  * TRANSFORMS OF HOST DATA, INCLUDING TRANSFERS TO GPU *
  *******************************************************/ 
+
+cudaError_t copy_convert_field_to_gpu(void* dst, void* src, long n, int sizeof_real)
+{
+	cudaError_t err = cudaSuccess;
+	if (sizeof_real == 4) {
+		// convert
+		float* tmp_f = (float*) malloc(n*sizeof(float));
+		for (int i=0; i<n; i++) tmp_f[i] = ((double*) src)[i];
+		// copy spectral data to GPU
+		err = cudaMemcpy(dst, tmp_f, n*sizeof(float), cudaMemcpyHostToDevice);
+		free(tmp_f);
+	} else {
+		err = cudaMemcpy(dst, src, n*sizeof(double), cudaMemcpyHostToDevice);
+	}
+	return err;
+}
 
 extern "C"
 void SH_to_spat_gpu(shtns_cfg shtns, cplx *Qlm, double *Vr, const long int llim)
@@ -866,15 +933,7 @@ void SH_to_spat_gpu(shtns_cfg shtns, cplx *Qlm, double *Vr, const long int llim)
 	if (howmany > 1  &&  2*shtns->spec_dist > shtns->nlm_stride) { printf("ERROR: distance between field too large, unsupported\n."); return; }
 
 	// copy spectral data to GPU
-  if (shtns->sizeof_real == 4) {
-	// convert
-	float* tmp_f = (float*) malloc(2*nlm_pad*sizeof(float));
-	for (int i=0; i<2*nlm_pad; i++) tmp_f[i] = ((double*) Qlm)[i];
-	// copy spectral data to GPU
-	err = cudaMemcpy(d_qlm, tmp_f, 2*nlm_pad*sizeof(float), cudaMemcpyHostToDevice);
-	free(tmp_f);
-  } else
-	err = cudaMemcpy(d_qlm, Qlm, 2*nlm_pad*sizeof(double), cudaMemcpyHostToDevice);
+	err = copy_convert_field_to_gpu(d_qlm, Qlm, 2*nlm_pad, shtns->sizeof_real);
 	if (err != cudaSuccess) { CUDA_ERROR_CHECK;	return; }
 
 	// SHT on the GPU
@@ -887,9 +946,9 @@ void SH_to_spat_gpu(shtns_cfg shtns, cplx *Qlm, double *Vr, const long int llim)
 	// copy back spatial data
 	err = cudaMemcpy(Vr, d_q, shtns->nspat * shtns->sizeof_real, cudaMemcpyDeviceToHost);
 	if (err != cudaSuccess) { CUDA_ERROR_CHECK;	return; }
-  if (shtns->sizeof_real == 4) {	// convert float to double in-place
-	for (int i=shtns->nspat-1; i>=0; i--) 	Vr[i] = ((float*)Vr)[i];
-  }
+	if (shtns->sizeof_real == 4) {	// convert float to double in-place
+		for (int i=shtns->nspat-1; i>=0; i--) 	Vr[i] = ((float*)Vr)[i];
+	}
 }
 
 
@@ -905,9 +964,7 @@ void SHsphtor_to_spat_gpu(shtns_cfg shtns, cplx *Slm, cplx *Tlm, double *Vt, dou
 	const long nlm_stride = shtns->nlm_stride * howmany;
 	const long spat_stride = shtns->spat_stride;
 	long nlm_pad = (howmany==1) ? shtns->nlm : shtns->spec_dist*howmany;
-
-	double* d_vwlm = shtns->gpu_buf_in;
-	double* d_vtp = shtns->gpu_staging_mem;
+	const int sizeof_real = shtns->sizeof_real;
 
 	if (llim < mmax*mres) {
 		mmax = llim / mres;	// truncate mmax too !
@@ -915,48 +972,63 @@ void SHsphtor_to_spat_gpu(shtns_cfg shtns, cplx *Slm, cplx *Tlm, double *Vt, dou
 	}
 	if (howmany > 1  &&  2*nlm_pad > nlm_stride) { printf("ERROR: distance between field too large, unsupported\n."); return; }
 
-	// transfer and convert on gpu
-	double* d_Slm = 0;
-	double* d_Tlm = 0;
+	char* d_vwlm = (char*)shtns->gpu_buf_in;
+	char* d_vtp = (char*)shtns->gpu_staging_mem;
+	void* d_Slm = 0;
+	void* d_Tlm = 0;
+	// (convert and) transfer to gpu
 	if (Slm) {
-		d_Slm = d_vtp;
-		err = cudaMemcpy(d_Slm, Slm, 2*nlm_pad*sizeof(double), cudaMemcpyHostToDevice);
+		d_Slm = d_vtp;		
+		err = copy_convert_field_to_gpu(d_Slm, Slm, 2*nlm_pad, sizeof_real);
 		if (err != cudaSuccess) { CUDA_ERROR_CHECK;	return; }
 	}
 	if (Tlm) {
-		d_Tlm = d_vtp + nlm_stride;
-		err = cudaMemcpy(d_Tlm, Tlm, 2*nlm_pad*sizeof(double), cudaMemcpyHostToDevice);
+		d_Tlm = d_vtp + nlm_stride*sizeof_real;
+		err = copy_convert_field_to_gpu(d_Tlm, Tlm, 2*nlm_pad, sizeof_real);
 		if (err != cudaSuccess) { CUDA_ERROR_CHECK;	return; }
 	}
 
-	sphtor2scal_gpu(shtns, (cplx*) d_Slm, (cplx*) d_Tlm, (cplx*) d_vwlm, (cplx*) (d_vwlm+nlm_stride), llim, mmax);
+	if(sizeof_real != 4)		// fp64
+		sphtor2scal_gpu(shtns, (cplx*) d_Slm, (cplx*) d_Tlm, (cplx*) d_vwlm, (cplx*) (d_vwlm+sizeof(double)*nlm_stride), llim, mmax);
+	else
+		sphtor2scal_gpu<float>(shtns, (cplx_f*) d_Slm, (cplx_f*) d_Tlm, (cplx_f*) d_vwlm, (cplx_f*) (d_vwlm+sizeof(float)*nlm_stride), llim, mmax);
 
 	// SHT on the GPU
 	if (Vt) {
-		cuda_SH_to_spat<1>(shtns, (cplx*) d_vwlm, d_vtp, llim+1, mmax);
+		if (sizeof_real != 4)
+			cuda_SH_to_spat<1>(shtns, (cplx*) d_vwlm, (double*)d_vtp, llim+1, mmax);
+		else
+			cuda_SH_to_spat<1,float>(shtns, (cplx_f*) d_vwlm, (float*)d_vtp, llim+1, mmax);
 		if (Vp) {
 			cudaEventCreateWithFlags(&ev_sht, cudaEventDisableTiming );
 			cudaEventRecord(ev_sht, shtns->comp_stream);					// record the end of scalar SH (theta).
 		}
 	}
 	if (Vp) {
-		cuda_SH_to_spat<1>(shtns, (cplx*) (d_vwlm + nlm_stride), d_vtp + spat_stride, llim+1, mmax);
+		if (sizeof_real != 4)
+			cuda_SH_to_spat<1>(shtns, (cplx*) (d_vwlm + sizeof(double)*nlm_stride), ((double*)d_vtp) + spat_stride, llim+1, mmax);
+		else
+			cuda_SH_to_spat<1,float>(shtns, (cplx_f*) (d_vwlm + sizeof(float)*nlm_stride), ((float*)d_vtp) + spat_stride, llim+1, mmax);
 	}
 	if (CUDA_ERROR_CHECK) return;
 
 	if (Vt) {	// copy back spatial data (theta)
 		if (Vp) {
 			cudaStreamWaitEvent(shtns->xfer_stream, ev_sht, 0);					// xfer stream waits for end of scalar SH (theta).
-			cudaMemcpyAsync(Vt, d_vtp, nspat*sizeof(double), cudaMemcpyDeviceToHost, shtns->xfer_stream);
+			cudaMemcpyAsync(Vt, d_vtp, nspat*sizeof_real, cudaMemcpyDeviceToHost, shtns->xfer_stream);
 			cudaEventDestroy(ev_sht);
 		} else {
-			err = cudaMemcpy(Vt, d_vtp, nspat*sizeof(double), cudaMemcpyDeviceToHost);
+			err = cudaMemcpy(Vt, d_vtp, nspat*sizeof_real, cudaMemcpyDeviceToHost);
 		}
 	}
 	if (Vp) {	// copy back spatial data (phi)
-		err = cudaMemcpy(Vp, d_vtp + spat_stride, nspat*sizeof(double), cudaMemcpyDeviceToHost);
+		err = cudaMemcpy(Vp, d_vtp + sizeof_real*spat_stride, nspat*sizeof_real, cudaMemcpyDeviceToHost);
 	}
 	if (err != cudaSuccess) CUDA_ERROR_CHECK;
+
+	if (shtns->sizeof_real == 4) {	// convert float to double in-place
+		for (int i=shtns->nspat-1; i>=0; i--) 	{	Vt[i] = ((float*)Vt)[i];	Vp[i] = ((float*)Vp)[i];  }
+	}
 }
 
 extern "C"
@@ -974,6 +1046,12 @@ void SHtor_to_spat_gpu(shtns_cfg shtns, cplx *Tlm, double *Vt, double *Vp, const
 extern "C"
 void SHqst_to_spat_gpu(shtns_cfg shtns, cplx *Qlm, cplx *Slm, cplx *Tlm, double *Vr, double *Vt, double *Vp, const long int llim)
 {
+	if (shtns->sizeof_real == 4) {	// for testing purposes
+		SH_to_spat_gpu(shtns, Qlm, Vr, llim);
+		SHsphtor_to_spat_gpu(shtns, Slm,Tlm, Vt,Vp, llim);
+		return;
+	}
+
 	cudaError_t err = cudaSuccess;
 	cudaEvent_t ev_sht0, ev_sht1, ev_up;
 	int mmax = shtns->mmax;
@@ -1092,13 +1170,22 @@ void spat_to_SHsphtor_gpu(shtns_cfg shtns, double *Vt, double *Vp, cplx *Slm, cp
 	const long nlm_stride = shtns->nlm_stride * howmany;
 	cudaStream_t xfer_stream = shtns->xfer_stream;
 
-	double* d_vwlm;
-	double* d_vtp;
-
-	d_vtp = shtns->gpu_staging_mem;
-	d_vwlm = shtns->gpu_buf_in;
-
 	if (howmany > 1  &&  2*shtns->spec_dist > shtns->nlm_stride) { printf("ERROR: distance between field too large, unsupported\n."); return; }
+	
+	if (shtns->sizeof_real == 4) {	// fp32, for testing purposes
+		float* d_vtp = (float*) shtns->gpu_staging_mem;
+		copy_convert_field_to_gpu(d_vtp, Vt, nspat, sizeof(float));
+		copy_convert_field_to_gpu(d_vtp+spat_stride, Vp, nspat, sizeof(float));
+		cu_spat_to_SHsphtor_float(shtns, d_vtp, d_vtp + spat_stride, (cplx_f*) d_vtp, (cplx_f*)(d_vtp+nlm_stride), llim);
+		long nlm_pad = (howmany==1) ? shtns->nlm : shtns->spec_dist*howmany;
+		err = cudaMemcpy(Slm, d_vtp, 2*nlm_pad*sizeof(float), cudaMemcpyDeviceToHost);
+		err = cudaMemcpy(Tlm, d_vtp+nlm_stride, 2*nlm_pad*sizeof(float), cudaMemcpyDeviceToHost);
+		for (int i=2*nlm_pad-1; i>=0; i--) {	((double*)Slm)[i] = ((float*)Slm)[i];	((double*)Tlm)[i] = ((float*)Tlm)[i];	}
+		return;
+	}
+
+	double* d_vwlm = shtns->gpu_buf_in;
+	double* d_vtp = shtns->gpu_staging_mem;
 
 	// copy spatial data to gpu
 	err = cudaMemcpy(d_vtp, Vt, nspat*sizeof(double), cudaMemcpyHostToDevice);
@@ -1135,6 +1222,11 @@ void spat_to_SHsphtor_gpu(shtns_cfg shtns, double *Vt, double *Vp, cplx *Slm, cp
 extern "C"
 void spat_to_SHqst_gpu(shtns_cfg shtns, double *Vr, double *Vt, double *Vp, cplx *Qlm, cplx *Slm, cplx *Tlm, const long int llim)
 {
+	if (shtns->sizeof_real == 4) {	// fp32, for testing purposes
+		spat_to_SH_gpu(shtns, Vr, Qlm, llim);
+		spat_to_SHsphtor_gpu(shtns, Vt,Vp, Slm,Tlm, llim);
+		return;
+	}
 	cudaError_t err = cudaSuccess;
 	cudaEvent_t ev_up, ev_up2, ev_sh2;
 	const long nspat = shtns->nspat;

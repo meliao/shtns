@@ -430,9 +430,9 @@ sphtor2scal_kernel(const double* __restrict__ mx, const double* __restrict__ slm
 	}
 }
 
-__global__ void
-sphtor2ish_kernel(const double* __restrict__ mx, const double* __restrict__ xlm,
-		const double* __restrict__ slm, const double* __restrict__ tlm, double *vlm, double *wlm, 
+template<typename real> __global__ void
+sphtor2ish_kernel(const real* __restrict__ mx, const real* __restrict__ xlm,
+		const real* __restrict__ slm, const real* __restrict__ tlm, real *vlm, real *wlm, 
 		const int llim, const int lmax, const int mres, const int ql_dist=0, const int ql_ish_dist=0)
 {
 	// indices for overlapping blocks:
@@ -442,18 +442,19 @@ sphtor2ish_kernel(const double* __restrict__ mx, const double* __restrict__ xlm,
 	const int b = blockIdx.z;
 	int ll = l0 + j - 2;
 
-	extern __shared__ double sl[];			// size blockDim.x
-	double* const tl = sl + blockDim.x;		// size blockDim.x
-	double* const M  = sl + 2*blockDim.x;	// size blockDim.x
+	extern __shared__ double sl_[];
+	real* const sl = (real*) sl_;		// size blockDim.x
+	real* const tl = sl + blockDim.x;	// size blockDim.x
+	real* const M  = sl + 2*blockDim.x;	// size blockDim.x
 
 	const int m = im*mres;
 	const int llim_m = llim-m;
 	const int ofs = im*(((lmax+1)<<1) -m + mres) + ll;
 	ll >>= 1;
 
-	double v = 0.0;
-	double w = 0.0;
-	double mm = 0.0;
+	real v = 0.0;
+	real w = 0.0;
+	real mm = 0.0;
 	if ( (ll >= 0) && (ll <= llim_m) ) {
 		mm = mx[ofs];
 		if (slm) v = slm[ofs + b*ql_dist];
@@ -465,10 +466,10 @@ sphtor2ish_kernel(const double* __restrict__ mx, const double* __restrict__ xlm,
 
 	__syncthreads();
 
-	const double mimag = m * (j - (j^1));
+	const real mimag = m * (j - (j^1));
 	if ((j<blockDim.x-4) && (ll <= llim_m)) {
-		double ml = M[j|1];
-		double mu = M[(j|1)+1];
+		real ml = M[j|1];
+		real mu = M[(j|1)+1];
 		v = mimag*tl[(j^1)+2]  +  (ml*v + mu*sl[j+4]);
 		w = mimag*sl[(j^1)+2]  -  (ml*w + mu*tl[j+4]);
 	}
@@ -486,11 +487,11 @@ sphtor2ish_kernel(const double* __restrict__ mx, const double* __restrict__ xlm,
 	__syncthreads();
 
 	if ((j < blockDim.x-8) && (ll <= llim_m)) {
-		double x0 = xlm[x_ofs + (j&2)];   //M[ix + (j&2)];	// ix for l-m even, ix+2 for l-m odd
+		real x0 = xlm[x_ofs + (j&2)];   //M[ix + (j&2)];	// ix for l-m even, ix+2 for l-m odd
 		v *= x0;
 		w *= x0;
 		if ((j&2)==0) {		// for l-m even
-			double x2 = xlm[x_ofs +1];   //M[ix+1];			// contribution of l+2
+			real x2 = xlm[x_ofs +1];   //M[ix+1];			// contribution of l+2
 			v += x2 * sl[j2+2];
 			w += x2 * tl[j2+2];
 		}
@@ -559,9 +560,9 @@ scal2sphtor_kernel(const double* __restrict__ mx, const double* __restrict__ vlm
 	}
 }
 
-__global__ void
-ish2sphtor_kernel(const double* __restrict__ mx, const double* __restrict__ xlm, const double* __restrict__ vlm, const double* __restrict__ wlm, 
-	double *slm, double *tlm, const int llim, const int lmax, const int mres, const int ql_ish_dist=0, const int ql_dist=0)
+template<typename real> __global__ void
+ish2sphtor_kernel(const real* __restrict__ mx, const real* __restrict__ xlm, const real* __restrict__ vlm, const real* __restrict__ wlm, 
+	real *slm, real *tlm, const int llim, const int lmax, const int mres, const int ql_ish_dist=0, const int ql_dist=0)
 {
 	const int j = threadIdx.x;
 	const int im = blockIdx.y;
@@ -573,16 +574,17 @@ ish2sphtor_kernel(const double* __restrict__ mx, const double* __restrict__ xlm,
 	const int q_ofs = im*(((lmax+1)*2) -m+mres);
 	const int llim_m_p1 = llim+1-m;
 
-	extern __shared__ double vl[];			// size blockDim.x
-	double* const wl = vl + blockDim.x+2;		// size blockDim.x
+	extern __shared__ double vl_[];			// size blockDim.x
+	real* const vl = (real*) vl_;
+	real* const wl = vl + blockDim.x+2;		// size blockDim.x
 
-	double v = 0.0;
-	double w = 0.0;
+	real v = 0.0;
+	real w = 0.0;
 	{
 		if (l<=llim_m_p1) {
 			const int x_ofs = 3*im*(2*(lmax+4) -m+mres)/4;
-			double x = xlm[x_ofs + 3*(l>>1) + (j&2)];
-			double x2 = (l>=2) ? xlm[x_ofs + 3*(l>>1) -2] : 0.0;
+			real x = xlm[x_ofs + 3*(l>>1) + (j&2)];
+			real x2 = (l>=2) ? xlm[x_ofs + 3*(l>>1) -2] : 0.0;
 			if (im!=0) {
 				const int i = q_ofs + 2*im + b*ql_ish_dist + l0+(j^1);		// xchg real and imag
 				v = vlm[i] * x;
@@ -608,7 +610,7 @@ ish2sphtor_kernel(const double* __restrict__ mx, const double* __restrict__ xlm,
 
 
 	l += m;
-	double ml,mu, ll_1;
+	real ml,mu, ll_1;
 	if ((l <= llim) && (l>0)) {
 		ll_1 = 1.0 / (l*(l+1));
 		mu = mx[q_ofs + l0 + (j|1)];    //M[2*(j>>1)+3];
@@ -618,10 +620,10 @@ ish2sphtor_kernel(const double* __restrict__ mx, const double* __restrict__ xlm,
 	__syncthreads();
 
 	if ((j<blockDim.x-2) &&  (j >= ((blockIdx.x == 0) ? 0 : 2))) {
-		double v2 = 0.0;
-		double w2 = 0.0;
+		real v2 = 0.0;
+		real w2 = 0.0;
 		if ((l <= llim) && (l>0)) {
-			const double mimag = m * ((j^1) -j);
+			const real mimag = m * ((j^1) -j);
 			v2 = mimag*w  +  (ml*vl[j] + mu*vl[j+4]);
 			w2 = mimag*v  -  (ml*wl[j] + mu*wl[j+4]);
 			v2 *= ll_1;
@@ -715,25 +717,27 @@ void ishioka2sh_gpu(shtns_cfg shtns, std::complex<real>* d_Qlm_ish, std::complex
 	CUDA_ERROR_CHECK;
 }
 
-void sphtor2scal_gpu(shtns_cfg shtns, cplx* d_Slm, cplx* d_Tlm, cplx* d_Vlm, cplx* d_Wlm, int llim, int mmax)
+template<typename real=double>
+void sphtor2scal_gpu(shtns_cfg shtns, std::complex<real>* d_Slm, std::complex<real>* d_Tlm, std::complex<real>* d_Vlm, std::complex<real>* d_Wlm, int llim, int mmax)
 {
 	size_t blksze = ((shtns->lmax+3)*2+WARPSZE-1)/WARPSZE * WARPSZE;
 	if (blksze > MAX_THREADS_PER_BLOCK) blksze = MAX_THREADS_PER_BLOCK;
 	dim3 blocks((2*(shtns->lmax+3)+blksze-9)/(blksze-8), mmax+1, shtns->howmany);
 	dim3 threads(blksze, 1, 1);
-	sphtor2ish_kernel <<< blocks, threads, blksze*3*sizeof(double), shtns->comp_stream >>>
-		(shtns->d_mx_stdt, shtns->d_xlm, (double*) d_Slm, (double*) d_Tlm, (double*) d_Vlm, (double*) d_Wlm, llim, shtns->lmax, shtns->mres, shtns->spec_dist*2, shtns->nlm_stride);
+	sphtor2ish_kernel <<< blocks, threads, blksze*3*sizeof(real), shtns->comp_stream >>>
+		((real*) shtns->d_mx_stdt, (real*) shtns->d_xlm, (real*) d_Slm, (real*) d_Tlm, (real*) d_Vlm, (real*) d_Wlm, llim, shtns->lmax, shtns->mres, shtns->spec_dist*2, shtns->nlm_stride);
 	CUDA_ERROR_CHECK;
 }
 
-void scal2sphtor_gpu(shtns_cfg shtns, cplx* d_Vlm, cplx* d_Wlm, cplx* d_Slm, cplx* d_Tlm, int llim)
+template<typename real=double>
+void scal2sphtor_gpu(shtns_cfg shtns, std::complex<real>* d_Vlm, std::complex<real>* d_Wlm, std::complex<real>* d_Slm, std::complex<real>* d_Tlm, int llim)
 {
 	size_t blksze = ((shtns->lmax+3)*2+WARPSZE-1)/WARPSZE * WARPSZE;
 	if (blksze > MAX_THREADS_PER_BLOCK) blksze = MAX_THREADS_PER_BLOCK;
 	dim3 blocks((2*(shtns->lmax+3)+blksze-5)/(blksze-4), shtns->mmax+1, shtns->howmany);
 	dim3 threads(blksze, 1, 1);
-	ish2sphtor_kernel <<< blocks, threads, (blksze+2)*2*sizeof(double), shtns->comp_stream >>>
-		(shtns->d_mx_van, shtns->d_x2lm, (double*) d_Vlm, (double*) d_Wlm, (double*)d_Slm, (double*)d_Tlm, llim, shtns->lmax, shtns->mres, shtns->nlm_stride, shtns->spec_dist*2);
+	ish2sphtor_kernel <<< blocks, threads, (blksze+2)*2*sizeof(real), shtns->comp_stream >>>
+		((real*) shtns->d_mx_van, (real*) shtns->d_x2lm, (real*) d_Vlm, (real*) d_Wlm, (real*)d_Slm, (real*)d_Tlm, llim, shtns->lmax, shtns->mres, shtns->nlm_stride, shtns->spec_dist*2);
 	CUDA_ERROR_CHECK;
 }
 
