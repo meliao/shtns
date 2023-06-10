@@ -714,11 +714,16 @@ double SHT_error(shtns_cfg shtns, int vector)
 #endif
 
 	if (vector) {
+		for (i=1; i<NLM; i++) {
+			double nrm = 1.0/shtns->li[i];		// approx unit norm for vector with unit energy in each mode
+			Tlm0[i] *= nrm;		Slm0[i] *= nrm;
+		}
 		Slm0[0] = 0.0; 	Tlm0[0] = 0.0;		// l=0, m=0 n'a pas de signification sph/tor
 		SHsphtor_to_spat(shtns, Slm0, Tlm0, Sh, Th);		// vector SHT
 		spat_to_SHsphtor(shtns, Sh, Th, Slm, Tlm);
 		for (i=0, tmax=0., n2=0., jj=0; i<NLM; i++) {		// compute error
 			t = cabs(Slm[i] - Slm0[i]);
+			if (i>0) t *= shtns->li[i];		// relative error: account for mean spectrum of unit energy
 			n2 += t*t;
 			if (t>tmax) { tmax = t; jj = i; }
 		}
@@ -728,6 +733,7 @@ double SHT_error(shtns_cfg shtns, int vector)
 	#endif
 		for (i=0, tmax=0., n2=0., jj=0; i<NLM; i++) {		// compute error
 			t = cabs(Tlm[i] - Tlm0[i]);
+			if (i>0) t *= shtns->li[i];		// relative error: account for mean spectrum of unit energy
 			n2 += t*t;
 			if (t>tmax) { tmax = t; jj = i; }
 		}
@@ -735,7 +741,7 @@ double SHT_error(shtns_cfg shtns, int vector)
 	#if SHT_VERBOSE > 1
 		if (verbose>1) printf("                  - toroidal   rms error = %.3g  max error = %.3g for l=%hu,lm=%ld\n",sqrt(n2/NLM),tmax,shtns->li[jj],jj);
 	#endif
-	
+
 		//for (int i=0; i<NLM; i++) {
 		//	printf("l=%d err=%.3g %.3g \t %g,%g (%g,%g) \t %g,%g (%g,%g)\n",shtns->li[i], cabs(Slm[i] - Slm0[i]), cabs(Tlm[i] - Tlm0[i]), creal(Slm[i]),cimag(Slm[i]), creal(Slm0[i]),cimag(Slm0[i]), creal(Tlm[i]),cimag(Tlm[i]), creal(Tlm0[i]),cimag(Tlm0[i]));
 		//}

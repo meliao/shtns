@@ -212,7 +212,8 @@ double vect_error(complex double *Slm, complex double *Tlm, complex double *Slm0
 				if (shtns->li[i] <= ltr)	Slm[i+b*NLM] -= Slm0[i+b*NLM];
 				t = cabs(Slm[i+b*NLM]);
 			}
-			n2 += t*t;
+			int l = shtns->li[i];
+			n2 += t*t * (l*(l+1));             // relative error: account for mean spectrum of unit energy
 			if (t>tmax) { tmax = t; jj = i; ib = b; }
 		}
 	}
@@ -248,7 +249,8 @@ double vect_error(complex double *Slm, complex double *Tlm, complex double *Slm0
 				if (shtns->li[i] <= ltr)	Tlm[i+b*NLM] -= Tlm0[i+b*NLM];
 				t = cabs(Tlm[i+b*NLM]);
 			}
-			n2 += t*t;
+			int l = shtns->li[i];
+			n2 += t*t * (l*(l+1));             // relative error: account for mean spectrum of unit energy
 			if (t>tmax) { tmax = t; jj = i; ib=b; }
 		}
 	}
@@ -938,9 +940,17 @@ int main(int argc, char *argv[])
 	}
 
 	if (vector) {
-		for (int b=0;b<batch;b++) Slm0[LM(shtns, 0,0) + b*NLM] = 0.0;	// l=0, m=0 n'a pas de signification sph/tor
-		for (int b=0;b<batch;b++) Tlm0[LM(shtns, 0,0) + b*NLM] = 0.0;	// l=0, m=0 n'a pas de signification sph/tor
-	//	for (i=0;i<NLM*batch;i++) Slm0[i] = 0.0;	// zero out Slm.
+		for (int b=0;b<batch;b++) {
+			for (int i=1;i<NLM;i++) {	// rescale amplitudes for vector transform (unit energy in each mode) -- except l=0
+				int l = shtns->li[i];
+				double scal = 1.0/sqrt(l*(l+1));
+				Slm0[i + b*NLM] *= scal;
+				Tlm0[i + b*NLM] *= scal;
+			}
+			Slm0[LM(shtns, 0,0) + b*NLM] = 0.0;	// l=0, m=0 n'a pas de signification sph/tor
+			Tlm0[LM(shtns, 0,0) + b*NLM] = 0.0;	// l=0, m=0 n'a pas de signification sph/tor
+			//for (i=0;i<NLM;i++) Slm0[i + b*NLM] = 0.0;	// zero out Slm.
+		}
 
 		printf("** performing %d vector SHT\n", SHT_ITER);
 		printf(":: STD\n");
