@@ -77,7 +77,7 @@ __device__ __forceinline__ void atomicAdd_sht(double* address, double val)
 	} while (assumed != old);
 }
 __device__ __forceinline__ void atomicAdd_sht(float* address, float val) {
-	atomicAdd(adress,val);
+	atomicAdd(address,val);
 }
 #else
 	#define atomicAdd_sht atomicAdd
