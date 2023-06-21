@@ -502,13 +502,14 @@ int cushtns_init_gpu(shtns_cfg shtns)
 	if (err != cudaSuccess) return -1;
 	#if SHT_VERBOSE > 0
 	#if SHTNS_GPU == 1
-	printf("  cuda GPU #%d \"%s\" found (warp size = %d, compute capabilities = %d.%d).\n", device_id, prop.name, prop.warpSize, prop.major, prop.minor);
+	printf("  cuda GPU #%d \"%s\" found (warp size = %d, compute capabilities = %d.%d", device_id, prop.name, prop.warpSize, prop.major, prop.minor);
 	char gpu_arch_target[16];
 	sprintf(gpu_arch_target, "_%d", prop.major*10 + prop.minor);		// the gpu_arch we will compile for!
 	#elif SHTNS_GPU == 2
-	printf("  hip GPU #%d \"%s\" found (warp size = %d).\n", device_id, prop.gcnArchName, prop.warpSize);
+	printf("  hip GPU #%d \"%s\" found (warp size = %d", device_id, prop.gcnArchName, prop.warpSize);
 	const char* gpu_arch_target = prop.gcnArchName;
 	#endif
+	printf(", CU=%d, max_threads=%d, %.3g GB, L2 cache=%.3gMB).\n", prop.multiProcessorCount, prop.maxThreadsPerMultiProcessor * prop.multiProcessorCount, prop.totalGlobalMem/(1024.*1024.*1024.), prop.l2CacheSize/(1024.*1024.));
 	#endif
 	if (prop.warpSize != WARPSZE) return -1;		// failure, warpsize must be known at compile time (does it?).
 	if (prop.major < 3) return -1;			// failure, SHTns requires compute cap. >= 3 (warp shuffle instructions)
