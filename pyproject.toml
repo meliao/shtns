@@ -1,0 +1,22 @@
+[project]
+name = "shtns"
+version = "3.6.1"
+description = "High performance Spherical Harmonic Transform"
+authors = [
+  { name="Nathanael Schaeffer", email="nathanael.schaeffer@gmail.com" },
+]
+dependencies = [
+  'numpy',
+]
+requires-python = ">=3.2"
+classifiers = [
+    "Programming Language :: C",
+    "Programming Language :: Python",
+    "License :: OSI Approved :: CEA CNRS Inria Logiciel Libre License, version 2.1 (CeCILL-2.1)",
+    "Intended Audience :: Science/Research",
+    "Development Status :: 5 - Production/Stable",
+    "Topic :: Scientific/Engineering",
+]
+[build-system]
+requires = ["setuptools>=61.0", "numpy"]
+build-backend = "setuptools.build_meta"

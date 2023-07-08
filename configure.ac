@@ -10,8 +10,6 @@ target="libshtns.a"		# by default, build the library.
 objs="sht_fly.o"
 install="install-lib"	# by default, install the library.
 
-# optional variables :
-AC_ARG_VAR(PYTHON, [the python interpreter (defaults to 'python')])
 # optional features with --enable-XXX
 AC_ARG_ENABLE([verbose],
 	AS_HELP_STRING([--enable-verbose=0-3], [define verbosity level for the library: 0=silent, 1=default, 2=debug, 3=full]),
@@ -307,33 +305,9 @@ AS_IF([test "x$enable_mkl" != "xyes"], [
 
 # Checks related to Python and NumPy paths:
 AS_IF([test "x$enable_python" != "xno"], [
-	AS_IF([test "x$PYTHON" = "x"], [
-		AC_MSG_CHECKING(for python with numpy package)
-		py_test="python python2 python3"
-	],[
-		AC_MSG_CHECKING(if $PYTHON has numpy package)
-		py_test="$PYTHON"
-	])
-	for py in $py_test
-	do :
-		numpy_inc=`$py -c "from numpy import get_include; print(get_include())" 2>/dev/null`
-		AS_IF([test "x$numpy_inc" != "x"],[break])
-	done
-	AS_IF([test "x$numpy_inc" = "x"], [
-		AC_MSG_RESULT(no)
-		AC_MSG_ERROR([NumPy package is required for the python interface.])
-	],[
-		AC_MSG_RESULT($py)
-		PYTHON=$py
-	])
-	python_inc=`$PYTHON -c "from distutils.sysconfig import get_python_inc; print(get_python_inc())"  2>/dev/null`
-	echo "  python include path = $python_inc"
-	echo "  numpy include path = $numpy_inc"
-	AC_SUBST([numpy_inc])
-	AC_SUBST([python_inc])
 	CFLAGS="$CFLAGS -fpic"	# required compile flag for python extensions.
 	CFLAGS2="$CFLAGS2 -fpic"	# required compile flag for python extensions.
-	target="_shtns.so"	# build python extension instead of C library.
+	target="shtns_numpy_wrap.c"	# build python extension instead of C library.
 	install="install-py"	# install python extension instead of C library.
 ])
 
@@ -402,7 +376,7 @@ AC_SUBST([CC2])
 AC_SUBST([CFLAGS2])
 AC_SUBST([FFLAGS])
 AC_SUBST([gpu_compile])
-AC_CONFIG_FILES([Makefile setup.py])
+AC_CONFIG_FILES([Makefile])
 AC_OUTPUT
 
 ## if binutils bug: warn the user.

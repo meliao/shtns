@@ -113,21 +113,12 @@ clean :
 	rm -rf build
 
 
-# build a python interface using SWIG.
-# use it with "from shtns import *" in a python program/shell
-_shtns.so : shtns_numpy_wrap.c Makefile $(hfiles) $(objs)
-	CC="$(CC)" $(PYTHON) setup.py build
-	@echo "*****************************************************************************************"
-	@echo "*** Now, for system wide install, run 'make install' as root.                           *"
-	@echo "*** Otherwise run '$(PYTHON) setup.py install --user' to install for current user only. *"
-	@echo "*****************************************************************************************"
-
 # generate python and c glue code with SWIG.
 shtns_numpy_wrap.c : shtns_numpy.i sht_private.h shtns.h
 	-swig -python shtns_numpy.i
 
-install-py : _shtns.so
-	$(PYTHON) setup.py install
+install-py :
+	pip install shtns
 
 .PHONY : install install-py install-lib clean docs
 

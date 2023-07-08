@@ -659,8 +659,6 @@ target
 ac_ct_FC
 FCFLAGS
 FC
-python_inc
-numpy_inc
 OPENMP_CFLAGS
 SED
 OBJEXT
@@ -670,7 +668,6 @@ CPPFLAGS
 LDFLAGS
 CFLAGS
 CC
-PYTHON
 target_alias
 host_alias
 build_alias
@@ -731,7 +728,6 @@ enable_march
       ac_precious_vars='build_alias
 host_alias
 target_alias
-PYTHON
 CC
 CFLAGS
 LDFLAGS
@@ -1387,7 +1383,6 @@ Optional Features:
   --disable-openmp        do not use OpenMP
 
 Some influential environment variables:
-  PYTHON      the python interpreter (defaults to 'python')
   CC          C compiler command
   CFLAGS      C compiler flags
   LDFLAGS     linker flags, e.g. -L<lib dir> if you have libraries in a
@@ -2449,8 +2444,6 @@ ac_config_headers="$ac_config_headers sht_config.h"
 target="libshtns.a"		# by default, build the library.
 objs="sht_fly.o"
 install="install-lib"	# by default, install the library.
-
-# optional variables :
 
 # optional features with --enable-XXX
 # Check whether --enable-verbose was given.
@@ -5286,50 +5279,9 @@ fi
 if test "x$enable_python" != "xno"
 then :
 
-	if test "x$PYTHON" = "x"
-then :
-
-		{ printf "%s\n" "$as_me:${as_lineno-$LINENO}: checking for python with numpy package" >&5
-printf %s "checking for python with numpy package... " >&6; }
-		py_test="python python2 python3"
-
-else $as_nop
-
-		{ printf "%s\n" "$as_me:${as_lineno-$LINENO}: checking if $PYTHON has numpy package" >&5
-printf %s "checking if $PYTHON has numpy package... " >&6; }
-		py_test="$PYTHON"
-
-fi
-	for py in $py_test
-	do :
-		numpy_inc=`$py -c "from numpy import get_include; print(get_include())" 2>/dev/null`
-		if test "x$numpy_inc" != "x"
-then :
-  break
-fi
-	done
-	if test "x$numpy_inc" = "x"
-then :
-
-		{ printf "%s\n" "$as_me:${as_lineno-$LINENO}: result: no" >&5
-printf "%s\n" "no" >&6; }
-		as_fn_error $? "NumPy package is required for the python interface." "$LINENO" 5
-
-else $as_nop
-
-		{ printf "%s\n" "$as_me:${as_lineno-$LINENO}: result: $py" >&5
-printf "%s\n" "$py" >&6; }
-		PYTHON=$py
-
-fi
-	python_inc=`$PYTHON -c "from distutils.sysconfig import get_python_inc; print(get_python_inc())"  2>/dev/null`
-	echo "  python include path = $python_inc"
-	echo "  numpy include path = $numpy_inc"
-
-
 	CFLAGS="$CFLAGS -fpic"	# required compile flag for python extensions.
 	CFLAGS2="$CFLAGS2 -fpic"	# required compile flag for python extensions.
-	target="_shtns.so"	# build python extension instead of C library.
+	target="shtns_numpy_wrap.c"	# build python extension instead of C library.
 	install="install-py"	# install python extension instead of C library.
 
 fi
@@ -5844,7 +5796,7 @@ echo "prefix=$prefix"
 
 
 
-ac_config_files="$ac_config_files Makefile setup.py"
+ac_config_files="$ac_config_files Makefile"
 
 cat >confcache <<\_ACEOF
 # This file is a shell script that caches the results of configure
@@ -6533,7 +6485,6 @@ do
   case $ac_config_target in
     "sht_config.h") CONFIG_HEADERS="$CONFIG_HEADERS sht_config.h" ;;
     "Makefile") CONFIG_FILES="$CONFIG_FILES Makefile" ;;
-    "setup.py") CONFIG_FILES="$CONFIG_FILES setup.py" ;;
 
   *) as_fn_error $? "invalid argument: \`$ac_config_target'" "$LINENO" 5;;
   esac
