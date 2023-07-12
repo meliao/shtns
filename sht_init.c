@@ -925,20 +925,24 @@ done:
 
 
 const char* shtns_get_build_info() {
-	static char s[128];	// a reasonable buffer size
-	int n = snprintf(s, 127,
+	const int nmax=159;
+	static char s[160];	// a reasonable buffer size, set to nmax+1
+	int n = snprintf(s, nmax,
   #ifndef SHTNS4MAGIC
 	"[SHTns " SHTNS_VER "] built "
   #else
 	"[SHTns " SHTNS_VER "] built for MagIC "
   #endif
 	__DATE__ ", " __TIME__  ", id: ");
-	if (strlen(SHTNS_GIT) > 0) n += snprintf(s+n, 127-n, SHTNS_GIT ",");
-	n += snprintf(s+n, 127-n, _SHTNS_ID_);
-  #ifdef SHTNS_GPU
-	snprintf(s+n, 127-n, (SHTNS_GPU == 2) ? ",hip" : ",cuda");
+	if (strlen(SHTNS_GIT) > 0) n += snprintf(s+n, nmax-n, SHTNS_GIT ",");
+	n += snprintf(s+n, nmax-n, _SHTNS_ID_);
+  #ifdef _OPENMP
+	n += snprintf(s+n, nmax-n, ",openmp");
   #endif
-	s[127]=0;
+  #ifdef SHTNS_GPU
+	snprintf(s+n, nmax-n, (SHTNS_GPU == 2) ? ",hip" : ",cuda");
+  #endif
+	s[nmax]=0;
 	return s;
 }
 
