@@ -42,7 +42,7 @@ class Spharmt(object):
         self.ntrunc = ntrunc
         self.nlm = self._shtns.nlm
         self.degree = self._shtns.l
-        self.lap = -self.degree*(self.degree+1.0).astype(np.complex)
+        self.lap = -self.degree*(self.degree+1.0).astype(complex)
         self.invlap = np.zeros(self.lap.shape, self.lap.dtype)
         self.invlap[1:] = 1./self.lap[1:]
         self.rsphere = rsphere
@@ -68,7 +68,7 @@ class Spharmt(object):
 
     def getgrad(self, divspec):
         """compute gradient vector from spectral coeffs"""
-        vrtspec = np.zeros(divspec.shape, dtype=np.complex)
+        vrtspec = np.zeros(divspec.shape, dtype=complex)
         u, v = self._shtns.synth(vrtspec, divspec)
         return u/rsphere, v/rsphere
 
@@ -114,12 +114,12 @@ if __name__ == "__main__":
     f = 2.*omega*np.sin(lats)   # coriolis
 
     # zonal jet.
-    vg = np.zeros((nlats, nlons), np.float)
+    vg = np.zeros((nlats, nlons), float)
     u1 = (umax/en)*np.exp(1./((x.lats-phi0)*(x.lats-phi1)))
-    ug = np.zeros((nlats), np.float)
+    ug = np.zeros((nlats), float)
     ug = np.where(np.logical_and(x.lats < phi1, x.lats > phi0), u1, ug)
     ug.shape = (nlats, 1)
-    ug = ug*np.ones((nlats, nlons), dtype=np.float)     # broadcast to shape (nlats, nlonss)
+    ug = ug*np.ones((nlats, nlons), dtype=float)     # broadcast to shape (nlats, nlonss)
     # height perturbation.
     hbump = hamp*np.cos(lats)*np.exp(-((lons-np.pi)/alpha)**2)*np.exp(-(phi2-lats)**2/beta)
 
@@ -143,9 +143,9 @@ if __name__ == "__main__":
     phispec = x.grdtospec(phig)
 
     # initialize spectral tendency arrays
-    ddivdtspec = np.zeros(vrtspec.shape+(3,), np.complex)
-    dvrtdtspec = np.zeros(vrtspec.shape+(3,), np.complex)
-    dphidtspec = np.zeros(vrtspec.shape+(3,), np.complex)
+    ddivdtspec = np.zeros(vrtspec.shape+(3,), complex)
+    dvrtdtspec = np.zeros(vrtspec.shape+(3,), complex)
+    dphidtspec = np.zeros(vrtspec.shape+(3,), complex)
     nnew = 0
     nnow = 1
     nold = 2
