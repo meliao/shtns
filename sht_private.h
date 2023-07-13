@@ -773,13 +773,6 @@ static void zero_poles2_vect(v2d* F0, long ofsm, long n) {
 	}
 }
 
-static void zero_mem(v2d* F0, long n) {
-	#pragma omp simd
-	for (long i=0; i<n*VSIZE2; i++) {
-		((double*)F0)[i] = 0.0;
-	}
-}
-
 inline static
 void S2D_CSTORE2(double* mem, long idx, long nlat, rnd nr, rnd sr, rnd ni, rnd si) {
 	vinterleave(nr,ni);

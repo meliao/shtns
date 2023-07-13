@@ -934,7 +934,9 @@ const char* shtns_get_build_info() {
 	"[SHTns " SHTNS_VER "] built for MagIC "
   #endif
 	__DATE__ ", " __TIME__  ", id: ");
+  #ifdef SHTNS_GIT
 	if (strlen(SHTNS_GIT) > 0) n += snprintf(s+n, nmax-n, SHTNS_GIT ",");
+  #endif
 	n += snprintf(s+n, nmax-n, _SHTNS_ID_);
   #ifdef _OPENMP
 	n += snprintf(s+n, nmax-n, ",openmp");

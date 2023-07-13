@@ -20,7 +20,7 @@
 
 import numpy        # numpy for arrays
 import shtns        # shtns module compiled and installed using
-                    #   ./configure --enable-python && make && make install
+                    #   pip install shtns
 
 lmax = 7            # maximum degree of spherical harmonic representation.
 mmax = 3            # maximum order of spherical harmonic representation.
