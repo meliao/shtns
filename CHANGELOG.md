@@ -1,6 +1,12 @@
 SHTNS CHANGE LOG:
 -----------------
 
+* v3.6.1  (13 Jul 2023)
+	- better python module installation, using `pip install shtns` (thanks to all testers!)
+	- float (single precision) vector transforms supported on GPU.
+	- fix `shallow_water.py` example to work with recent numpy (thanks to P. Personnettaz)
+	- better nested openmp parallelism support (thanks to M. Schreiber)
+
 * v3.6  (30 May 2023)
 	- Rewrite of GPU transforms, with important performance improvements.
 	- New support for AMD GPU MI100 and MI200 series.
