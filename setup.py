@@ -3,7 +3,7 @@
 # and https://stackoverflow.com/questions/42585210/extending-setuptools-extension-to-use-cmake-in-setup-py
 
 from setuptools import setup, Extension
-from setuptools.command.build_ext import build_ext
+from setuptools.command.build_ext import build_ext, new_compiler, customize_compiler
 from numpy import get_include
 import os,sys
 
@@ -15,6 +15,40 @@ def getver():
                 return l[s+3:].split()[0]
     return 'unknown'
 
+OPENMP_TEST_C = """
+#include <omp.h>
+#include "fftw3/fftw3.h"
+int main(void) {
+  fftw_init_threads();
+  return omp_get_max_threads();
+}
+"""
+
+def check_openmp_support(omp_flags='-fopenmp'):
+    """ check if openmp is actually supported (not always on macos!) -- adapted from https://github.com/astropy/extension-helpers/blob/main/extension_helpers/_openmp_helpers.py """
+    import tempfile,glob
+    ccompiler = new_compiler()
+    customize_compiler(ccompiler)
+    openmp_ok = True
+    with tempfile.TemporaryDirectory() as tmp_dir:
+        start_dir = os.path.abspath('.')
+        try:
+            os.chdir(tmp_dir)
+            # Write source of test program (will also test fftw openmp support!)
+            with open('test_openmp.c', 'w') as f:
+                f.write(OPENMP_TEST_C)
+            os.mkdir('objects')
+            # Compile test program
+            ccompiler.compile(['test_openmp.c'], output_dir='objects', extra_postargs=[omp_flags, "-I"+start_dir])
+            # Link test program with fftw3_omp library
+            objects = glob.glob(os.path.join('objects', '*' + ccompiler.obj_extension))
+            ccompiler.link_executable(objects, 'test_openmp', extra_postargs=[omp_flags, "-lfftw3_omp"])
+        except Exception:
+            openmp_ok = False
+        finally:
+            os.chdir(start_dir)
+    return openmp_ok
+
 numpy_inc = get_include()               #  NumPy include path.
 shtns_o = "sht_init.o sht_kernels_a.o sht_kernels_s.o sht_odd_nlat.o sht_fly.o sht_omp.o".split()
 libdir = []
@@ -23,6 +57,8 @@ libs = ['fftw3', 'm']
 config_cmd = ['./configure','--enable-python','--prefix='+sys.prefix]
 
 use_openmp = os.environ.get('SHTNS_OPENMP', '1') != '0'   # allows to disable openmp with environment variable SHTNS_OPENMP=0
+if use_openmp:
+    use_openmp = check_openmp_support()
 if use_openmp:
     cargs.append('-fopenmp')
     libs.insert(0,'fftw3_omp')
