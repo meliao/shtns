@@ -38,11 +38,23 @@ FEATURES:
 INSTALL:
 --------
 
-Briefly, the shell commands `./configure; make; make install` should
-configure, build, and install this package. `./configure --help` will
-list available options (among which `--enable-openmp` and `--enable-python`).
-However, in order to get the best performance, it is highly recommended to
-compile and install the FFTW library yourself, because many distributions
+Requirements: FFTW library, and numpy for the python module.
+
+- To install the **C Library**, the shell commands
+
+        ./configure; make; make install
+
+    should configure, build, and install this library. `./configure --help` will
+    list available options (among which `--enable-openmp` and `--enable-march`).
+
+- The **Python module** can be installed from the online pypi prepository with
+
+        pip install shtns
+
+    or from the source tree with `pip install .` or `python setup.py install --user`
+
+Please note that, in order **to get the best performance, it is highly recommended to
+compile and install the FFTW library yourself**, because many distributions
 include a non-optimized FFTW library.
 
 DOCUMENTATION:
@@ -65,7 +77,7 @@ DOCUMENTATION:
           year = {2013},
         }
 
-  If you use Ishioka's recurrence (the default since SHTns v3.4), you may also want to cite his paper:
+- If you use Ishioka's recurrence (the default since SHTns v3.4), you may also want to cite his paper:
 
         @article {ishioka2018,
           author={Ishioka, Keiichi},
@@ -75,7 +87,7 @@ DOCUMENTATION:
           year={2018},
         }
 
-  If you use the GPU transforms, VkFFT is used for FFTs (since v3.6), and you may cite the paper:
+- If you use the GPU transforms, VkFFT is used for FFTs (since v3.6), and you may cite the paper:
 
         @article {vkfft,
           author={Tolmachev, Dmitrii},

@@ -607,13 +607,13 @@ if (rank == 0) MPI_Barrier();	// other processes now resume and load the config 
 SHTns provides a Python interface that uses <a href="http://numpy.scipy.org/">NumPy</a> arrays to perform Spherical Harmonic Transforms.
 The Python interface has been generated using <a href="http://www.swig.org/">SWIG</a> (but you don't need it to compile the the Python package).
 
-\li Compile using (see also \ref compil)
-\code ./configure --enable-python
-make
-make install \endcode
-Optionally you can indicate an alternate pyhton interpreter to \c ./configure using PYTHON=<my-python> (see ./configure --help).<br/>
-If you cannot install as root, you can alternatively intall the python package as user, replacing \code make install \endcode with
-\code  python setup.py install --user \endcode
+\li You can install the python module from the pypi repository:
+\code pip install shtns \endcode
+It is also possible to install from the source tree with:
+\code pip install . \endcode
+or
+\code python setup.py install --user \endcode
+In case you don't want OpenMP support, you can disable it by adding `SHTNS_OPENMP=0` in front of the above commands.
 
 \li Use within a python script or shell \code import shtns \endcode
 
