@@ -7,30 +7,6 @@ from setuptools.command.build_ext import build_ext, new_compiler, customize_comp
 from numpy import get_include
 import os,sys
 
-long_description = """
-This is the python module to use **SHTns, a high performance spherical harmonic transform and rotation** library.
-It requires FFTW installed in your system.
-
-## GETTING STARTED
-
-### Basic Installation:
-- make sure FFTW is installed in your system; if not, install it using your system package manager.
-- run:
-
-    `pip install shtns`
-
-This simple installation should work and be enough for most use cases.
-However, **in order to have the highest possible performance, FFTW should be compiled and tuned for your machine**,
-which is not the case with pre-compiled system packages.
-
-### Example code:
-See <https://bitbucket.org/nschaeff/shtns/src/master/examples/SHT_example.py>
-and <https://bitbucket.org/nschaeff/shtns/src/master/examples/shallow_water.py>
-
-## MORE INFO
-See <https://bitbucket.org/nschaeff/shtns/src/master/README.md>
-"""
-
 def getver():
     with open('CHANGELOG.md') as f:
         for l in f:
@@ -109,13 +85,6 @@ setup(name='shtns',
         author='Nathanael Schaeffer',
         author_email='nathanael.schaeffer@univ-grenoble-alpes.fr',
         url='https://bitbucket.org/nschaeff/shtns',
-        project_urls={
-            "Documentation": "https://nschaeff.bitbucket.io/shtns/",
-            "Source": "https://bitbucket.org/nschaeff/shtns/",
-            "Changelog": "https://bitbucket.org/nschaeff/shtns/src/master/CHANGELOG.md",
-        },
-        long_description=long_description,
-        long_description_content_type='text/markdown',
         ext_modules=[shtns_module],
         py_modules=["shtns"],
         requires=["numpy"],
