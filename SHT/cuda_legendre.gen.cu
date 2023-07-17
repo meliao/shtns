@@ -127,7 +127,7 @@ template<int S> __global__
 __launch_bounds__(64, 1)	// leads to better performance for small transforms on MI250
 #endif
 void leg_m_kernel(
-	const real* __restrict__ al, const real* __restrict__ ct, const real* __restrict__ ql, real *q,
+	const real_g* __restrict__ al, const real_g* __restrict__ ct, const real* __restrict__ ql, real *q,
 	const int llim, const int nlat_2, const int nphi, const int m_inc,
 	const int ql_dist, const int q_dist
 #if BLKSZE_SH2ISH > 0
@@ -148,15 +148,15 @@ void leg_m_kernel(
 	const int LSPAN = (WARPSZE==32 && BLOCKSIZE >= 2*WARPSZE) ? BLOCKSIZE/2 : WARPSZE;		// always WARPSZE for amd
 	static_assert(LSPAN <= BLOCKSIZE, "LSPAN must not exceed BLOCKSIZE");
 	static_assert(LSPAN % 4 == 0, "LSPAN must be a multiple of 4");
-	__shared__ real ak[LSPAN];
+	__shared__ real_g ak[LSPAN];
 	__shared__ real qk[NFIELDS][(M0_ONLY) ? LSPAN : LSPAN*2];
 
 	static_assert( (!HI_LLIM) || ( NW==1 || (NW&1)==0 ), "high llim works with NW=1 or NW even" );
 
 	#define COST_CACHE		// optional: store cos(theta) into shared memory to reduce register pressure
-	real y0[NW];
-	real y1[NW];
-	real ct2[NW];
+	real_g y0[NW];
+	real_g y1[NW];
+	real_g ct2[NW];
 	#ifndef COST_CACHE
 	real cost_[NW];
 	#define COST(i,j) cost_[i]
@@ -207,21 +207,23 @@ void leg_m_kernel(
 		while (l<=llim - LSPAN) {	// compute even and odd parts
 			for (int k = 0; k<LSPAN; k+=4) {
 				#pragma unroll
-				for (int f=0; f<NFIELDS; f++) {
+				for (int i=0; i<NW; i++) {
+					real y0g = y0[i];
 					#pragma unroll
-					for (int i=0; i<NW; i++) {
-						re[f][i] += y0[i] * qk[f][k];		// real
-						ro[f][i] += y0[i] * qk[f][k+1];		// real
+					for (int f=0; f<NFIELDS; f++) {
+						re[f][i] += y0g * qk[f][k];		// real
+						ro[f][i] += y0g * qk[f][k+1];		// real
 					}
 				}
 				#pragma unroll
 				for (int i=0; i<NW; i++) y0[i] += (ak[k+1]*ct2[i] + ak[k]) * y1[i];
 				#pragma unroll
-				for (int f=0; f<NFIELDS; f++) {
+				for (int i=0; i<NW; i++) {
+					real y1g = y1[i];
 					#pragma unroll
-					for (int i=0; i<NW; i++) {
-						re[f][i] += y1[i] * qk[f][k+2];		// real
-						ro[f][i] += y1[i] * qk[f][k+3];		// real
+					for (int f=0; f<NFIELDS; f++) {
+						re[f][i] += y1g * qk[f][k+2];		// real
+						ro[f][i] += y1g * qk[f][k+3];		// real
 					}
 				}
 				#pragma unroll
@@ -246,16 +248,17 @@ void leg_m_kernel(
 		int k=0;
 		while (l<llim) {	// compute even and odd parts
 			#pragma unroll
-			for (int f=0; f<NFIELDS; f++) {
+			for (int i=0; i<NW; i++) {
+				real y0g = y0[i];
 				#pragma unroll
-				for (int i=0; i<NW; i++) {
-					re[f][i] += y0[i] * qk[f][k];	// real
-					ro[f][i] += y0[i] * qk[f][k+1];	// real
+				for (int f=0; f<NFIELDS; f++) {
+					re[f][i] += y0g * qk[f][k];	// real
+					ro[f][i] += y0g * qk[f][k+1];	// real
 				}
 			}
 			#pragma unroll
 			for (int i=0; i<NW; i++) {
-				real tmp = (ak[k+1]*ct2[i] + ak[k]) * y1[i] + y0[i];
+				real_g tmp = (ak[k+1]*ct2[i] + ak[k]) * y1[i] + y0[i];
 				y0[i] = y1[i];
 				y1[i] = tmp;
 			}
@@ -263,9 +266,10 @@ void leg_m_kernel(
 		}
 		if (l==llim) {
 			#pragma unroll
-			for (int f=0; f<NFIELDS; f++) {
+			for (int i=0; i<NW; i++) {
+				real y0g = y0[i];
 				#pragma unroll
-				for (int i=0; i<NW; i++) {
+				for (int f=0; f<NFIELDS; f++) {
 					re[f][i] += y0[i] * qk[f][k];		// real
 				}
 			}
@@ -397,18 +401,19 @@ void leg_m_kernel(
 		l=m;		al+=2;
 		while (l<=llim - LSPAN) {	// compute even and odd parts
 			for (int k = 0; k<LSPAN; k+=4) {
-				real tmp[NW];
+				real_g tmp[NW];
 				#pragma unroll
 				for (int i=0; i<NW; i++)	tmp[i] = ak[k+1]*ct2[i] + ak[k];
 				if ((!HI_LLIM) || (ny==0)) {
 					#pragma unroll
-					for (int f=0; f<NFIELDS; f++) {
+					for (int i=0; i<NW; i++) {
+						real y0g = y0[i];
 						#pragma unroll
-						for (int i=0; i<NW; i++) {
-							rer[f][i] += y0[i] * qk[f][2*k];	// real
-							rei[f][i] += y0[i] * qk[f][2*k+1];	// imag
-							ror[f][i] += y0[i] * qk[f][2*k+2];	// real
-							roi[f][i] += y0[i] * qk[f][2*k+3];	// imag
+						for (int f=0; f<NFIELDS; f++) {
+							rer[f][i] += y0g * qk[f][2*k];	// real
+							rei[f][i] += y0g * qk[f][2*k+1];	// imag
+							ror[f][i] += y0g * qk[f][2*k+2];	// real
+							roi[f][i] += y0g * qk[f][2*k+3];	// imag
 						}
 					}
 				}
@@ -418,13 +423,14 @@ void leg_m_kernel(
 				for (int i=0; i<NW; i++)	tmp[i] = ak[k+3]*ct2[i] + ak[k+2];
 				if ((!HI_LLIM) || (ny==0)) {
 					#pragma unroll
-					for (int f=0; f<NFIELDS; f++) {
+					for (int i=0; i<NW; i++) {
+						real y1g = y1[i];
 						#pragma unroll
-						for (int i=0; i<NW; i++) {
-							rer[f][i] += y1[i] * qk[f][2*k+4];	// real
-							rei[f][i] += y1[i] * qk[f][2*k+5];	// imag
-							ror[f][i] += y1[i] * qk[f][2*k+6];	// real
-							roi[f][i] += y1[i] * qk[f][2*k+7];	// imag
+						for (int f=0; f<NFIELDS; f++) {
+							rer[f][i] += y1g * qk[f][2*k+4];	// real
+							rei[f][i] += y1g * qk[f][2*k+5];	// imag
+							ror[f][i] += y1g * qk[f][2*k+6];	// real
+							roi[f][i] += y1g * qk[f][2*k+7];	// imag
 						}
 					}
 				}
@@ -470,18 +476,19 @@ void leg_m_kernel(
 		}
 		int k=0;
 		while (l<llim) {	// compute even and odd parts
-			real tmp[NW];
+			real_g tmp[NW];
 			#pragma unroll
 			for (int i=0; i<NW; i++)	tmp[i] = ak[k+1]*ct2[i] + ak[k];
 			if ((!HI_LLIM) || (ny==0)) {
 				#pragma unroll
-				for (int f=0; f<NFIELDS; f++) {
+				for (int i=0; i<NW; i++) {
+					real y0g = y0[i];
 					#pragma unroll
-					for (int i=0; i<NW; i++) {
-						rer[f][i] += y0[i] * qk[f][2*k];	// real
-						rei[f][i] += y0[i] * qk[f][2*k+1];	// imag
-						ror[f][i] += y0[i] * qk[f][2*k+2];	// real
-						roi[f][i] += y0[i] * qk[f][2*k+3];	// imag
+					for (int f=0; f<NFIELDS; f++) {
+						rer[f][i] += y0g * qk[f][2*k];	// real
+						rei[f][i] += y0g * qk[f][2*k+1];	// imag
+						ror[f][i] += y0g * qk[f][2*k+2];	// real
+						roi[f][i] += y0g * qk[f][2*k+3];	// imag
 					}
 				}
 			}
@@ -507,11 +514,12 @@ void leg_m_kernel(
 		if (l==llim) {
 			if ((!HI_LLIM) || (ny==0)) {
 				#pragma unroll
-				for (int f=0; f<NFIELDS; f++) {
+				for (int i=0; i<NW; i++) {
+					real y0g = y0[i];
 					#pragma unroll
-					for (int i=0; i<NW; i++) {
-						rer[f][i] += y0[i] * qk[f][2*k];	// real
-						rei[f][i] += y0[i] * qk[f][2*k+1];	// imag
+					for (int f=0; f<NFIELDS; f++) {
+						rer[f][i] += y0g * qk[f][2*k];	// real
+						rei[f][i] += y0g * qk[f][2*k+1];	// imag
 					}
 				}
 			}
@@ -521,11 +529,11 @@ void leg_m_kernel(
 		for (int f=0; f<NFIELDS; f++) {
 			#pragma unroll
 			for (int i=0; i<NW; i++) {
-				y0[i]     = rer[f][i]+ror[f][i]*COST(i,j);	// recycle y0 as temporary value
+				real t    = rer[f][i]+ror[f][i]*COST(i,j);	// recycle y0 as temporary value
 				rer[f][i] = rer[f][i]-ror[f][i]*COST(i,j);
 				ror[f][i] = rei[f][i]-roi[f][i]*COST(i,j);
 				rei[f][i] = rei[f][i]+roi[f][i]*COST(i,j);
-				roi[f][i] = y0[i];
+				roi[f][i] = t;
 			}
 		}
 
@@ -571,7 +579,7 @@ template<int S> __global__
 #ifdef __gfx90a__
 __launch_bounds__(64,1)
 #endif
-void ileg_m_kernel(const real* __restrict__ al, const real* __restrict__ ct, const real* __restrict__ q, real *ql, const int llim, 
+void ileg_m_kernel(const real_g* __restrict__ al, const real_g* __restrict__ ct, const real* __restrict__ q, real *ql, const int llim, 
 	const int nlat_2, const int nphi, const int m_inc, const int q_dist, const int ql_dist)
 {
 	const int BLOCKSIZE=BLKSZE_A;
@@ -590,12 +598,12 @@ void ileg_m_kernel(const real* __restrict__ al, const real* __restrict__ ct, con
 
 	const int padding = 2;		// padding = 0 is very bad for performance (shared-memory bank conflicts).
 	const int l_inc = BLOCKSIZE+padding;
-	__shared__ real ak[LSPAN+2];	// cache
+	__shared__ real_g ak[LSPAN+2];	// cache
 	const int NROWS = M0_ONLY ? ( (LSPAN>4*NFIELDS) ? LSPAN/2 : 2*NFIELDS ) : ( (LSPAN>8*NFIELDS) ? LSPAN/2 : 4*NFIELDS );
 	__shared__ real yl[NROWS*l_inc - padding];		// yl is also used for even/odd computation.
 
-	real cost = (it < nlat_2) ? ct[it] : 0.0;
-	real y0, y1;
+	real_g cost = (it < nlat_2) ? ct[it] : 0.0;
+	real_g y0, y1;
 
 	if (im == 0) {
 		const int NW = NFIELDS*LSPAN;
@@ -634,8 +642,8 @@ void ileg_m_kernel(const real* __restrict__ al, const real* __restrict__ ct, con
 			if (BLOCKSIZE > WARPSZE) {	__syncthreads(); } else { _syncwarp_fence; }
 				#pragma unroll
 				for (int k=0; k<LSPAN/2; k+=2) {		// compute a block of the matrix, write it in shared mem.
-					real c0 = ak[2*k+3]*cost + ak[2*k+2];
-					real c1 = ak[2*k+5]*cost + ak[2*k+4];
+					real_g c0 = ak[2*k+3]*cost + ak[2*k+2];
+					real_g c1 = ak[2*k+5]*cost + ak[2*k+4];
 					yl[k*l_inc +j]     = y0;		// l and l+1
 					yl[(k+1)*l_inc +j] = y1;		// l+2 and l+3
 					y0 += c0 * y1;
@@ -803,8 +811,8 @@ void ileg_m_kernel(const real* __restrict__ al, const real* __restrict__ ct, con
 			if (BLOCKSIZE > WARPSZE) {	__syncthreads(); } else { _syncwarp_fence; }
 			#pragma unroll 4
 			for (int k=0; k<LSPAN/2; k+=2) {		// compute a block of the matrix, write it in shared mem.
-				real c0 = ak[2*k+3]*cost + ak[2*k+2];
-				real c1 = ak[2*k+5]*cost + ak[2*k+4];
+				real_g c0 = ak[2*k+3]*cost + ak[2*k+2];
+				real_g c1 = ak[2*k+5]*cost + ak[2*k+4];
 					if (fabs(y0) > SHT_ACCURACY*SHT_SCALE_FACTOR + 1.0)
 					{	// rescale when value is significant
 						++ny;
@@ -873,8 +881,8 @@ void ileg_m_kernel(const real* __restrict__ al, const real* __restrict__ ct, con
 			if (BLOCKSIZE > WARPSZE) {	__syncthreads(); } else { _syncwarp_fence; }
 			#pragma unroll 4
 			for (int k=0; k<LSPAN/2; k+=2) {		// compute a block of the matrix, write it in shared mem.
-				real c0 = ak[2*k+3]*cost + ak[2*k+2];
-				real c1 = ak[2*k+5]*cost + ak[2*k+4];
+				real_g c0 = ak[2*k+3]*cost + ak[2*k+2];
+				real_g c1 = ak[2*k+5]*cost + ak[2*k+4];
 				yl[k*l_inc +j]     = y0;		// l and l+1
 				yl[(k+1)*l_inc +j] = y1;		// l+2 and l+3
 				y0 += c0 * y1;

@@ -183,7 +183,7 @@ struct shtns_info {		// MUST start with "int nlm;"
 	#ifdef SHTNS_GPU
 	/* cuda stuff */
 	short cu_flags;
-	short sizeof_real;		// 4 for float, 8 for double
+	unsigned char sizeof_real, sizeof_real_g;		// 4 for float, 8 for double
 	double* d_clm;
 	double* d_xlm;
 	double* d_x2lm;
