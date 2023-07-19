@@ -108,17 +108,6 @@ __device__ __forceinline__ bool polar_skip_sint2(float sint2, int llim, int m) {
 	return false;
 }
 
-#if BLKSZE_SH2ISH > 0
-__device__ real qish(const real* __restrict__ xlm, const real* __restrict__ ql, const int llim_m, int ll)
-{
-	real q = ql[ll];
-	const int x_ofs = 3*(ll >> 2) + (ll&2);
-	q *= xlm[x_ofs];
-	if (((ll&2)==0) && (ll+2 <2*llim_m))	// l-m even
-		q += ql[ll+4] * xlm[x_ofs + 1];		// contribution of l+2
-	return q;
-}
-#endif
 
 /// requirements : blockSize must be 1 in the y- and z-direction and BLKSZE_S in the x-direction.
 /// llim MUST BE <= 1800, unless HI_LLIM=1
@@ -173,14 +162,23 @@ void leg_m_kernel(
 	if (im==0) {
 		if ((LSPAN==BLOCKSIZE || j<LSPAN) && (j<=llim)) {
 			ak[j] = al[j+2];
-			#pragma unroll
-			for (int f=0; f<NFIELDS; f++) 	{
-				#if BLKSZE_SH2ISH > 0
-					if (S==0)	qk[f][j] = qish(xlm, ql+(b*NFIELDS+f)*ql_dist, llim, 2*j);
-					else
-				#endif
-						qk[f][j] = ql[j + (b*NFIELDS+f)*ql_dist];		// keep only real part
-			}
+			#if BLKSZE_SH2ISH > 0
+			if (S==0) {
+				int xofs = 3*(j>>1);	// load xlm coeffs once for all fields
+				real x0 = xlm[xofs+2*(j&1)];
+				real x1 = xlm[xofs+1];		// only used for j&2==0
+				bool use_x1 = (((j&1)==0) & (j+1 <llim));	// l-m even
+				#pragma unroll
+				for (int f=0; f<NFIELDS; f++) {
+					int qofs = 2*j + (b*NFIELDS+f)*ql_dist;
+					real ql_ = ql[qofs] * x0;
+					if (use_x1)	ql_ += x1 * ql[qofs + 4];
+					qk[f][j] = ql_;
+				}
+			} else
+			#endif
+				#pragma unroll
+				for (int f=0; f<NFIELDS; f++)	qk[f][j] = ql[j + (b*NFIELDS+f)*ql_dist];		// keep only real part
 		}
 
 		#pragma unroll
@@ -233,14 +231,24 @@ void leg_m_kernel(
 			l  += LSPAN;
 			if (BLOCKSIZE > WARPSZE) { __syncthreads(); } else { _syncwarp; }
 			if ((l+j <= llim) && (BLOCKSIZE==LSPAN || j<LSPAN)) {
-				#pragma unroll
-				for (int f=0; f<NFIELDS; f++) {
-					#if BLKSZE_SH2ISH > 0
-					if (S==0)	qk[f][j] = qish(xlm, ql+(b*NFIELDS+f)*ql_dist, llim, 2*(l+j));
-					else
-					#endif
-						qk[f][j] = ql[l+j + (b*NFIELDS+f)*ql_dist];
-				}
+				#if BLKSZE_SH2ISH > 0
+				if (S==0) {
+					int xofs = 3*((l+j)>>1);	// load xlm coeffs once for all fields
+					real x0 = xlm[xofs+2*((l+j)&1)];
+					real x1 = xlm[xofs+1];		// only used for j&2==0
+					bool use_x1 = ((((l+j)&1)==0) & (l+j+1 <llim));	// l-m even
+					#pragma unroll
+					for (int f=0; f<NFIELDS; f++) {
+						int qofs = 2*(j+l) + (b*NFIELDS+f)*ql_dist;
+						real ql_ = ql[qofs] * x0;
+						if (use_x1)	ql_ += x1 * ql[qofs + 4];
+						qk[f][j] = ql_;
+					}
+				} else
+				#endif
+					#pragma unroll
+					for (int f=0; f<NFIELDS; f++)	qk[f][j] = ql[l+j + (b*NFIELDS+f)*ql_dist];		// keep only real part
+
 				ak[j] = al[j];
 			}
 			if (BLOCKSIZE > WARPSZE) { __syncthreads(); } else { _syncwarp; }
@@ -270,7 +278,7 @@ void leg_m_kernel(
 				real y0g = y0[i];
 				#pragma unroll
 				for (int f=0; f<NFIELDS; f++) {
-					re[f][i] += y0[i] * qk[f][k];		// real
+					re[f][i] += y0g * qk[f][k];		// real
 				}
 			}
 		}
@@ -301,23 +309,49 @@ void leg_m_kernel(
 
 		if ((LSPAN==BLOCKSIZE || j<LSPAN) && (m+j<=llim)) 	ak[j] = al[j+2];
 			if ((m+j/2 <= llim) && (2*LSPAN>=BLOCKSIZE || j<2*LSPAN)) {
+				#if BLKSZE_SH2ISH > 0
+				real x0, x1;
+				bool use_x1;
+				if (S==0) {
+					int xofs = 3*(j>>2);	// load xlm coeffs once for all fields
+					x0 = xlm[xofs+(j&2)];
+					x1 = xlm[xofs+1];		// only used for j&2==0
+					use_x1 = (((j&2)==0) & (j+2 <2*(llim-m)));	// l-m even
+				}
+				#endif
 				#pragma unroll
 				for (int f=0; f<NFIELDS; f++) {
+					int qofs = 2*m+j + (b*NFIELDS+f)*ql_dist;
+					real ql_ = ql[qofs];
 					#if BLKSZE_SH2ISH > 0
-					if (S==0)		qk[f][j] = qish(xlm, ql+2*m+(b*NFIELDS+f)*ql_dist, llim-m, j);
-					else
+					if (S==0) {		ql_ *= x0;
+						if (use_x1)	ql_ += x1 * ql[qofs + 4];
+					}
 					#endif
-						qk[f][j] = ql[2*m+j + (b*NFIELDS+f)*ql_dist];
+					qk[f][j] = ql_;
 				}
 			}
 			if ((BLOCKSIZE < 2*LSPAN) && (m+j/2+BLOCKSIZE/2 <= llim) && (2*BLOCKSIZE<=2*LSPAN || j+BLOCKSIZE < 2*LSPAN)) {
+				#if BLKSZE_SH2ISH > 0
+				real x0, x1;
+				bool use_x1;
+				if (S==0) {
+					int xofs = 3*(j>>2) + 3*BLOCKSIZE/4;	// load xlm coeffs once for all fields
+					x0 = xlm[xofs+(j&2)];
+					x1 = xlm[xofs+1];		// only used for j&2==0
+					use_x1 = (((j&2)==0) & (j+BLOCKSIZE+2 <2*(llim-m)));	// l-m even
+				}
+				#endif
 				#pragma unroll
 				for (int f=0; f<NFIELDS; f++) {
+					int qofs = 2*m+j+BLOCKSIZE + (b*NFIELDS+f)*ql_dist;
+					real ql_ = ql[qofs];
 					#if BLKSZE_SH2ISH > 0
-					if (S==0)	qk[f][j+BLOCKSIZE] = qish(xlm, ql+2*m+(b*NFIELDS+f)*ql_dist, llim-m, j+BLOCKSIZE);
-					else
+					if (S==0) {		ql_ *= x0;
+						if (use_x1)	ql_ += x1 * ql[qofs + 4];
+					}
 					#endif
-						qk[f][j+BLOCKSIZE] = ql[2*m+j+BLOCKSIZE + (b*NFIELDS+f)*ql_dist];	
+					qk[f][j+BLOCKSIZE] = ql_;
 				}
 			}
 
@@ -452,23 +486,51 @@ void leg_m_kernel(
 			l  += LSPAN;
 			if (BLOCKSIZE > WARPSZE) { __syncthreads(); } else { _syncwarp; }
 			if ((l+j/2 <= llim) && (BLOCKSIZE<=2*LSPAN || j<2*LSPAN)) {
+				#if BLKSZE_SH2ISH > 0
+				real x0, x1;
+				bool use_x1;
+				if (S==0) {
+					int ll = 2*(l-m)+j;
+					int xofs = 3*(ll>>2);	// load xlm coeffs once for all fields
+					x0 = xlm[xofs+(ll&2)];
+					x1 = xlm[xofs+1];		// only used for j&2==0
+					use_x1 = (((ll&2)==0) & (ll+2 <2*(llim-m)));	// l-m even
+				}
+				#endif
 				#pragma unroll
 				for (int f=0; f<NFIELDS; f++) {
+					int qofs = 2*l+j + (b*NFIELDS+f)*ql_dist;
+					real ql_ = ql[qofs];
 					#if BLKSZE_SH2ISH > 0
-					if (S==0)	qk[f][j] = qish(xlm, ql+2*m+(b*NFIELDS+f)*ql_dist, llim-m, 2*(l-m)+j);
-					else
+					if (S==0) {		ql_ *= x0;
+						if (use_x1)	ql_ += x1 * ql[qofs + 4];
+					}
 					#endif
-						qk[f][j] = ql[2*l+j + (b*NFIELDS+f)*ql_dist];
+					qk[f][j] = ql_;
 				}
 			}
 			if ((BLOCKSIZE < 2*LSPAN) && (l+j/2+BLOCKSIZE/2 <= llim) && (2*BLOCKSIZE<=2*LSPAN || j+BLOCKSIZE < 2*LSPAN)) {
+				#if BLKSZE_SH2ISH > 0
+				real x0, x1;
+				bool use_x1;
+				if (S==0) {
+					int ll = 2*(l-m)+j+BLOCKSIZE;
+					int xofs = 3*(ll>>2);	// load xlm coeffs once for all fields
+					x0 = xlm[xofs+(ll&2)];
+					x1 = xlm[xofs+1];		// only used for j&2==0
+					use_x1 = (((ll&2)==0) & (ll+2 <2*(llim-m)));	// l-m even
+				}
+				#endif
 				#pragma unroll
 				for (int f=0; f<NFIELDS; f++) {
+					int qofs = 2*l+j+BLOCKSIZE + (b*NFIELDS+f)*ql_dist;
+					real ql_ = ql[qofs];
 					#if BLKSZE_SH2ISH > 0
-					if (S==0)	qk[f][j+BLOCKSIZE] = qish(xlm, ql+2*m+(b*NFIELDS+f)*ql_dist, llim-m, 2*(l-m)+j+BLOCKSIZE);
-					else
+					if (S==0) {		ql_ *= x0;
+						if (use_x1)	ql_ += x1 * ql[qofs + 4];
+					}
 					#endif
-						qk[f][BLOCKSIZE+j] = ql[2*l+BLOCKSIZE+j + (b*NFIELDS+f)*ql_dist];
+					qk[f][BLOCKSIZE+j] = ql_;
 				}
 			}
 			if ((l+j <= llim) && (LSPAN==BLOCKSIZE || j<LSPAN))	 ak[j] = al[j];
