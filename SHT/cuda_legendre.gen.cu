@@ -156,7 +156,7 @@ void leg_m_kernel(
 	#pragma unroll
 	for (int i=0; i<NW; i++) {
 		const int it = BLOCKSIZE*NW * blockIdx.x + ((HI_LLIM) ? NW*j+i : j+i*BLOCKSIZE);
-		ct2[i] = (it < nlat_2) ? ct[it] : 0.0;
+		ct2[i] = (it < nlat_2) ? ct[it] : 0;
 	}
 
 	if (im==0) {
@@ -189,13 +189,13 @@ void leg_m_kernel(
 		for (int f=0; f<NFIELDS; f++) {
 			#pragma unroll
 			for (int i=0; i<NW; i++) {
-				re[f][i] = 0.0;
-				ro[f][i] = 0.0;
+				re[f][i] = 0;
+				ro[f][i] = 0;
 			}
 		}
 		int l = 0;
 		#pragma unroll
-		for (int i=0; i<NW; i++) y0[i] = (S==1 && !ROBERT_FORM) ? rsqrt(1.0 - ct2[i]) : 1.0;    // for vectors, divide by sin(theta) -- except in Robert form
+		for (int i=0; i<NW; i++) y0[i] = (S==1 && !ROBERT_FORM) ? rsqrt(1 - ct2[i]) : 1;    // for vectors, divide by sin(theta) -- except in Robert form
 		#pragma unroll
 		for (int i=0; i<NW; i++) y1[i] = (al[1]*ct2[i] + al[0])*y0[i];
 
@@ -358,16 +358,16 @@ void leg_m_kernel(
 		#pragma unroll
 		for (int i=0; i<NW; i++) {	COST(i,j) = ct2[i];		ct2[i] *= ct2[i];	}	// cos(theta)^2
 		#pragma unroll
-		for (int i=0; i<NW; i++) 	y1[i] = 1.0 - ct2[i];		// y1 = sin(theta)^2
+		for (int i=0; i<NW; i++) 	y1[i] = 1 - ct2[i];		// y1 = sin(theta)^2
 		#pragma unroll
-		for (int i=0; i<NW; i++) 	y0[i] = 1.0;
+		for (int i=0; i<NW; i++) 	y0[i] = 1;
 
 		#pragma unroll
 		for (int i=0; i<NW; i++) {
 			#pragma unroll
 			for (int f=0; f<NFIELDS; f++) {
-				ror[f][i] = 0.0;		roi[f][i] = 0.0;
-				rer[f][i] = 0.0;		rei[f][i] = 0.0;
+				ror[f][i] = 0;		roi[f][i] = 0;
+				rer[f][i] = 0;		rei[f][i] = 0;
 			}
 		}
 
@@ -409,7 +409,7 @@ void leg_m_kernel(
 					for (int i=0; i<NW; i++) y0[i] *= y1[i];
 					#if HI_LLIM==1
 						ny += nsint;
-						if (y0[NW-1] < (SHT_ACCURACY+1.0/SHT_SCALE_FACTOR)) {
+						if (y0[NW-1] < (SHT_ACCURACY+1/SHT_SCALE_FACTOR)) {
 							#pragma unroll
 							for (int i=0; i<NW; i++) y0[i] *= SHT_SCALE_FACTOR;
 							ny--;
@@ -420,7 +420,7 @@ void leg_m_kernel(
 				for (int i=0; i<NW; i++) y1[i] *= y1[i];
 				#if HI_LLIM==1
 					nsint += nsint;
-					if (y1[NW-1] < 1.0/SHT_SCALE_FACTOR) {
+					if (y1[NW-1] < 1/SHT_SCALE_FACTOR) {
 						nsint--;
 						#pragma unroll
 						for (int i=0; i<NW; i++) y1[i] *= SHT_SCALE_FACTOR;
@@ -469,13 +469,13 @@ void leg_m_kernel(
 					}
 				}
 				#if HI_LLIM==1
-				else if (fabs(y0[NW-1]) > SHT_ACCURACY*SHT_SCALE_FACTOR + 1.0)
+				else if (fabs(y0[NW-1]) > SHT_ACCURACY*SHT_SCALE_FACTOR + 1)
 				{	// rescale when value is significant
 					++ny;
 					#pragma unroll
 					for (int i=0; i<NW; i++) {
-						y0[i] *= 1.0/SHT_SCALE_FACTOR;
-						y1[i] *= 1.0/SHT_SCALE_FACTOR;
+						y0[i] *= 1/SHT_SCALE_FACTOR;
+						y1[i] *= 1/SHT_SCALE_FACTOR;
 					}
 				}
 				#endif
@@ -555,13 +555,13 @@ void leg_m_kernel(
 				}
 			}
 			#if HI_LLIM==1
-			else if (fabs(y1[NW-1]) > SHT_ACCURACY*SHT_SCALE_FACTOR + 1.0)
+			else if (fabs(y1[NW-1]) > SHT_ACCURACY*SHT_SCALE_FACTOR + 1)
 			{	// rescale when value is significant
 				++ny;
 				#pragma unroll
 				for (int i=0; i<NW; i++) {
-					y0[i] *= 1.0/SHT_SCALE_FACTOR;
-					y1[i] *= 1.0/SHT_SCALE_FACTOR;
+					y0[i] *= 1/SHT_SCALE_FACTOR;
+					y1[i] *= 1/SHT_SCALE_FACTOR;
 				}
 			}
 			#endif
@@ -664,7 +664,7 @@ void ileg_m_kernel(const real_g* __restrict__ al, const real_g* __restrict__ ct,
 	const int NROWS = M0_ONLY ? ( (LSPAN>4*NFIELDS) ? LSPAN/2 : 2*NFIELDS ) : ( (LSPAN>8*NFIELDS) ? LSPAN/2 : 4*NFIELDS );
 	__shared__ real yl[NROWS*l_inc - padding];		// yl is also used for even/odd computation.
 
-	real_g cost = (it < nlat_2) ? ct[it] : 0.0;
+	real_g cost = (it < nlat_2) ? ct[it] : 0;
 	real_g y0, y1;
 
 	if (im == 0) {
@@ -678,14 +678,14 @@ void ileg_m_kernel(const real_g* __restrict__ al, const real_g* __restrict__ ct,
 
 		#pragma unroll
 		for (int f=0; f<NFIELDS; f++) {
-			real x0 = (it < nlat_2) ? q[it              + f*q_dist] : 0.0;	// north
-			real x1 = (it < nlat_2) ? q[nlat_2*2-1 - it + f*q_dist] : 0.0;	// south
+			real x0 = (it < nlat_2) ? q[it              + f*q_dist] : 0;	// north
+			real x1 = (it < nlat_2) ? q[nlat_2*2-1 - it + f*q_dist] : 0;	// south
 			yl[f*2*l_inc +j]     = x0+x1;			// even
 			yl[(f*2+1)*l_inc +j] = (x0-x1)*cost;	// odd
 		}
 		if (BLOCKSIZE > WARPSZE) {	__syncthreads(); } else { _syncwarp_fence; }
 
-		y0 = (it < nlat_2) ? ct[it + nlat_2] : 0.0;		// weights are stored just after ct.
+		y0 = (it < nlat_2) ? ct[it + nlat_2] : 0;		// weights are stored just after ct.
 		cost *= cost;	// ct2
 		
 		// transpose reo to my_reo
@@ -694,7 +694,7 @@ void ileg_m_kernel(const real_g* __restrict__ al, const real_g* __restrict__ ct,
 			int it = j % (BLOCKSIZE/NW) + k*(BLOCKSIZE/NW);
 			my_reo[k] = yl[(2*f0  + (ll&1))*l_inc + it];
 		}
-		if (S==1) y0 *= (ROBERT_FORM) ? 1.0/(1.0-cost) : rsqrt(1.0 - cost);
+		if (S==1) y0 *= (ROBERT_FORM) ? 1/(1-cost) : rsqrt(1 - cost);
 		y1 = (ak[1]*cost + ak[0]) * y0;
 		if (WARPSZE < LSPAN+2  &&  j<LSPAN+2-WARPSZE)	ak[WARPSZE+j] = al[WARPSZE+j];		// sometimes a bit more than a warp is needed
 
@@ -767,7 +767,7 @@ void ileg_m_kernel(const real_g* __restrict__ al, const real_g* __restrict__ ct,
 		const int m = im*MRES;
 		y0 = cost * cost;			// cos(theta)^2
 		int l = (im*(2*(LMAX+1)-MRES-m))>>1;
-		y1 = 1.0 - y0;		// sin(theta)^2
+		y1 = 1 - y0;		// sin(theta)^2
 		al += l+m;
 		if (j < LSPAN+2) ak[j] = al[j];
 		ql += 2*(l + S*im);	// allow vector transforms where llim = lmax+1
@@ -796,10 +796,10 @@ void ileg_m_kernel(const real_g* __restrict__ al, const real_g* __restrict__ ct,
 		const real costx = shfl_xor(cost, 1)*sgn;		// neighboor cost for "reverse" exchange
 		#pragma unroll
 		for (int f=0; f<NFIELDS; f++) {
-			real qer = (it < nlat_2) ? q[im*m_inc        + it            + f*q_dist] : 0.0;	// north imag (ani)
-			real t0  = (it < nlat_2) ? q[(nphi-im)*m_inc + it            + f*q_dist] : 0.0;	// north real (an)
-			real qor = (it < nlat_2) ? q[im*m_inc        + nlat_2*2-1-it + f*q_dist] : 0.0;	// south imag (asi)
-			real t1  = (it < nlat_2) ? q[(nphi-im)*m_inc + nlat_2*2-1-it + f*q_dist] : 0.0;	// south real (as)
+			real qer = (it < nlat_2) ? q[im*m_inc        + it            + f*q_dist] : 0;	// north imag (ani)
+			real t0  = (it < nlat_2) ? q[(nphi-im)*m_inc + it            + f*q_dist] : 0;	// north real (an)
+			real qor = (it < nlat_2) ? q[im*m_inc        + nlat_2*2-1-it + f*q_dist] : 0;	// south imag (asi)
+			real t1  = (it < nlat_2) ? q[(nphi-im)*m_inc + nlat_2*2-1-it + f*q_dist] : 0;	// south real (as)
 			real qei = t0-qer;		qer += t0;		// ani = -qei[lane+1],   bni = qei[lane-1]
 			real qoi = t1-qor;		qor += t1;		// bsi = -qoi[lane-1],   asi = qoi[lane+1];
 
@@ -839,7 +839,7 @@ void ileg_m_kernel(const real_g* __restrict__ al, const real_g* __restrict__ ct,
 					y0 *= y1;
 					#if HI_LLIM==1
 						ny += nsint;
-						if (y0 < (SHT_ACCURACY+1.0/SHT_SCALE_FACTOR)) {
+						if (y0 < (SHT_ACCURACY+1/SHT_SCALE_FACTOR)) {
 							ny--;
 							y0 *= SHT_SCALE_FACTOR;
 						}
@@ -848,7 +848,7 @@ void ileg_m_kernel(const real_g* __restrict__ al, const real_g* __restrict__ ct,
 				y1 *= y1;
 				#if HI_LLIM==1
 					nsint += nsint;
-					if (y1 < 1.0/SHT_SCALE_FACTOR) {
+					if (y1 < 1/SHT_SCALE_FACTOR) {
 						nsint--;
 						y1 *= SHT_SCALE_FACTOR;
 					}
@@ -868,18 +868,18 @@ void ileg_m_kernel(const real_g* __restrict__ al, const real_g* __restrict__ ct,
 		#else
 		unsigned long long y_zero = _ballot(ny);
 		#endif
-		if (ny) for (int k=0; k<LSPAN/2; k++)  yl[k*l_inc +j] = 0.0;
+		if (ny) for (int k=0; k<LSPAN/2; k++)  yl[k*l_inc +j] = 0;
 		while (y_zero && l <= llim) {
 			if (BLOCKSIZE > WARPSZE) {	__syncthreads(); } else { _syncwarp_fence; }
 			#pragma unroll 4
 			for (int k=0; k<LSPAN/2; k+=2) {		// compute a block of the matrix, write it in shared mem.
 				real_g c0 = ak[2*k+3]*cost + ak[2*k+2];
 				real_g c1 = ak[2*k+5]*cost + ak[2*k+4];
-					if (fabs(y0) > SHT_ACCURACY*SHT_SCALE_FACTOR + 1.0)
+					if (fabs(y0) > SHT_ACCURACY*SHT_SCALE_FACTOR + 1)
 					{	// rescale when value is significant
 						++ny;
-						y0 *= 1.0/SHT_SCALE_FACTOR;
-						y1 *= 1.0/SHT_SCALE_FACTOR;
+						y0 *= 1/SHT_SCALE_FACTOR;
+						y1 *= 1/SHT_SCALE_FACTOR;
 					}
 				if (ny==0) yl[k*l_inc +j]     = y0;		// l and l+1
 				if (ny==0) yl[(k+1)*l_inc +j] = y1;		// l+2 and l+3
