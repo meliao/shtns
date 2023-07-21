@@ -163,9 +163,12 @@ AC_CHECK_HEADERS([stdlib.h stdio.h string.h math.h complex.h stdatomic.h])
 # Checks for libraries.
 AC_CHECK_LIB([m],[cos],,AC_MSG_ERROR([math library not found.]))
 
-# With Python, enable openmp by default.
+# Checks related to Python:
 AS_IF([test "x$enable_python" != "xno"], [
-	AS_IF([test "x$enable_openmp" = "xdefault"], [enable_openmp=yes])
+	AS_IF([test "x$enable_openmp" = "xdefault"], [enable_openmp=yes])   # enable openmp by default
+	CFLAGS="$CFLAGS -fpic"	# required compile flag for python extensions.
+	CFLAGS2="$CFLAGS2 -fpic"	# required compile flag for python extensions.
+	install="install-py"	# install python extension instead of C library.
 ])
 
 # for MagIC code, also disable matrix transforms.
@@ -248,10 +251,13 @@ AS_IF([test "x$enable_cuda" != "xno"], [
 	    gpu_compile="$gpu_compile -Xcompiler -fopenmp"
 	    target="libshtns_cuda_omp.a"
 	])
+	AS_IF([test "x$enable_python" != "xno"], [
+	    gpu_compile="$gpu_compile -Xcompiler -fpic"
+	])
 	LIBS="$LIBS -lstdc++"	# cuda uses the c++ standard library. This is needed to link with gcc
 	AC_CHECK_FILE([vkfft/vkFFT.h], AC_DEFINE([VKFFT_BACKEND],[1],[Use vkFFT for the FFT on the GPU when possible]))
 ])
-libname=$target		# set the libname befor checking for python.
+libname=$target
 
 # Check for FFTW (MKL preferred, FFTW optional)
 AS_IF([test "x$enable_mkl" == "xyes"], [
@@ -300,15 +306,6 @@ AS_IF([test "x$enable_mkl" != "xyes"], [
 	AS_IF([test "x$enable_openmp" = "xyes"], [
 		AC_CHECK_LIB([fftw3_omp], [fftw_init_threads],,AC_MSG_ERROR([FFTW3 does not support OpenMP. Did you compile it with --enable-openmp ?.]))
 	])
-])
-
-
-# Checks related to Python and NumPy paths:
-AS_IF([test "x$enable_python" != "xno"], [
-	CFLAGS="$CFLAGS -fpic"	# required compile flag for python extensions.
-	CFLAGS2="$CFLAGS2 -fpic"	# required compile flag for python extensions.
-	target="shtns_numpy_wrap.c"	# build python extension instead of C library.
-	install="install-py"	# install python extension instead of C library.
 ])
 
 # Checks related to long double

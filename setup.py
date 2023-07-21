@@ -56,6 +56,15 @@ cargs = ['-std=c99', '-DSHTNS_VER="' + getver() +'"']
 libs = ['fftw3', 'm']
 config_cmd = ['./configure','--enable-python','--prefix='+sys.prefix]
 
+## for cuda support:
+cuda_path = os.environ.get('CUDA_PATH','')
+if cuda_path != '':
+    config_cmd.append('--enable-cuda')
+    cargs.append('-I' + cuda_path + '/include')
+    libdir.extend([cuda_path + '/lib64', cuda_path + '/lib64/stubs'])
+    libs.extend(['cudart','nvrtc','cuda','stdc++'])
+    shtns_o.append('sht_gpu.o')
+
 use_openmp = os.environ.get('SHTNS_OPENMP', '1') != '0'   # allows to disable openmp with environment variable SHTNS_OPENMP=0
 if use_openmp:
     use_openmp = check_openmp_support()

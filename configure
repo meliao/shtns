@@ -4495,14 +4495,17 @@ else $as_nop
 fi
 
 
-# With Python, enable openmp by default.
+# Checks related to Python:
 if test "x$enable_python" != "xno"
 then :
 
 	if test "x$enable_openmp" = "xdefault"
 then :
   enable_openmp=yes
-fi
+fi   # enable openmp by default
+	CFLAGS="$CFLAGS -fpic"	# required compile flag for python extensions.
+	CFLAGS2="$CFLAGS2 -fpic"	# required compile flag for python extensions.
+	install="install-py"	# install python extension instead of C library.
 
 fi
 
@@ -4999,6 +5002,12 @@ then :
 	    target="libshtns_cuda_omp.a"
 
 fi
+	if test "x$enable_python" != "xno"
+then :
+
+	    gpu_compile="$gpu_compile -Xcompiler -fpic"
+
+fi
 	LIBS="$LIBS -lstdc++"	# cuda uses the c++ standard library. This is needed to link with gcc
 	{ printf "%s\n" "$as_me:${as_lineno-$LINENO}: checking for vkfft/vkFFT.h" >&5
 printf %s "checking for vkfft/vkFFT.h... " >&6; }
@@ -5025,7 +5034,7 @@ fi
 
 
 fi
-libname=$target		# set the libname befor checking for python.
+libname=$target
 
 # Check for FFTW (MKL preferred, FFTW optional)
 if test "x$enable_mkl" == "xyes"
@@ -5271,18 +5280,6 @@ fi
 
 
 fi
-
-fi
-
-
-# Checks related to Python and NumPy paths:
-if test "x$enable_python" != "xno"
-then :
-
-	CFLAGS="$CFLAGS -fpic"	# required compile flag for python extensions.
-	CFLAGS2="$CFLAGS2 -fpic"	# required compile flag for python extensions.
-	target="shtns_numpy_wrap.c"	# build python extension instead of C library.
-	install="install-py"	# install python extension instead of C library.
 
 fi
 

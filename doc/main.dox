@@ -619,8 +619,14 @@ In case you don't want OpenMP support, you can disable it by adding `SHTNS_OPENM
 
 To start using SHTns you must then create an sht object, from which you can call the transform functions and more.
 The arrays should be created using <a href="http://numpy.scipy.org/">NumPy</a>.
-\see See the \link SHT_example.py Python example \endlink to get started,
-and the full working example \link shallow_water.py \endlink that solves the non-linear shallow water equations.
+
+The Python interface also supports cuda GPU transparently, if the `CUDA_PATH` environment variable was pointing
+to the cuda toolkit installed on your system when you installed the shtns module (see above). To enable transforms on GPU, grids must be set with `SHT_ALLOW_GPU` and
+`SHT_THETA_CONTIGUOUS`.
+
+\see See the \link SHT_example.py Python example \endlink and \link SHT_gpu_example.py Python GPU example \endlink to get started.
+
+There is also and the full working example \link shallow_water.py \endlink that solves the non-linear shallow water equations.
 
 <i>In case of segfaults, you may have alignment problems (should not occur on 64 bit systems).
 Please file a <a href="https://bitbucket.org/nschaeff/shtns/issues">bugreport</a> or contact the author.</i>
@@ -635,6 +641,9 @@ Please file a <a href="https://bitbucket.org/nschaeff/shtns/issues">bugreport</a
 
 \example sht_rot.py
   \brief Shows how to perform arbitrary rotations of spherical harmonic fields; optionally displays the fields as 3D plots.
+
+\example SHT_gpu_example.py
+  \brief Shows how to perform transforms on GPU if available.
 
 */
 
