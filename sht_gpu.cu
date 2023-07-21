@@ -248,7 +248,7 @@ int init_cuda_program(shtns_cfg shtns, const char* gpu_arch_target)
 	const int nwarp_target = (shtns->nlat_2 + WARPSZE-1)/WARPSZE;		// number of 'warps' needed for nlat_2 points
 	const bool hi_llim = (shtns->mmax > 0  &&  
 		shtns->lmax > ((shtns->sizeof_real_g == 4) ? SHT_L_RESCALE_FLY_FLOAT : SHT_L_RESCALE_FLY));	// special rescaling needed
-	bool sh2ish_fuse = (SHT_ALLOW_SH2ISH_FUSE  &&  !hi_llim);		// never fuse hi_llim
+	bool sh2ish_fuse = (SHT_ALLOW_SH2ISH_FUSE  &&  shtns->lmax < 1024);		// don't fuse when polar optimization is profitable
 	int nwarp_s=4;		// 1 to 4 warps is a good choice on V100 for vector or when sh2ish is disabled. Usually, 4 is a bit better.
 	int nwarp_a=1;		// 1 WARP is by far the best choice here, at least on V100
 	const int nw_a=1;	// only one point per thread possible for analysis
@@ -314,6 +314,7 @@ int init_cuda_program(shtns_cfg shtns, const char* gpu_arch_target)
 		nblocks_s0 = optimize_nwarp(&nwarp_s0, nwarp_target, nw_s, 1.14f);
 		if (nblocks_s0 > 2) sh2ish_fuse = false;	// disable sh2ish_fuse, very likely slower or only marginally faster
 		if (nw_s == 4) sh2ish_fuse = false;			// MI250
+		if (hi_llim && shtns->sizeof_real == 8) sh2ish_fuse = false;	// don't fuse hi_llim double-precision.
 	}
 
 	// also store into plan the kernel launch parameters:
