@@ -295,7 +295,11 @@ int init_cuda_program(shtns_cfg shtns, const char* gpu_arch_target)
 		nw_s=4;
 		lspan_a = (nf_a > 1) ? 32 : 16;		// 16 for nf_a=1
 		if (hi_llim  &&  nf_s==1  &&  shtns->howmany % 3 == 0)	nf_s=3;
-		if (shtns->howmany % 4 == 0) { nf_a=4;		if (hi_llim) { nf_s=4;	nw_s=2; } }
+		if (shtns->howmany % 4 == 0) { nf_a=4;	if (hi_llim) { nf_s=4;	nw_s=2; } }	// nw_s=2 also allows fusion with sh2ish
+		if (shtns->sizeof_real == 4) {	// maximize nf_s
+			if (nf_a==4 && shtns->sizeof_real_g==8) nf_a=2;	// actually a better value for real data with double recurrence
+			for (int k=8; k>0; k--) if (shtns->howmany % k == 0) { nf_s=k; nw_s=2; break; }
+		}
 	} else {	// assume MI100
 		if (nwarp_target > 2  &&  !hi_llim)	nf_s=1;
 	}
@@ -337,11 +341,13 @@ int init_cuda_program(shtns_cfg shtns, const char* gpu_arch_target)
 	if (sh2ish_fuse) {
 		// for scalar synthesis we should try to fuse sh2ish and leg_m_kernel for better performance.
 		// this requires a larger blocksize (nwarp_s), up to MAX_THREADS_PER_BLOCK.
-		nwarp_s0 = 8;		// start with maximum number of warps per block
+		if (nw_s == 4 && nwarp_s == 1) {  nw_s=2; nwarp_s=2; }	// MI250: nw_s=4 does not work well with fuse
+		nwarp_s0 = MAX_THREADS_PER_BLOCK/WARPSZE;		// start with maximum number of warps per block
 		if (SHT_VERBOSE > 1) printf("optimize scalar synthesis:\n");
 		nblocks_s0 = optimize_nwarp(&nwarp_s0, nwarp_target, nw_s, 1.14f);
-		if (nblocks_s0 > 2) sh2ish_fuse = false;	// disable sh2ish_fuse, very likely slower or only marginally faster
-		if (nw_s == 4) sh2ish_fuse = false;			// MI250
+		if (nwarp_s0==1  && nblocks_s0<=MAX_THREADS_PER_BLOCK/WARPSZE) { nwarp_s0=nblocks_s0;  nblocks_s0=1; }	// if one warp and several blocks, do one block and several warps!
+		if (nblocks_s0 > 1) sh2ish_fuse = false;	// disable sh2ish_fuse, very likely slower or only marginally faster
+		if (nw_s == 4 && shtns->sizeof_real==8) sh2ish_fuse = false;			// MI250
 		if (hi_llim && shtns->sizeof_real == 8) sh2ish_fuse = false;	// don't fuse hi_llim double-precision.
 	}
 
