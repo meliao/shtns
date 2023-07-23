@@ -2,7 +2,6 @@
 PREFIX=@prefix@
 SED=@SED@
 LIBS=@LIBS@
-PYTHON=@PYTHON@
 shtns_ver := $(shell grep -m 1 -e "^* v" CHANGELOG.md | sed -e "s/^* v\([^ ]*\).*/-DSHTNS_VER=\\\\\"\1\\\\\"/")
 git_id := $(shell git describe --tags --always --dirty=*)
 
@@ -13,8 +12,8 @@ cc=@CC@ @CFLAGS@ -D_GNU_SOURCE -DSHTNS_GIT=\"$(git_id)\" $(shtns_ver) @LDFLAGS@
 fc=@FC@ @FFLAGS@ @LDFLAGS@
 
 hfiles = sht_private.h sht_config.h shtns.h shtns_simd.h
-objs = sht_init.o sht_kernels_a.o sht_kernels_s.o sht_odd_nlat.o @objs@
-libname = @libname@
+objs = sht_kernels_a.o sht_kernels_s.o sht_odd_nlat.o @objs@
+libname = @target@
 
 default : @target@
 
@@ -24,11 +23,9 @@ test : test_suite test_rot
 	./test_suite
 	./test_rot
 
-@libname@ : Makefile $(objs)
-	ar rcs @libname@ $(objs)
-	@echo " "
-	@cat COPYRIGHT
-	@echo " "
+@target@ : Makefile $(objs)
+	rm -f @target@
+	ar rcs @target@ $(objs)
 	@echo "**** link with : @LDFLAGS@ @LIBS@"
 
 install-lib : $(libname)
@@ -38,9 +35,6 @@ install-lib : $(libname)
 	cp shtns.h $(PREFIX)/include/
 	cp shtns_cuda.h $(PREFIX)/include/
 	cp shtns.f shtns.f03 shtns_cuda.f03 $(PREFIX)/include/
-	@echo " "
-	@cat COPYRIGHT
-	@echo " "
 	@echo "**** link with : -L$(PREFIX)/lib @LDFLAGS@ @LIBS@"
 
 # codelets :
@@ -66,6 +60,8 @@ SHT/cuda_legendre.inc : SHT/cuda_legendre.gen.cu
 # objects :
 sht_init.o : sht_init.c Makefile sht_legendre.c sht_func.c sht_com.c $(hfiles)
 	$(cc) -c $< -o $@
+sht_init_gpu.o : sht_init.c Makefile sht_legendre.c sht_func.c sht_com.c $(hfiles)
+	$(cc) @gpu_cflags@ -c $< -o $@
 
 sht_odd_nlat.o : sht_odd_nlat.c Makefile sht_private.h
 	$(cc) -c $< -o $@
@@ -107,7 +103,7 @@ docs :
 
 clean :
 	$(MAKE) clean -C SHT
-	rm -f $(objs) $(libname)
+	rm -f $(objs) $(libname) sht_init.o sht_init_gpu.o
 	rm -rf doc/html
 	rm -rf doc/latex
 	rm -rf build
@@ -125,4 +121,3 @@ install-py :
 
 #fftw compiling options :
 #-O3 -fomit-frame-pointer -fstrict-aliasing -ffast-math -fno-schedule-insns -fno-web -fno-loop-optimize --param inline-unit-growth=1000 --param large-function-growth=1000
-

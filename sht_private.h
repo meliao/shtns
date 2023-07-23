@@ -60,6 +60,10 @@
 #endif
 #include "shtns_cuda.h"
 
+#ifdef VKFFT_BACKEND
+#include "vkfft/vkFFT.h"
+#endif
+
 #ifdef __cplusplus
 extern "C" {
 #endif /* __cplusplus */
@@ -71,9 +75,6 @@ int init_gpu_staging_buffer(shtns_cfg shtns);
 #endif /* __cplusplus */
 #endif
 
-#ifdef VKFFT_BACKEND
-#include "vkfft/vkFFT.h"
-#endif
 
 /* BEGIN COMPILE-TIME SETTINGS */
 
@@ -147,7 +148,9 @@ struct shtns_info {		// MUST start with "int nlm;"
 	fftw_plan ifftc, fftc;
 	fftw_plan ifft_cplx, fft_cplx;		// for complex-valued spatial fields.
 	fftw_plan ifftc_block, fftc_block;
-	
+
+	float cpu_timer;		// <0 : timing disabled,  >= 0 : enabled
+
 	/* batched transform */
 	int howmany;		///< number of fields to transform simultaneously
 	long spec_dist;		///< pointer distance between two spectral fields (in complex number)
@@ -180,8 +183,16 @@ struct shtns_info {		// MUST start with "int nlm;"
 	fftw_plan ifft_lat;		///< fftw plan for SHqst_to_lat
 	int nphi_lat;			///< nphi of previous SHqst_to_lat
 
+	unsigned char nlorder;	// order of non-linear terms to be resolved by SH transform.
+	unsigned char grid;		// store grid type.
+	short norm;				// store the normalization of the Spherical Harmonics (enum \ref shtns_norm + \ref SHT_NO_CS_PHASE flag)
+	unsigned fftw_plan_mode;
+	unsigned layout;		// requested data layout
+	double Y00_1, Y10_ct, Y11_st;
+	shtns_cfg next;		// pointer to next sht_setup or NULL (records a chained list of SHT setup).
+
 	#ifdef SHTNS_GPU
-	/* cuda stuff */
+	// cuda stuff, MUST be at the end of the structure!!
 	unsigned short cu_flags;
 	unsigned char sizeof_real, sizeof_real_g;		// 4 for float, 8 for double
 	double* d_clm;
@@ -208,18 +219,8 @@ struct shtns_info {		// MUST start with "int nlm;"
 	//cufftHandle cufft_plan_float;				// the cufft Handle single precision
 	#endif
 	cudaEvent_t gpu_timer[3];
-	#endif
+	#endif	/* SHTNS_GPU  ===> NOTHING ELSE  IN THE STRUCTURE BEYOND THIS LINE */
 
-	float cpu_timer;		// <0 : timing disabled,  >= 0 : enabled
-
-	/* other misc informations */
-	unsigned char nlorder;	// order of non-linear terms to be resolved by SH transform.
-	unsigned char grid;		// store grid type.
-	short norm;				// store the normalization of the Spherical Harmonics (enum \ref shtns_norm + \ref SHT_NO_CS_PHASE flag)
-	unsigned fftw_plan_mode;
-	unsigned layout;		// requested data layout
-	double Y00_1, Y10_ct, Y11_st;
-	shtns_cfg next;		// pointer to next sht_setup or NULL (records a chained list of SHT setup).
 	// the end should be aligned on the size of int, to allow the storage of small arrays.
 };
 

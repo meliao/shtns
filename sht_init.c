@@ -1081,16 +1081,15 @@ shtns_cfg shtns_create(int lmax, int mmax, int mres, enum shtns_norm norm)
 	if (mres <= 0) shtns_runerr("MRES must be > 0");
 
 	// allocate new setup and initialize some variables (used as flags) :
-	shtns = VMALLOC( SIZEOF_SHTNS_INFO(mmax) );		// aligned on a cache line: the public part fits in a single cache line
+	const size_t sze = SIZEOF_SHTNS_INFO(mmax);
+	shtns = VMALLOC( sze );		// aligned on a cache line: the public part fits in a single cache line
 	if (shtns == NULL) return shtns;	// FAIL
 	{
-		void **p0 = (void**) &shtns->tm;	// first pointer in struct.
-		void **p1 = (void**) &shtns->Y00_1;	// first non-pointer.
-		while(p0 < p1)	 *p0++ = NULL;		// write NULL to every pointer.
+		memset(shtns, 0, sze);		// zero initialize everything!
 		shtns->tm = (unsigned short*) (shtns + 1);	// tm is stored at the end of the struct...
 		shtns->ct = NULL;	shtns->st = NULL;
-		shtns->nphi = 0;	shtns->nlat = 0;	shtns->nlat_2 = 0;		shtns->nspat = 0;	// public data
 		shtns->ylm_lat = NULL;	shtns->ct_lat = 2.0;	shtns->ifft_lat = NULL;		shtns->nphi_lat = 0;	// _to_lat data
+		shtns->mx_stdt = NULL;	// marks vector transforms as disabled.
 		#ifdef SHTNS_GPU
 		shtns->d_clm = NULL;		// this marks the gpu as disabled.
 		#endif

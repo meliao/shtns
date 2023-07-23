@@ -191,15 +191,14 @@ AS_IF([test "x$enable_openmp" = "xyes"], [
 # Check for HIP
 AS_IF([test "x$enable_hip" != "xno"], [
 	CFLAGS="$CFLAGS -I${ROCM_PATH}/include -D__HIP_PLATFORM_AMD__"
-	CFLAGS2="$CFLAGS2 -I${ROCM_PATH}/include -D__HIP_PLATFORM_AMD__"
 	LDFLAGS="$LDFLAGS -L${ROCM_PATH}/lib"
 	echo $LDFLAGS
 	AC_CHECK_LIB([amdhip64],[hipMalloc],,AC_MSG_ERROR([hip library not found. Try adding LDFLAGS="-L$ROCM_PATH/lib"]))
 	dnl AC_CHECK_LIB([hipfft],[hipfftCreate],,AC_MSG_NOTICE([hipftt library not found.]))
 	dnl AC_CHECK_LIB([rocfft],[rocfft_execute],,AC_MSG_NOTICE([rocfft library not found.]))
-	objs="$objs sht_gpu.o"
 
-	gpu_compile="hipcc -std=c++11 -O3 --rocm-path=$ROCM_PATH -D__HIP_PLATFORM_AMD__"
+	gpu_cflags="-DSHTNS_GPU=2"  # GPU transforms, 1 for CUDA, 2 for HIP
+	gpu_compile="hipcc -std=c++11 -O3 --rocm-path=$ROCM_PATH -D__HIP_PLATFORM_AMD__ $gpu_cflags"
 	#gpu_compile="amdclang -mllvm -amdgpu-early-inline-all=true -mllvm -amdgpu-function-calls=false -std=c++11 -O3 --rocm-path=$ROCM_PATH -D__HIP_PLATFORM_AMD__ -x hip"
 	AS_IF([test "x$enable_hip" == "xyes"],[
 	    gpu_compile="$gpu_compile --offload-arch=gfx908:xnack+ --offload-arch=gfx90a:xnack+ --offload-arch=gfx908:xnack- --offload-arch=gfx90a:xnack-"
@@ -207,19 +206,16 @@ AS_IF([test "x$enable_hip" != "xno"], [
 	    AS_CASE([$enable_hip], "mi100", [hip_arch=gfx908], "mi200", [hip_arch=gfx90a], "mi250", [hip_arch=gfx90a], [hip_arch=$enable_hip])
 	    gpu_compile="$gpu_compile --offload-arch=$hip_arch:xnack+ --offload-arch=$hip_arch:xnack-"
 	])
-	AC_DEFINE([SHTNS_GPU],[2],[GPU transforms (1 for CUDA, 2 for HIP)])
 	target="libshtns_cuda.a"
 	AS_IF([test "x$enable_openmp" = "xyes"], [
 	    gpu_compile="$gpu_compile -fopenmp"
 	    target="libshtns_cuda_omp.a"
 	])
-	LIBS="$LIBS -lstdc++"	# hip/cuda uses the c++ standard library. This is needed to link with gcc
 	AC_CHECK_FILE([vkfft/vkFFT.h], AC_DEFINE([VKFFT_BACKEND],[2],[Use vkFFT for the FFT on the GPU when possible]))
 ])
 # Check for CUDA
 AS_IF([test "x$enable_cuda" != "xno"], [
 	CFLAGS="$CFLAGS -I$CUDA_PATH/include"
-	CFLAGS2="$CFLAGS2 -I$CUDA_PATH/include"
 	# assume 64 bit mode, add default directory to find CUDA
 	LDFLAGS="$LDFLAGS -L$CUDA_PATH/lib64 -L$CUDA_PATH/lib64/stubs"
 	echo $LDFLAGS
@@ -227,7 +223,6 @@ AS_IF([test "x$enable_cuda" != "xno"], [
 	dnl AC_CHECK_LIB([cufft],[cufftPlanMany],,AC_MSG_NOTICE([cufft library not found.]))
 	AC_CHECK_LIB([nvrtc],[nvrtcGetPTX],,AC_MSG_ERROR([nvrtc library not found. Try adding LDFLAGS="-L/usr/local/cuda/lib64"]))
 	AC_CHECK_LIB([cuda],[cuLaunchKernel],,AC_MSG_ERROR([cuda library not found. Try adding LDFLAGS="-L/usr/local/cuda/lib64"]))
-	objs="$objs sht_gpu.o"
 
 	nvcc_gencode_flags=""
 	# find cuda arch:
@@ -243,9 +238,9 @@ AS_IF([test "x$enable_cuda" != "xno"], [
 	AS_IF([test "x$nvcc_gencode_flags" == "x"],[
 	    AC_MSG_ERROR([nvcc does not support any compatible gpu. Is nvcc available ?])
 	])
-	AC_DEFINE([SHTNS_GPU],[1],[GPU transforms (1 for CUDA, 2 for HIP)])
+	gpu_cflags="-DSHTNS_GPU=1"  # GPU transforms, 1 for CUDA, 2 for HIP
 	# for nvcc, the underlying gcc is not always c++11 by default, so we need to explicitely ask for it.
-	gpu_compile="nvcc -std=c++11 $nvcc_gencode_flags -lineinfo -Xptxas=-v"
+	gpu_compile="nvcc -std=c++11 $nvcc_gencode_flags -lineinfo -Xptxas=-v $gpu_cflags"
 	target="libshtns_cuda.a"
 	AS_IF([test "x$enable_openmp" = "xyes"], [
 	    gpu_compile="$gpu_compile -Xcompiler -fopenmp"
@@ -254,10 +249,14 @@ AS_IF([test "x$enable_cuda" != "xno"], [
 	AS_IF([test "x$enable_python" != "xno"], [
 	    gpu_compile="$gpu_compile -Xcompiler -fpic"
 	])
-	LIBS="$LIBS -lstdc++"	# cuda uses the c++ standard library. This is needed to link with gcc
 	AC_CHECK_FILE([vkfft/vkFFT.h], AC_DEFINE([VKFFT_BACKEND],[1],[Use vkFFT for the FFT on the GPU when possible]))
 ])
-libname=$target
+AS_IF([test "x$gpu_compile" != "x" ], [
+    objs="$objs sht_init_gpu.o sht_gpu.o"
+    LIBS="$LIBS -lstdc++"	# cuda/hip uses the c++ standard library. This is needed to link with gcc
+],[
+    objs="$objs sht_init.o"
+])
 
 # Check for FFTW (MKL preferred, FFTW optional)
 AS_IF([test "x$enable_mkl" == "xyes"], [
@@ -368,11 +367,11 @@ echo "prefix=$prefix"
 AC_SUBST([target])
 AC_SUBST([install])
 AC_SUBST([objs])
-AC_SUBST([libname])
 AC_SUBST([CC2])
 AC_SUBST([CFLAGS2])
 AC_SUBST([FFLAGS])
 AC_SUBST([gpu_compile])
+AC_SUBST([gpu_cflags])
 AC_CONFIG_FILES([Makefile])
 AC_OUTPUT
 

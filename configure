@@ -648,11 +648,11 @@ ac_includes_default="\
 ac_header_c_list=
 ac_subst_vars='LTLIBOBJS
 LIBOBJS
+gpu_cflags
 gpu_compile
 FFLAGS
 CFLAGS2
 CC2
-libname
 objs
 install
 target
@@ -4619,7 +4619,6 @@ if test "x$enable_hip" != "xno"
 then :
 
 	CFLAGS="$CFLAGS -I${ROCM_PATH}/include -D__HIP_PLATFORM_AMD__"
-	CFLAGS2="$CFLAGS2 -I${ROCM_PATH}/include -D__HIP_PLATFORM_AMD__"
 	LDFLAGS="$LDFLAGS -L${ROCM_PATH}/lib"
 	echo $LDFLAGS
 	{ printf "%s\n" "$as_me:${as_lineno-$LINENO}: checking for hipMalloc in -lamdhip64" >&5
@@ -4667,9 +4666,9 @@ else $as_nop
   as_fn_error $? "hip library not found. Try adding LDFLAGS=\"-L$ROCM_PATH/lib\"" "$LINENO" 5
 fi
 
-			objs="$objs sht_gpu.o"
 
-	gpu_compile="hipcc -std=c++11 -O3 --rocm-path=$ROCM_PATH -D__HIP_PLATFORM_AMD__"
+	gpu_cflags="-DSHTNS_GPU=2"  # GPU transforms, 1 for CUDA, 2 for HIP
+	gpu_compile="hipcc -std=c++11 -O3 --rocm-path=$ROCM_PATH -D__HIP_PLATFORM_AMD__ $gpu_cflags"
 	#gpu_compile="amdclang -mllvm -amdgpu-early-inline-all=true -mllvm -amdgpu-function-calls=false -std=c++11 -O3 --rocm-path=$ROCM_PATH -D__HIP_PLATFORM_AMD__ -x hip"
 	if test "x$enable_hip" == "xyes"
 then :
@@ -4691,9 +4690,6 @@ esac
 	    gpu_compile="$gpu_compile --offload-arch=$hip_arch:xnack+ --offload-arch=$hip_arch:xnack-"
 
 fi
-
-printf "%s\n" "#define SHTNS_GPU 2" >>confdefs.h
-
 	target="libshtns_cuda.a"
 	if test "x$enable_openmp" = "xyes"
 then :
@@ -4702,7 +4698,6 @@ then :
 	    target="libshtns_cuda_omp.a"
 
 fi
-	LIBS="$LIBS -lstdc++"	# hip/cuda uses the c++ standard library. This is needed to link with gcc
 	{ printf "%s\n" "$as_me:${as_lineno-$LINENO}: checking for vkfft/vkFFT.h" >&5
 printf %s "checking for vkfft/vkFFT.h... " >&6; }
 if test ${ac_cv_file_vkfft_vkFFT_h+y}
@@ -4733,7 +4728,6 @@ if test "x$enable_cuda" != "xno"
 then :
 
 	CFLAGS="$CFLAGS -I$CUDA_PATH/include"
-	CFLAGS2="$CFLAGS2 -I$CUDA_PATH/include"
 	# assume 64 bit mode, add default directory to find CUDA
 	LDFLAGS="$LDFLAGS -L$CUDA_PATH/lib64 -L$CUDA_PATH/lib64/stubs"
 	echo $LDFLAGS
@@ -4872,7 +4866,6 @@ else $as_nop
   as_fn_error $? "cuda library not found. Try adding LDFLAGS=\"-L/usr/local/cuda/lib64\"" "$LINENO" 5
 fi
 
-	objs="$objs sht_gpu.o"
 
 	nvcc_gencode_flags=""
 	# find cuda arch:
@@ -4989,11 +4982,9 @@ then :
 	    as_fn_error $? "nvcc does not support any compatible gpu. Is nvcc available ?" "$LINENO" 5
 
 fi
-
-printf "%s\n" "#define SHTNS_GPU 1" >>confdefs.h
-
+	gpu_cflags="-DSHTNS_GPU=1"  # GPU transforms, 1 for CUDA, 2 for HIP
 	# for nvcc, the underlying gcc is not always c++11 by default, so we need to explicitely ask for it.
-	gpu_compile="nvcc -std=c++11 $nvcc_gencode_flags -lineinfo -Xptxas=-v"
+	gpu_compile="nvcc -std=c++11 $nvcc_gencode_flags -lineinfo -Xptxas=-v $gpu_cflags"
 	target="libshtns_cuda.a"
 	if test "x$enable_openmp" = "xyes"
 then :
@@ -5008,7 +4999,6 @@ then :
 	    gpu_compile="$gpu_compile -Xcompiler -fpic"
 
 fi
-	LIBS="$LIBS -lstdc++"	# cuda uses the c++ standard library. This is needed to link with gcc
 	{ printf "%s\n" "$as_me:${as_lineno-$LINENO}: checking for vkfft/vkFFT.h" >&5
 printf %s "checking for vkfft/vkFFT.h... " >&6; }
 if test ${ac_cv_file_vkfft_vkFFT_h+y}
@@ -5034,7 +5024,17 @@ fi
 
 
 fi
-libname=$target
+if test "x$gpu_compile" != "x"
+then :
+
+    objs="$objs sht_init_gpu.o sht_gpu.o"
+    LIBS="$LIBS -lstdc++"	# cuda/hip uses the c++ standard library. This is needed to link with gcc
+
+else $as_nop
+
+    objs="$objs sht_init.o"
+
+fi
 
 # Check for FFTW (MKL preferred, FFTW optional)
 if test "x$enable_mkl" == "xyes"
