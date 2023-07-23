@@ -23,6 +23,17 @@
 
 /* regular transforms */
 
+void SH_to_spat_time(shtns_cfg shtns, cplx *Qlm, double *Vr) {
+	if (time_sht) cpu_timer[0] = shtns_wtime();
+	((pf2l)shtns->ftable[SHT_STD][SHT_TYP_SSY])(shtns, Qlm, Vr, shtns->lmax);
+	if (time_sht) cpu_timer[1] = shtns_wtime();
+}
+void spat_to_SH_time(shtns_cfg shtns, double *Vr, cplx *Qlm) {
+	if (time_sht) cpu_timer[0] = shtns_wtime();
+	((pf2l)shtns->ftable[SHT_STD][SHT_TYP_SAN])(shtns, Vr, Qlm, shtns->lmax);
+	if (time_sht) cpu_timer[1] = shtns_wtime();
+}
+
 void SH_to_spat(shtns_cfg shtns, cplx *Qlm, double *Vr) {
 	((pf2l)shtns->ftable[SHT_STD][SHT_TYP_SSY])(shtns, Qlm, Vr, shtns->lmax);
 }

@@ -20,10 +20,13 @@
 
 cuda = """
 cudaError_t
+cudaEventCreate
 cudaEventCreateWithFlags
 cudaEventDestroy
 cudaEventDisableTiming
+cudaEventElapsedTime
 cudaEventRecord
+cudaEventSynchronize
 cudaEvent_t
 cudaFree
 cudaGetDevice

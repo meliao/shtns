@@ -153,6 +153,35 @@ static int fft_int(int n, int fmax)
 	return n;
 }
 
+int time_sht = 0;
+double cpu_timer[2] = {0,0};
+
+inline double shtns_wtime() {
+	#ifdef _OPENMP
+	return omp_get_wtime();
+	#else
+	return 0;
+	#endif
+}
+
+void shtns_profiling(int on) {
+	time_sht = (on != 0);
+	#ifdef SHTNS_GPU
+		cushtns_profiling(on);
+	#endif
+}
+
+double shtns_profiling_read_time(double* time_1, double* time_2)
+{
+	double t1=0.0;	double t2=0.0;
+	#ifdef SHTNS_GPU
+	cushtns_profiling_read_time(&t1, &t2);	// return intermediate kernel time (fft and legendre separated)
+	#endif
+	if (time_1) *time_1 = t1;	if (time_2) *time_2 = t2;
+	return cpu_timer[1]-cpu_timer[0];		// return total CPU time (including transfers)
+}
+
+
 /*	SHT FUNCTIONS  */
 #include "sht_func.c"
 

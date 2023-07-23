@@ -84,6 +84,34 @@ void shtns_free(void* p) {
 	}
 }
 
+bool time_kernels = false;
+cudaEvent_t gpu_timer[3];
+
+extern "C"
+void cushtns_profiling(int on) {
+	if (on && !time_kernels) {
+		for (int i=0; i<3; i++) cudaEventCreate(&gpu_timer[i]);
+		time_kernels = true;
+	}
+	if (!on && time_kernels) {
+		time_kernels = false;
+		for (int i=2; i>=0; i--) cudaEventDestroy(gpu_timer[i]);
+	}
+}
+
+extern "C"
+double cushtns_profiling_read_time(double* time_1, double* time_2)
+{
+	float t1_ms = 0;	float t2_ms = 0;	// times in milliseconds
+	if (time_kernels) {
+		cudaEventSynchronize(gpu_timer[2]);		// wait for the events to happen
+		cudaEventElapsedTime(&t1_ms, gpu_timer[0], gpu_timer[1]);
+		cudaEventElapsedTime(&t2_ms, gpu_timer[1], gpu_timer[2]);
+	}
+	*time_1 = t1_ms*1e-3;	*time_2 = t2_ms*1e-3;
+	return (t1_ms+t2_ms)*1e-3;
+}
+
 static void destroy_cuda_buffer_fft(shtns_cfg shtns)
 {
 	#if defined(HAVE_LIBCUFFT) || defined(HAVE_LIBROCFFT)
@@ -724,13 +752,16 @@ void cuda_SH_to_spat(shtns_cfg shtns, std::complex<real>* d_Qlm, real *d_Vr, con
 	
 	if (sizeof(real) != shtns->sizeof_real) { printf("ERROR: SHTns plan not prepared for fp%ld data\n", sizeof(real)*8);	exit(1); }
 
+	if (S==0 && time_kernels) cudaEventRecord(gpu_timer[0], shtns->comp_stream);
 	if (S==0  &&  (SHT_ALLOW_SH2ISH_FUSE==0 || shtns->nwarp[2]==0)) {
 		d_qlm = (std::complex<real>*) shtns->gpu_buf_in;
 		sh2ishioka_gpu(shtns, d_Qlm, d_qlm, llim, mmax, S);
 	} else
 		if (d_Vr == (real*) d_Qlm) { printf("ERROR: cuda_SH_to_spat must have distinct in and out fields");	exit(1); }
 	legendre(shtns, S, d_qlm, d_Vr, llim, mmax);
+	if (S==0 && time_kernels) cudaEventRecord(gpu_timer[1], shtns->comp_stream);
 	fourier_to_spat_gpu(shtns, d_Vr, mmax, sizeof(real));	// in-place
+	if (S==0 && time_kernels) cudaEventRecord(gpu_timer[2], shtns->comp_stream);
 }
 
 /// Perform SH transform on data that is already on the GPU. d_Qlm and d_Vr are pointers to GPU memory (obtained by cudaMalloc() for instance)
@@ -743,7 +774,9 @@ void cuda_spat_to_SH(shtns_cfg shtns, real *d_Vr, std::complex<real>* d_Qlm, con
 
 	if (sizeof(real) != shtns->sizeof_real) { printf("ERROR: SHTns plan not prepared for fp%ld data\n", sizeof(real)*8);	exit(1); }
 
+	if (S==0 && time_kernels) cudaEventRecord(gpu_timer[0], shtns->comp_stream);
 	spat_to_fourier_gpu(shtns, d_Vr, mmax, sizeof(real));
+	if (S==0 && time_kernels) cudaEventRecord(gpu_timer[1], shtns->comp_stream);
 	if (S==0) {
 		std::complex<real>* d_Qlm_ish = (std::complex<real>*) shtns->gpu_buf_in;
 		ilegendre(shtns, S, d_Vr, d_Qlm_ish, llim);
@@ -752,6 +785,7 @@ void cuda_spat_to_SH(shtns_cfg shtns, real *d_Vr, std::complex<real>* d_Qlm, con
 		if (d_Vr == (real*) d_Qlm) { printf("ERROR: cuda_spat_to_SH must have distinct in and out fields");	exit(1); }
 		ilegendre(shtns, S, d_Vr, d_Qlm, llim);
 	}
+	if (S==0 && time_kernels) cudaEventRecord(gpu_timer[2], shtns->comp_stream);
 }
 
 
@@ -905,7 +939,7 @@ void cu_spat_to_SHqst_float(shtns_cfg shtns, float *Vr, float *Vt, float *Vp, cp
  * TRANSFORMS OF HOST DATA, INCLUDING TRANSFERS TO GPU *
  *******************************************************/ 
 
-cudaError_t copy_convert_field_to_gpu(void* dst, void* src, long n, int sizeof_real)
+cudaError_t copy_convert_field_to_gpu(void* dst, void* src, long n, int sizeof_real, cudaStream_t strm)
 {
 	cudaError_t err = cudaSuccess;
 	if (sizeof_real == 4) {
@@ -913,10 +947,10 @@ cudaError_t copy_convert_field_to_gpu(void* dst, void* src, long n, int sizeof_r
 		float* tmp_f = (float*) malloc(n*sizeof(float));
 		for (int i=0; i<n; i++) tmp_f[i] = ((double*) src)[i];
 		// copy spectral data to GPU
-		err = cudaMemcpy(dst, tmp_f, n*sizeof(float), cudaMemcpyHostToDevice);
+		err = cudaMemcpyAsync(dst, tmp_f, n*sizeof(float), cudaMemcpyHostToDevice, strm);
 		free(tmp_f);
 	} else {
-		err = cudaMemcpy(dst, src, n*sizeof(double), cudaMemcpyHostToDevice);
+		err = cudaMemcpyAsync(dst, src, n*sizeof(double), cudaMemcpyHostToDevice, strm);
 	}
 	return err;
 }
@@ -942,7 +976,7 @@ void SH_to_spat_gpu(shtns_cfg shtns, cplx *Qlm, double *Vr, const long int llim)
 	if (howmany > 1  &&  2*shtns->spec_dist > shtns->nlm_stride) { printf("ERROR: distance between field too large, unsupported\n."); return; }
 
 	// copy spectral data to GPU
-	err = copy_convert_field_to_gpu(d_qlm, Qlm, 2*nlm_pad, shtns->sizeof_real);
+	err = copy_convert_field_to_gpu(d_qlm, Qlm, 2*nlm_pad, shtns->sizeof_real, shtns->comp_stream);
 	if (err != cudaSuccess) { CUDA_ERROR_CHECK;	return; }
 
 	// SHT on the GPU
@@ -988,12 +1022,12 @@ void SHsphtor_to_spat_gpu(shtns_cfg shtns, cplx *Slm, cplx *Tlm, double *Vt, dou
 	// (convert and) transfer to gpu
 	if (Slm) {
 		d_Slm = d_vtp;		
-		err = copy_convert_field_to_gpu(d_Slm, Slm, 2*nlm_pad, sizeof_real);
+		err = copy_convert_field_to_gpu(d_Slm, Slm, 2*nlm_pad, sizeof_real, shtns->comp_stream);
 		if (err != cudaSuccess) { CUDA_ERROR_CHECK;	return; }
 	}
 	if (Tlm) {
 		d_Tlm = d_vtp + nlm_stride*sizeof_real;
-		err = copy_convert_field_to_gpu(d_Tlm, Tlm, 2*nlm_pad, sizeof_real);
+		err = copy_convert_field_to_gpu(d_Tlm, Tlm, 2*nlm_pad, sizeof_real, shtns->comp_stream);
 		if (err != cudaSuccess) { CUDA_ERROR_CHECK;	return; }
 	}
 
@@ -1138,10 +1172,10 @@ void spat_to_SH_gpu(shtns_cfg shtns, double *Vr, cplx *Qlm, const long int llim)
 	if (shtns->sizeof_real == 4) {		// convert double to float
 		float* tmp_f = (float*) malloc(sizeof(float)*shtns->nspat);
 		for (int i=0; i<shtns->nspat; i++) tmp_f[i] = Vr[i];
-		err = cudaMemcpy(d_q, tmp_f, shtns->nspat * sizeof(float), cudaMemcpyHostToDevice);
+		err = cudaMemcpyAsync(d_q, tmp_f, shtns->nspat * sizeof(float), cudaMemcpyHostToDevice, shtns->comp_stream);
 		free(tmp_f);
 	} else
-	err = cudaMemcpy(d_q, Vr, shtns->nspat * sizeof(double), cudaMemcpyHostToDevice);
+	err = cudaMemcpyAsync(d_q, Vr, shtns->nspat * sizeof(double), cudaMemcpyHostToDevice, shtns->comp_stream);
 	if (err != cudaSuccess) { CUDA_ERROR_CHECK;	return; }
 
 	// SHT on the GPU
@@ -1183,8 +1217,8 @@ void spat_to_SHsphtor_gpu(shtns_cfg shtns, double *Vt, double *Vp, cplx *Slm, cp
 	
 	if (shtns->sizeof_real == 4) {	// fp32, for testing purposes
 		float* d_vtp = (float*) shtns->gpu_staging_mem;
-		copy_convert_field_to_gpu(d_vtp, Vt, nspat, sizeof(float));
-		copy_convert_field_to_gpu(d_vtp+spat_stride, Vp, nspat, sizeof(float));
+		copy_convert_field_to_gpu(d_vtp, Vt, nspat, sizeof(float), shtns->comp_stream);
+		copy_convert_field_to_gpu(d_vtp+spat_stride, Vp, nspat, sizeof(float), shtns->comp_stream);
 		cu_spat_to_SHsphtor_float(shtns, d_vtp, d_vtp + spat_stride, (cplx_f*) d_vtp, (cplx_f*)(d_vtp+nlm_stride), llim);
 		long nlm_pad = (howmany==1) ? shtns->nlm : shtns->spec_dist*howmany;
 		err = cudaMemcpy(Slm, d_vtp, 2*nlm_pad*sizeof(float), cudaMemcpyDeviceToHost);
