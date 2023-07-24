@@ -85,7 +85,7 @@ static void SH_rotK90_init(shtns_cfg shtns)
 	#endif
 	q = (cplx*) q0;		// in-place FFT
 	nfft = 2*ntheta;	nrembed = nfft+2;		ncembed = nrembed/2;
-	shtns->fft_rot = fftw_plan_many_dft_r2c(1, &nfft, lmax, q0, &nrembed, lmax, 1, q, &ncembed, lmax, 1, FFTW_MEASURE);
+	shtns->fft_rot = fftw_plan_many_dft_r2c(1, &nfft, lmax, q0, &nrembed, lmax, 1, q, &ncembed, lmax, 1, FFTW_ESTIMATE);	// FFTW_ESTIMATE is suboptimal, but these routines are not used anymore...
 
 	VFREE(q0);
 	shtns->npts_rot = ntheta;		// save ntheta, and mark as initialized.
