@@ -7,11 +7,13 @@
 """Python/NumPy interface to the SHTns spherical harmonic transform library"""
 
 from sys import version_info as _swig_python_version_info
-# Import the low-level C/C++ module
-if __package__ or "." in __name__:
-    from . import _shtns
-else:
+
+try:
+    import _shtns_cuda as _shtns
+except:
     import _shtns
+print(_shtns.build_info())
+
 
 try:
     import builtins as __builtin__
