@@ -681,7 +681,7 @@ void ileg_m_kernel(const real_g* __restrict__ al, const real_g* __restrict__ ct,
 			real x0 = (it < nlat_2) ? q[it              + f*q_dist] : 0;	// north
 			real x1 = (it < nlat_2) ? q[nlat_2*2-1 - it + f*q_dist] : 0;	// south
 			yl[f*2*l_inc +j]     = x0+x1;			// even
-			yl[(f*2+1)*l_inc +j] = (x0-x1)*cost;	// odd
+			yl[(f*2+1)*l_inc +j] = (x0-x1)*((real)cost);	// odd
 		}
 		if (BLOCKSIZE > WARPSZE) {	__syncthreads(); } else { _syncwarp_fence; }
 
@@ -792,8 +792,9 @@ void ileg_m_kernel(const real_g* __restrict__ al, const real_g* __restrict__ ct,
 		#endif
 
 		q += b*NFIELDS*q_dist;
+		const real cost_ = cost;
 		const real sgn = (j^1)-j;	//	1-2*(j&1);	// +/-
-		const real costx = shfl_xor(cost, 1)*sgn;		// neighboor cost for "reverse" exchange
+		const real costx = shfl_xor(cost_, 1)*sgn;		// neighboor cost for "reverse" exchange
 		#pragma unroll
 		for (int f=0; f<NFIELDS; f++) {
 			real qer = (it < nlat_2) ? q[im*m_inc        + it            + f*q_dist] : 0;	// north imag (ani)
@@ -804,8 +805,8 @@ void ileg_m_kernel(const real_g* __restrict__ al, const real_g* __restrict__ ct,
 			real qoi = t1-qor;		qor += t1;		// bsi = -qoi[lane-1],   asi = qoi[lane+1];
 
 			yl[(f*4+3)*l_inc +(j^1)] = (qei + qoi)*costx;	// roi, exchange even and odd lanes
-			yl[(f*4+2)*l_inc + j]    = (qer - qor)*cost;	// ror
-			yl[(f*4+1)*l_inc +(j^1)] = (qei - qoi)*sgn;		// rei, exchange evend and odd lanes
+			yl[(f*4+2)*l_inc + j]    = (qer - qor)*cost_;	// ror
+			yl[(f*4+1)*l_inc +(j^1)] = (qei - qoi)*sgn;		// rei, exchange even and odd lanes
 			yl[f*4*l_inc     + j]    =  qer + qor;			// rer
 		}
 
