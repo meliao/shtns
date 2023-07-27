@@ -153,32 +153,21 @@ static int fft_int(int n, int fmax)
 	return n;
 }
 
-int time_sht = 0;
-double cpu_timer[2] = {0,0};
-
-inline double shtns_wtime() {
-	#ifdef _OPENMP
-	return omp_get_wtime();
-	#else
-	return 0;
-	#endif
-}
-
-void shtns_profiling(int on) {
-	time_sht = (on != 0);
+void shtns_profiling(shtns_cfg shtns, int on) {
+	shtns->cpu_timer = (on != 0) ? 0 : -1;		// enable or disable cpu timing: 0=on, -1=off
 	#ifdef SHTNS_GPU
-		cushtns_profiling(on);
+		cushtns_profiling(shtns, on);
 	#endif
 }
 
-double shtns_profiling_read_time(double* time_1, double* time_2)
+double shtns_profiling_read_time(shtns_cfg shtns, double* time_1, double* time_2)
 {
 	double t1=0.0;	double t2=0.0;
 	#ifdef SHTNS_GPU
-	cushtns_profiling_read_time(&t1, &t2);	// return intermediate kernel time (fft and legendre separated)
+	cushtns_profiling_read_time(shtns, &t1, &t2);	// return intermediate kernel time (fft and legendre separated)
 	#endif
 	if (time_1) *time_1 = t1;	if (time_2) *time_2 = t2;
-	return cpu_timer[1]-cpu_timer[0];		// return total CPU time (including transfers)
+	return shtns->cpu_timer;		// return total CPU time (including transfers)
 }
 
 
@@ -1168,6 +1157,7 @@ shtns_cfg shtns_create(int lmax, int mmax, int mres, enum shtns_norm norm)
 		shtns->robert_form = 0;		// no Robert form by default.
 		#endif
 		shtns->howmany = 1;		// 1 transform by default. Use shtns_set_batch() to ask for more.
+		shtns->cpu_timer = -1;		// disable timing by default
 	}
 
 	shtns->norm = norm;

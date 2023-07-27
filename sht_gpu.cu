@@ -47,7 +47,7 @@
 
 #include "sht_gpu_kernels.cu"
 
-enum cushtns_flags { CUSHT_OFF=0, CUSHT_ON=1, CUSHT_OWN_XFER_STREAM=4};
+enum cushtns_flags { CUSHT_OFF=0, CUSHT_ON=1, CUSHT_OWN_XFER_STREAM=4, CUSHT_PROFILING=64};
 
 /// include a compilable version of cuda_legendre.gen.cu (zero-terminated) :
 const char *src_leg =
@@ -84,29 +84,34 @@ void shtns_free(void* p) {
 	}
 }
 
-bool time_kernels = false;
-cudaEvent_t gpu_timer[3];
+// PROFILING TOOLS
+
+inline void profiling_record_time(shtns_cfg shtns, int idx, cudaStream_t strm) {
+	if (shtns->cu_flags & CUSHT_PROFILING) cudaEventRecord(shtns->gpu_timer[idx], strm);
+}
 
 extern "C"
-void cushtns_profiling(int on) {
+void cushtns_profiling(shtns_cfg shtns, int on) {
+	if (shtns->d_clm == 0) return;		// not a GPU transform!
+	const bool time_kernels = shtns->cu_flags & CUSHT_PROFILING;
 	if (on && !time_kernels) {
-		for (int i=0; i<3; i++) cudaEventCreate(&gpu_timer[i]);
-		time_kernels = true;
+		for (int i=0; i<3; i++) cudaEventCreate(&shtns->gpu_timer[i]);
+		shtns->cu_flags |= CUSHT_PROFILING;
 	}
 	if (!on && time_kernels) {
-		time_kernels = false;
-		for (int i=2; i>=0; i--) cudaEventDestroy(gpu_timer[i]);
+		for (int i=2; i>=0; i--) cudaEventDestroy(shtns->gpu_timer[i]);
+		shtns->cu_flags &= ~((int)CUSHT_PROFILING);
 	}
 }
 
 extern "C"
-double cushtns_profiling_read_time(double* time_1, double* time_2)
+double cushtns_profiling_read_time(shtns_cfg shtns, double* time_1, double* time_2)
 {
 	float t1_ms = 0;	float t2_ms = 0;	// times in milliseconds
-	if (time_kernels) {
-		cudaEventSynchronize(gpu_timer[2]);		// wait for the events to happen
-		cudaEventElapsedTime(&t1_ms, gpu_timer[0], gpu_timer[1]);
-		cudaEventElapsedTime(&t2_ms, gpu_timer[1], gpu_timer[2]);
+	if (shtns->cu_flags & CUSHT_PROFILING) {
+		cudaEventSynchronize(shtns->gpu_timer[2]);		// wait for the events to happen
+		cudaEventElapsedTime(&t1_ms, shtns->gpu_timer[0], shtns->gpu_timer[1]);
+		cudaEventElapsedTime(&t2_ms, shtns->gpu_timer[1], shtns->gpu_timer[2]);
 	}
 	*time_1 = t1_ms*1e-3;	*time_2 = t2_ms*1e-3;
 	return (t1_ms+t2_ms)*1e-3;
@@ -496,6 +501,7 @@ void cushtns_release_gpu(shtns_cfg shtns)
 	if (shtns->gpu_staging_mem) cudaFree(shtns->gpu_staging_mem);
 	if (shtns->cu_flags & CUSHT_OWN_XFER_STREAM) cudaStreamDestroy(shtns->xfer_stream);
 	destroy_cuda_buffer_fft(shtns);
+	cushtns_profiling(shtns, 0);		// frees resources allocated for profiling
 	// TODO: arrays possibly shared between different shtns_cfg should be deallocated ONLY if not used by other shtns_cfg.
 	if (shtns->d_clm) cudaFree(shtns->d_clm);
 	shtns->d_clm = 0;		// disable gpu.
@@ -758,16 +764,16 @@ void cuda_SH_to_spat(shtns_cfg shtns, std::complex<real>* d_Qlm, real *d_Vr, con
 	
 	if (sizeof(real) != shtns->sizeof_real) { printf("ERROR: SHTns plan not prepared for fp%ld data\n", sizeof(real)*8);	exit(1); }
 
-	if (S==0 && time_kernels) cudaEventRecord(gpu_timer[0], shtns->comp_stream);
+	if (S==0) profiling_record_time(shtns, 0, shtns->comp_stream);
 	if (S==0  &&  (SHT_ALLOW_SH2ISH_FUSE==0 || shtns->nwarp[2]==0)) {
 		d_qlm = (std::complex<real>*) shtns->gpu_buf_in;
 		sh2ishioka_gpu(shtns, d_Qlm, d_qlm, llim, mmax, S);
 	} else
 		if (d_Vr == (real*) d_Qlm) { printf("ERROR: cuda_SH_to_spat must have distinct in and out fields");	exit(1); }
 	legendre(shtns, S, d_qlm, d_Vr, llim, mmax);
-	if (S==0 && time_kernels) cudaEventRecord(gpu_timer[1], shtns->comp_stream);
+	if (S==0) profiling_record_time(shtns, 1, shtns->comp_stream);
 	fourier_to_spat_gpu(shtns, d_Vr, mmax, sizeof(real));	// in-place
-	if (S==0 && time_kernels) cudaEventRecord(gpu_timer[2], shtns->comp_stream);
+	if (S==0) profiling_record_time(shtns, 2, shtns->comp_stream);
 }
 
 /// Perform SH transform on data that is already on the GPU. d_Qlm and d_Vr are pointers to GPU memory (obtained by cudaMalloc() for instance)
@@ -780,9 +786,9 @@ void cuda_spat_to_SH(shtns_cfg shtns, real *d_Vr, std::complex<real>* d_Qlm, con
 
 	if (sizeof(real) != shtns->sizeof_real) { printf("ERROR: SHTns plan not prepared for fp%ld data\n", sizeof(real)*8);	exit(1); }
 
-	if (S==0 && time_kernels) cudaEventRecord(gpu_timer[0], shtns->comp_stream);
+	if (S==0) profiling_record_time(shtns, 0, shtns->comp_stream);
 	spat_to_fourier_gpu(shtns, d_Vr, mmax, sizeof(real));
-	if (S==0 && time_kernels) cudaEventRecord(gpu_timer[1], shtns->comp_stream);
+	if (S==0) profiling_record_time(shtns, 1, shtns->comp_stream);
 	if (S==0) {
 		std::complex<real>* d_Qlm_ish = (std::complex<real>*) shtns->gpu_buf_in;
 		ilegendre(shtns, S, d_Vr, d_Qlm_ish, llim);
@@ -791,7 +797,7 @@ void cuda_spat_to_SH(shtns_cfg shtns, real *d_Vr, std::complex<real>* d_Qlm, con
 		if (d_Vr == (real*) d_Qlm) { printf("ERROR: cuda_spat_to_SH must have distinct in and out fields");	exit(1); }
 		ilegendre(shtns, S, d_Vr, d_Qlm, llim);
 	}
-	if (S==0 && time_kernels) cudaEventRecord(gpu_timer[2], shtns->comp_stream);
+	if (S==0) profiling_record_time(shtns, 2, shtns->comp_stream);
 }
 
 

@@ -371,10 +371,10 @@ void SHqst_to_lat(shtns_cfg, cplx *Qlm, cplx *Slm, cplx *Tlm, double cost,
 					double *vr, double *vt, double *vp, int nphi, int ltr, int mtr);
 ///@}
 
-void shtns_profiling(int on);	///< on!=0: turn profiling on, on==0: turn off
-double shtns_profiling_read_time(double* t1, double* t2);	///< read timers of last transform. total time is returned, time for legendre and fourier are put in t1 and t2 (in order of execution)
-void SH_to_spat_time(shtns_cfg shtns, cplx *Qlm, double *Vr);	///< same as SH_to_spat() but with time recording
-void spat_to_SH_time(shtns_cfg shtns, double *Vr, cplx *Qlm);	///< same as spat_to_SH() but with time recording
+void shtns_profiling(shtns_cfg shtns, int on);	///< on!=0: turn profiling on, on==0: turn off
+double shtns_profiling_read_time(shtns_cfg shtns, double* t1, double* t2);	///< read timers of last transform. total time is returned, time for legendre and fourier are put in t1 and t2 (in order of execution)
+double SH_to_spat_time(shtns_cfg shtns, cplx *Qlm, double *Vr);	///< same as SH_to_spat() but with time recording; returns time in seconds
+double spat_to_SH_time(shtns_cfg shtns, double *Vr, cplx *Qlm);	///< same as spat_to_SH() but with time recording; returns time in seconds
 
 #endif
 

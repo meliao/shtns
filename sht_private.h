@@ -182,7 +182,7 @@ struct shtns_info {		// MUST start with "int nlm;"
 
 	#ifdef SHTNS_GPU
 	/* cuda stuff */
-	short cu_flags;
+	unsigned short cu_flags;
 	unsigned char sizeof_real, sizeof_real_g;		// 4 for float, 8 for double
 	double* d_clm;
 	double* d_xlm;
@@ -199,14 +199,17 @@ struct shtns_info {		// MUST start with "int nlm;"
 	unsigned short gridDim_y[2];
 	unsigned char nwarp[3];			// third value is for scalar synthesis with sh2ish_fuse, or set to 0 to disable sh2ish
 	CUmodule gpu_module;			// not sure this is needed
+	#ifdef VKFFT_BACKEND
+		VkFFTApplication vkfft_plan;
+	#endif
 	#if defined(HAVE_LIBCUFFT) || defined(HAVE_LIBROCFFT)
 	cufftHandle cufft_plan;						// the cufft Handle
 	//cufftHandle cufft_plan_float;				// the cufft Handle single precision
 	#endif
+	cudaEvent_t gpu_timer[3];
 	#endif
-	#ifdef VKFFT_BACKEND
-		VkFFTApplication vkfft_plan;
-	#endif
+
+	float cpu_timer;		// <0 : timing disabled,  >= 0 : enabled
 
 	/* other misc informations */
 	unsigned char nlorder;	// order of non-linear terms to be resolved by SH transform.

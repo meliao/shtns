@@ -326,7 +326,7 @@ void test_SHT()
 	ts2 = wtime() - ts2;
 	tcpu = clock() - tcpu;
 	ts = tcpu / (1000.*SHT_ITER);
-	ts_wall = shtns_profiling_read_time(&ts_leg, &ts_fft);
+	ts_wall = shtns_profiling_read_time(shtns, &ts_leg, &ts_fft);
 
 	for (i=0;i<NLM*batch;i++) Slm[i] = 1e30 -I*1e31;	// fill destination with garbage
 
@@ -339,7 +339,7 @@ void test_SHT()
 	ta2 = wtime() - ta2;
 	tcpu = clock() - tcpu;
 	ta = tcpu / (1000.*SHT_ITER*batch);
-	ta_wall = shtns_profiling_read_time(&ta_fft, &ta_leg);
+	ta_wall = shtns_profiling_read_time(shtns, &ta_fft, &ta_leg);
 	
 	ts2 *= 1000./(SHT_ITER*batch);
 	ta2 *= 1000./(SHT_ITER*batch);
@@ -817,9 +817,9 @@ int main(int argc, char *argv[])
 	}
 	shtns_set_grid_auto(shtns, shtmode | layout | layout_opts, polaropt, nlorder, &NLAT, &NPHI);
 
+	shtns_profiling(shtns, 1);		// enable internal profiling
 	shtns_print_cfg(shtns);
 
-	shtns_profiling(1);		// enable internal profiling
 /*
 	t1 = 1.0+2.0*I;
 	t2 = 1.0-I;

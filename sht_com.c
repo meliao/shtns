@@ -21,18 +21,30 @@
 
 /// common sht functions and api calls
 
-/* regular transforms */
+inline double shtns_wtime() {
+	#ifdef _OPENMP
+	return omp_get_wtime();
+	#else
+	return 0;
+	#endif
+}
 
-void SH_to_spat_time(shtns_cfg shtns, cplx *Qlm, double *Vr) {
-	if (time_sht) cpu_timer[0] = shtns_wtime();
-	((pf2l)shtns->ftable[SHT_STD][SHT_TYP_SSY])(shtns, Qlm, Vr, shtns->lmax);
-	if (time_sht) cpu_timer[1] = shtns_wtime();
+double SH_to_spat_time(shtns_cfg shtns, cplx *Qlm, double *Vr) {
+	double t = shtns_wtime();
+	SH_to_spat(shtns, Qlm, Vr);
+	t = shtns_wtime() - t;
+	if (shtns->cpu_timer >= 0) shtns->cpu_timer = t;
+	return t;
 }
-void spat_to_SH_time(shtns_cfg shtns, double *Vr, cplx *Qlm) {
-	if (time_sht) cpu_timer[0] = shtns_wtime();
-	((pf2l)shtns->ftable[SHT_STD][SHT_TYP_SAN])(shtns, Vr, Qlm, shtns->lmax);
-	if (time_sht) cpu_timer[1] = shtns_wtime();
+double spat_to_SH_time(shtns_cfg shtns, double *Vr, cplx *Qlm) {
+	double t = shtns_wtime();
+	spat_to_SH(shtns, Vr, Qlm);
+	t = shtns_wtime() - t;
+	if (shtns->cpu_timer >= 0) shtns->cpu_timer = t;
+	return t;
 }
+
+/* regular transforms */
 
 void SH_to_spat(shtns_cfg shtns, cplx *Qlm, double *Vr) {
 	((pf2l)shtns->ftable[SHT_STD][SHT_TYP_SSY])(shtns, Qlm, Vr, shtns->lmax);
