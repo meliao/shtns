@@ -50,9 +50,11 @@ shtns_cfg sht_data = NULL;
   #define omp_threads 1
 #endif
 
-static int verbose = 0;		// runtime verbosity control: 0 no output, 1 output, 2 debug (if compiled in)
+static int verbose = 0;		// runtime verbosity control: 0 no output, 1 output, 2 debug mode, 3 full
 void shtns_verbose(int v) {
-	verbose = v;
+	const char* vv = getenv("SHTNS_VERBOSE");
+	if (vv && strlen(vv) > 0)		v = atoi(vv);		// environment variable takes precedence.
+	if (v>=0) verbose = v;		// negative input means don't touch it; useful for just reading environment variable if any
 }
 
 #ifdef SHTNS_ISHIOKA
@@ -330,9 +332,7 @@ static void alloc_SHTarrays(shtns_cfg shtns, int vect, int analys)
 	shtns->ct = (double *) VMALLOC( sizeof(double) * l0*3 );			/// ct[] (including st and st_1)
 	shtns->st = shtns->ct + l0;		shtns->st_1 = shtns->ct + 2*l0;
 
-	#if SHT_VERBOSE > 1
-		if (verbose>1) printf("          Memory used for Ylm and Zlm matrices = %.3f Mb x2\n",3.0*sizeof(double)*NLM*NLAT_2/(1024.*1024.));
-	#endif
+	if (verbose>1) printf("          Memory used for Ylm and Zlm matrices = %.3f Mb x2\n",3.0*sizeof(double)*NLM*NLAT_2/(1024.*1024.));
 }
 
 
@@ -385,9 +385,7 @@ static void planFFT(shtns_cfg shtns, int layout)
 	if (NPHI==1) 	// no FFT needed.
 	{
 		shtns->fft_mode = FFT_NONE;		// no FFT
-		#if SHT_VERBOSE > 0
-			if (verbose) printf("        => no fft : Mmax=0, Nphi=1, Nlat=%d, Nbatch=%d\n",NLAT,howmany);
-		#endif
+		if (verbose) printf("        => no fft : Mmax=0, Nphi=1, Nlat=%d, Nbatch=%d\n",NLAT,howmany);
 		return;
 	}
 
@@ -402,13 +400,11 @@ static void planFFT(shtns_cfg shtns, int layout)
 		shtns->nlat_padded = NLAT;
 	}
 
-	#if SHT_VERBOSE > 0
 	if (verbose) {
 		printf("        => using FFTW : Mmax=%d, Nphi=%d, Nlat=%d, Nbatch=%d  ",MMAX,NPHI,NLAT, howmany);
 		if (NPHI <= (SHT_NL_ORDER+1)*MMAX)	printf("     !! Warning : anti-aliasing condition Nphi > %d*Mmax is not met !\n", SHT_NL_ORDER+1);
 		if (NPHI != fft_int(NPHI,7))		printf("     !! Warning : Nphi is not optimal for FFTW !\n");
 	}
-	#endif
 
 // Allocate dummy Spatial Fields.
 	ShF = (cplx *) VMALLOC(shtns->nspat * sizeof(cplx));		// for complex-valued fields
@@ -423,9 +419,7 @@ static void planFFT(shtns_cfg shtns, int layout)
 // complex fft for fly transform is a bit different.
 	if (layout & SHT_PHI_CONTIGUOUS) {		// out-of-place split dft
 		if ((NLAT & 1) == 0) {
-			#if SHT_VERBOSE > 0
 			if (verbose) printf("(phi-contiguous layout: phi_inc=%d, theta_inc=%d)\n",phi_inc,theta_inc);
-			#endif
 			fftw_iodim dim, many;
 			shtns->fft_mode = FFT_PHI_CONTIG_SPLIT | FFT_OOP;
 			dim.n = NPHI;    	dim.os = 1;			dim.is = NLAT;		// complex transpose
@@ -467,9 +461,7 @@ static void planFFT(shtns_cfg shtns, int layout)
 		shtns->fft_cplx =  fftw_plan_many_dft(1, &nfft, NLAT, ShF, &nfft, 1, NPHI, (cplx*)Sh, &nfft, NLAT, 1, FFTW_BACKWARD, shtns->fftw_plan_mode);
 	#if defined( HAVE_LIBCUFFT ) && !defined( VKFFT_BACKEND )
 	} else if ((!(layout & SHT_THETA_CONTIGUOUS)) && (nfft % 16 == 0) && (shtns->nlat % 32 == 0) && (howmany==1)) {		// use the fastest layout compatible with cuFFT
-		#if SHT_VERBOSE > 0
 		if (verbose) printf("(best cuFFT layout: phi_inc=2, theta_inc=NA)\n");
-		#endif
 		shtns->fft_mode = FFT_PHI_CONTIG_CPLX | FFT_OOP;	// out-of-place
 		// Fourier -> spatial
 		shtns->ifftc = fftw_plan_many_dft(1, &nfft, NLAT/2, ShF, &nfft, NLAT/2, 1, (cplx*) Sh, &nfft, 1, nfft, FFTW_BACKWARD, shtns->fftw_plan_mode);		
@@ -478,9 +470,7 @@ static void planFFT(shtns_cfg shtns, int layout)
 	#endif
 	} else {	//if (layout & SHT_THETA_CONTIGUOUS) {		// use only in-place here, supposed to be faster.
 		if ((NLAT & 1)==0) {
-			#if SHT_VERBOSE > 0
 			if (verbose) printf("(theta-contiguous layout: phi_inc=%d, theta_inc=%d)\n",phi_inc,theta_inc);
-			#endif
 			shtns->fft_mode = FFT_THETA_CONTIG;
 			shtns->ifftc = fftw_plan_many_dft(1, &nfft, shtns->nlat_2 * howmany, ShF, &nfft, phi_inc/2, 1, ShF, &nfft, phi_inc/2, 1, FFTW_BACKWARD, shtns->fftw_plan_mode);
 			shtns->fftc = shtns->ifftc;		// same thing, with m>0 and m<0 exchanged.
@@ -505,16 +495,11 @@ static void planFFT(shtns_cfg shtns, int layout)
 	}
 	VFREE(Sh);		VFREE(ShF);
 
-	#if SHT_VERBOSE > 0
 	if (verbose) {
 		if (NPHI <= (SHT_NL_ORDER+1)*MMAX)	printf("     !! Warning : anti-aliasing condition Nphi > %d*Mmax is not met !\n", SHT_NL_ORDER+1);
 		if (NPHI != fft_int(NPHI,7))		printf("     !! Warning : Nphi is not optimal for FFTW !\n");
 	}
-	#endif
-	#if SHT_VERBOSE > 1
 	if (verbose>1) printf("          fftw cost ifftc=%lg,  fftc=%lg\n",fftw_cost(shtns->ifftc), fftw_cost(shtns->fftc));
-	#endif
-	#if SHT_VERBOSE > 2
 	if (verbose>2) {
 		printf("\n *** fftc plan : \n");
 		if (shtns->fftc) fftw_print_plan(shtns->fftc);
@@ -522,7 +507,6 @@ static void planFFT(shtns_cfg shtns, int layout)
 		if (shtns->ifftc) fftw_print_plan(shtns->ifftc);
 		printf("\n");
 	}
-	#endif
 }
 
 
@@ -550,17 +534,13 @@ static void PolarOptimize(shtns_cfg shtns, double eps)
 			} while (v < eps);
 			shtns->tm[im] = it;
 		}
-	#if SHT_VERBOSE > 0
 		if (verbose) printf("        + polar optimization threshold = %.1e\n",eps);
-	#endif
-	#if SHT_VERBOSE > 1
-	if (verbose>1) {
-		printf("          tm[im]=");
-		for (im=0;im<=MMAX;im++)
-			printf(" %d",shtns->tm[im]);
-		printf("\n");
-	}
-	#endif
+		if (verbose>1) {
+			printf("          tm[im]=");
+			for (im=0;im<=MMAX;im++)
+				printf(" %d",shtns->tm[im]);
+			printf("\n");
+		}
 	}
 }
 
@@ -579,28 +559,22 @@ static void grid_weights(shtns_cfg shtns, double latdir)
 	if ((SHT_NORM != sht_fourpi)&&(SHT_NORM != sht_schmidt))  iylm_fft_norm = 4*M_PIl;	// FFT/SHT normalization for zlm (orthonormalized)
 	iylm_fft_norm /= (2*NPHI);
 	if (grid == GRID_GAUSS) {
-		#if SHT_VERBOSE > 0
 		if (verbose) {
 			printf("        => using Gauss nodes\n");
 			if (2*NLAT <= (SHT_NL_ORDER +1)*LMAX) printf("     !! Warning : Gauss-Legendre anti-aliasing condition 2*Nlat > %d*Lmax is not met.\n",SHT_NL_ORDER+1);
 		}
-		#endif
 		gauss_nodes(xg,stg,wg,NLAT);	// generate gauss nodes and weights : ct = ]1,-1[ = cos(theta)
 	} else if (grid == GRID_REGULAR) {
-		#if SHT_VERBOSE > 0
 		if (verbose) {
 			printf("        => using Regular nodes (Chebychev) with Fejer quadrature\n");
 			if (NLAT <= (SHT_NL_ORDER +1)*LMAX) printf("     !! Warning : Regular-Fejer anti-aliasing condition Nlat > %d*Lmax is not met.\n",SHT_NL_ORDER+1);
 		}
-		#endif
 		fejer1_nodes(xg,stg,wg,NLAT);
 	} else if (grid == GRID_POLES) {
-		#if SHT_VERBOSE > 0
 		if (verbose) {
 			printf("        => using Regular nodes including poles, with Clenshaw-Curtis quadrature\n");
 			if (NLAT <= (SHT_NL_ORDER +1)*LMAX) printf("     !! Warning : Regular-Clenshaw-Curtis anti-aliasing condition Nlat > %d*Lmax is not met.\n",SHT_NL_ORDER+1);
 		}
-		#endif
 		clenshaw_curtis_nodes(xg,stg,wg,NLAT);
 	} else shtns_runerr("unknown grid.");
 	if (NLAT&1) wg[NLAT/2] *= 0.5;		// odd NLAT : adjust weigth of middle point.
@@ -635,7 +609,6 @@ static void grid_weights(shtns_cfg shtns, double latdir)
 		shtns->wg[it] = wg[it]*iylm_fft_norm;		// faster double-precision computations.
 	for (it=NLAT_2; it < NLAT_2 +overflow; it++) shtns->wg[it] = 0.0;		// padding for multi-way algorithm.
 
-#if SHT_VERBOSE > 1
 	if ((verbose>1) && (grid == GRID_GAUSS)) {
 		printf(" NLAT=%d, NLAT_2=%d\n",NLAT,NLAT_2);
 	// TEST if gauss points are ok.
@@ -653,7 +626,6 @@ static void grid_weights(shtns_cfg shtns, double latdir)
 			printf("\n");
 		}
 	}
-#endif
 }
 
 
@@ -709,9 +681,7 @@ double SHT_error(shtns_cfg shtns, int vector)
 		if (t>tmax) { tmax = t; jj = i; }
 	}
 	err = tmax;
-#if SHT_VERBOSE > 1
 	if (verbose>1) printf("        scalar SH - poloidal   rms error = %.3g  max error = %.3g for l=%hu,lm=%ld\n",sqrt(n2/NLM),tmax,shtns->li[jj],jj);
-#endif
 
 	if (vector) {
 		for (i=1; i<NLM; i++) {
@@ -728,9 +698,7 @@ double SHT_error(shtns_cfg shtns, int vector)
 			if (t>tmax) { tmax = t; jj = i; }
 		}
 		if (tmax > err) err = tmax;
-	#if SHT_VERBOSE > 1
 		if (verbose>1) printf("        vector SH - spheroidal rms error = %.3g  max error = %.3g for l=%hu,lm=%ld\n",sqrt(n2/NLM),tmax,shtns->li[jj],jj);
-	#endif
 		for (i=0, tmax=0., n2=0., jj=0; i<NLM; i++) {		// compute error
 			t = cabs(Tlm[i] - Tlm0[i]);
 			if (i>0) t *= shtns->li[i];		// relative error: account for mean spectrum of unit energy
@@ -738,9 +706,7 @@ double SHT_error(shtns_cfg shtns, int vector)
 			if (t>tmax) { tmax = t; jj = i; }
 		}
 		if (tmax > err) err = tmax;
-	#if SHT_VERBOSE > 1
 		if (verbose>1) printf("                  - toroidal   rms error = %.3g  max error = %.3g for l=%hu,lm=%ld\n",sqrt(n2/NLM),tmax,shtns->li[jj],jj);
-	#endif
 
 		//for (int i=0; i<NLM; i++) {
 		//	printf("l=%d err=%.3g %.3g \t %g,%g (%g,%g) \t %g,%g (%g,%g)\n",shtns->li[i], cabs(Slm[i] - Slm0[i]), cabs(Tlm[i] - Tlm0[i]), creal(Slm[i]),cimag(Slm[i]), creal(Slm0[i]),cimag(Slm0[i]), creal(Tlm[i]),cimag(Tlm[i]), creal(Tlm0[i]),cimag(Tlm0[i]));
@@ -752,12 +718,6 @@ double SHT_error(shtns_cfg shtns, int vector)
 	return(err);		// return max error.
 }
 
-
-#if SHT_VERBOSE == 1
-  #define PRINT_DOT 	if (verbose>=1) {	printf(".");	fflush(stdout);	}
-#else
-  #define PRINT_DOT (0);
-#endif
 
 /// \internal measure time used for a transform function
 static double get_time(shtns_cfg shtns, int nloop, int npar, char* name, void *fptr, void *i1, void *i2, void *i3, void *o1, void *o2, void *o3, int l)
@@ -784,9 +744,7 @@ static double get_time(shtns_cfg shtns, int nloop, int npar, char* name, void *f
 		tik1 = getticks();
 		t = elapsed(tik1, tik0)/(nloop-1);		// discard first iteration.
 	}
-	#if SHT_VERBOSE > 1
 	if (verbose>1) {  printf("  t(%s) = %.3g",name,t);	fflush(stdout);  }
-	#endif
 	return t;
 }
 
@@ -829,11 +787,9 @@ static void choose_best_sht(shtns_cfg shtns, int* nlp, int vector)
 		}
 	}
 
-	#if SHT_VERBOSE > 0
 	if (verbose) {
 		printf("        finding optimal algorithm");	fflush(stdout);
 	}
-	#endif
 
 	const int ref_alg = (shtns->nthreads == 1) ? SHT_FLY2 : SHT_OMP2;
 	if (*nlp <= 0) {
@@ -850,19 +806,17 @@ static void choose_best_sht(shtns_cfg shtns, int* nlp, int vector)
 			if (tt >= SHT_TIME_LIMIT) break;			// we should not exceed some time-limit
 			t = get_time(shtns, nloop, 2, "", sht_func[SHT_STD][ref_alg][SHT_TYP_SSY], Slm, Tlm, Qlm, Sh, Th, Qh, LMAX);
 			r = fabs(2.0*(t-t0)/(t+t0));
-			#if SHT_VERBOSE > 1
-				if (verbose>1) printf(", nloop=%d, r=%g, m=%d (real time = %g s)\n",nloop,r,m,tt);
+			if (verbose>1) {
+				printf(", nloop=%d, r=%g, m=%d (real time = %g s)\n",nloop,r,m,tt);
 				if (tt >= 0.01) break;		// faster timing in debug mode.
-			#endif
-			PRINT_DOT
+			}
+			if (verbose==1) {	printf(".");	fflush(stdout);	}
 		} while((nloop<10000)&&(m < 3));
 		*nlp = nloop;
 	} else {
 		nloop = *nlp;
 	}
-	#if SHT_VERBOSE > 1
-		if (verbose>1) printf(" => nloop=%d (takes %g s)\n",nloop, tt);
-	#endif
+	if (verbose>1) printf(" => nloop=%d (takes %g s)\n",nloop, tt);
 	if (vector == 0)	typ_lim = SHT_TYP_VSY;		// time only scalar transforms.
 //	if (tt > 3.0)		typ_lim = SHT_TYP_VSY;		// time only scalar transforms.
 //	if (tt > 10.0)	goto done;		// timing this will be too slow...
@@ -879,9 +833,7 @@ static void choose_best_sht(shtns_cfg shtns, int* nlp, int vector)
 			if (sht_func[0][i][ityp] != NULL) m++;		// count number of algos
 		}
 		if (m >= 2) {		// don't time if there is only 1 algo !
-			#if SHT_VERBOSE > 1
 			if (verbose>1) {  printf("finding best %s ...",sht_type[ityp]);	fflush(stdout);  }
-			#endif
 			i = i0-1;		i0 = -1;
 			while (++i < alg_end) {
 				void *pf = sht_func[0][i][ityp];
@@ -895,7 +847,7 @@ static void choose_best_sht(shtns_cfg shtns, int* nlp, int vector)
 				#ifdef _OPENMP
 					if ((shtns->nthreads > 1) && ((i >= SHT_OMP1)||(i == SHT_SV))) t *= 1.3;	// 30% penality for openmp transforms.
 				#endif
-					if (t < t0) {	i0 = i;		t0 = t;		PRINT_VERB("*");	}
+					if (t < t0) {	i0 = i;		t0 = t;		if (verbose>1) printf("*");	}
 				}
 			}
 			if (i0 >= 0) {
@@ -905,19 +857,15 @@ static void choose_best_sht(shtns_cfg shtns, int* nlp, int vector)
 						if (sht_func[iv][i0][ityp+1]) shtns->ftable[iv][ityp+1] = sht_func[iv][i0][ityp+1];
 					}
 				}
-				PRINT_DOT
-				#if SHT_VERBOSE > 1
-					if (verbose>1) printf(" => %s\n",sht_name[i0]);
-				#endif
+				if (verbose==1) {	printf(".");	fflush(stdout);	}
+				if (verbose>1) printf(" => %s\n",sht_name[i0]);
 			}
 		}
 		if (ityp == 4) ityp++;		// skip second gradient
 	} while(++ityp < typ_lim);
 
 done:
-	#if SHT_VERBOSE > 0
-		if (verbose) printf("\n");
-	#endif
+	if (verbose) printf("\n");
 	if (Qlm) VFREE(Qlm);		if (Tlm) VFREE(Tlm);
 	if (Qh)  VFREE(Qh);			if (Th)  VFREE(Th);
 	if (Slm) VFREE(Slm);	 	if (Sh)  VFREE(Sh);
@@ -1021,9 +969,7 @@ int config_save(shtns_cfg shtns, int req_flags)
 		fclose(fcfg);
 	} else err -= 4;
 
-	#if SHT_VERBOSE > 0
-		if (err < 0) fprintf(stderr,"! Warning ! SHTns could not save config\n");
-	#endif
+	if (verbose && err < 0) fprintf(stderr,"! Warning ! SHTns could not save config\n");
 	return err;
 }
 
@@ -1061,15 +1007,11 @@ int config_load(shtns_cfg shtns, int req_flags)
 			if ((shtns->lmax == lmax2) && (shtns->mmax == mmax2) && (shtns->mres == mres2) && (shtns->nthreads == nthreads2) &&
 			  (shtns->nphi == nphi2) && (shtns->nlat == nlat2) && (shtns->grid == grid2) &&  (req_flags == req_flags2) &&
 			  (shtns->nlorder == nlorder2) && (strcmp(simd, _SHTNS_ID_)==0)) {
-			#if SHT_VERBOSE > 0
 				if (verbose > 0) printf("        + using saved config\n");
-			#endif
-			#if SHT_VERBOSE > 1
 				if (verbose > 1) {
 					fprint_ftable(stdout, ft2);
 					printf("\n");
 				}
-			#endif
 				for (int iv=0; iv<SHT_NVAR; iv++)
 				for (int it=0; it<SHT_NTYP; it++)
 					if (ft2[iv][it]) shtns->ftable[iv][it] = ft2[iv][it];		// accept only non-null pointer
@@ -1080,9 +1022,7 @@ int config_load(shtns_cfg shtns, int req_flags)
 		fclose(fcfg);
 		return found;
 	} else {
-		#if SHT_VERBOSE > 0
 			if (verbose) fprintf(stderr,"! Warning ! SHTns could not load config\n");
-		#endif
 		return -2;		// file not found
 	}
 }
@@ -1152,12 +1092,11 @@ shtns_cfg shtns_create(int lmax, int mmax, int mres, enum shtns_norm norm)
 	shtns->nlm_cplx = 2*shtns->nlm - (lmax+1);	// = nlm_cplx_calc(lmax, mmax, mres);
 	shtns->nthreads = omp_threads;
 	if (omp_threads > mmax+1) shtns->nthreads = mmax+1;	// limit the number of threads to mmax+1
-	#if SHT_VERBOSE > 0
+	shtns_verbose(-1);	// -1: check if environment variable sets verbosity level
 	if (verbose) {
 		shtns_print_version();
 		printf("        ");		shtns_print_cfg(shtns);
 	}
-	#endif
 
 	int larrays_ok=0, legendre_ok=0, l_2_ok=0;
 	s2 = sht_data;		// check if some data can be shared ...
@@ -1520,9 +1459,7 @@ int shtns_set_grid_auto(shtns_cfg shtns, enum shtns_type flags, double eps, int 
 			int err = init_gpu_staging_buffer(shtns);		// initialize staging buffers for auto-offload feature.
 			if (err)  gpu_ok = -1;
 		}
-		#if SHT_VERBOSE > 0
 		if ((verbose)&&(gpu_ok>=0)) printf("        + GPU #%d successfully initialized.\n", gpu_ok);
-		#endif
 	}
 	if (gpu_ok < 0) {		// disable the GPU functions
 		for (int j=SHT_GPU1; j<=SHT_GPU4; j++) {
@@ -1539,26 +1476,18 @@ int shtns_set_grid_auto(shtns_cfg shtns, enum shtns_type flags, double eps, int 
 	double t_estimate = 5e-10*LMAX*NLAT*MMAX/VSIZE2 * shtns->howmany;		// very rough cost estimate (in seconds for 1 core @ 1Ghz).
 	if ((t_estimate < 0.3*shtns->nthreads) || ((quick_init == 0) && (!cfg_loaded))) {	// don't perform accuracy checks for too large transforms (takes too much time).
 		t = SHT_error(shtns, vector);		// compute SHT accuracy.
-		#if SHT_VERBOSE > 0
-			if (verbose) printf("        + SHT accuracy = %.3g\n",t);
-		#endif
+		if (verbose) printf("        + SHT accuracy = %.3g\n",t);
 		if (t > ((layout & SHT_FP32) ? 5e-3 : 1.e-6) || isNotFinite(t)) {
 			printf("\033[93m Accuracy test failed. Please file a bug report at https://bitbucket.org/nschaeff/shtns/issues \033[0m\n");
 			#if (VSIZE2 == 8) && (defined __GNUC__) && !(defined __INTEL_COMPILER)
 			printf("\033[93m You may need to upgrade the 'binutils' package, see https://bitbucket.org/nschaeff/shtns/issues/37/ \033[0m\n");
 			#endif
-			#if SHT_VERBOSE < 2
-			shtns_runerr("bad SHT accuracy");		// stop if something went wrong (but not in debug mode)
-			#endif
+			if (verbose < 2) shtns_runerr("bad SHT accuracy");		// stop if something went wrong (but not in debug mode)
 		}
 	}
 
-  #if SHT_VERBOSE > 1
 	if ((omp_threads > 1)&&(verbose>1)) printf(" nthreads = %d\n",shtns->nthreads);
-  #endif
-  #if SHT_VERBOSE > 0
 	if (verbose) printf("        => SHTns is ready.\n");
-  #endif
 	return(shtns->nspat);	// returns the number of doubles to be allocated for a spatial field.
 }
 

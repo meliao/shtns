@@ -286,13 +286,6 @@ struct DtDp {		// theta and phi derivatives stored together.
 #define GLUE2(a,b) a##b
 #define GLUE3(a,b,c) a##b##c
 
-// verbose printing
-#if SHT_VERBOSE > 1
-  #define PRINT_VERB(msg) printf(msg)
-#else
-  #define PRINT_VERB(msg) (0)
-#endif
-
 /// Convert from vector 2 scalar SH to vector SH
 /// Slm = - (I*m*Wlm + MX*Vlm) / (l*(l+1))		=> why does this work ??? (aliasing of 1/sin(theta) ???)
 /// Tlm = - (I*m*Vlm - MX*Wlm) / (l*(l+1))
