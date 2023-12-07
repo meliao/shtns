@@ -101,7 +101,6 @@ class make(build_ext):
 
 setup(name='shtns',
     cmdclass={'build_ext': make },
-        version=getver(),
         description='High performance Spherical Harmonic Transform',
         author='Nathanael Schaeffer',
         author_email='nathanael.schaeffer@univ-grenoble-alpes.fr',
