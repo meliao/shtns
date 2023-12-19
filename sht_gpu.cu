@@ -47,7 +47,7 @@
 
 #include "sht_gpu_kernels.cu"
 
-enum cushtns_flags { CUSHT_OFF=0, CUSHT_ON=1, CUSHT_OWN_XFER_STREAM=4};
+enum cushtns_flags { CUSHT_OFF=0, CUSHT_ON=1, CUSHT_OWN_XFER_STREAM=4, CUSHT_PROFILING=64};
 
 /// include a compilable version of cuda_legendre.gen.cu (zero-terminated) :
 const char *src_leg =
@@ -82,6 +82,39 @@ void shtns_free(void* p) {
 			VFREE(p);
 		}
 	}
+}
+
+// PROFILING TOOLS
+
+inline void profiling_record_time(shtns_cfg shtns, int idx, cudaStream_t strm) {
+	if (shtns->cu_flags & CUSHT_PROFILING) cudaEventRecord(shtns->gpu_timer[idx], strm);
+}
+
+extern "C"
+void cushtns_profiling(shtns_cfg shtns, int on) {
+	if (shtns->d_clm == 0) return;		// not a GPU transform!
+	const bool time_kernels = shtns->cu_flags & CUSHT_PROFILING;
+	if (on && !time_kernels) {
+		for (int i=0; i<3; i++) cudaEventCreate(&shtns->gpu_timer[i]);
+		shtns->cu_flags |= CUSHT_PROFILING;
+	}
+	if (!on && time_kernels) {
+		for (int i=2; i>=0; i--) cudaEventDestroy(shtns->gpu_timer[i]);
+		shtns->cu_flags &= ~((int)CUSHT_PROFILING);
+	}
+}
+
+extern "C"
+double cushtns_profiling_read_time(shtns_cfg shtns, double* time_1, double* time_2)
+{
+	float t1_ms = 0;	float t2_ms = 0;	// times in milliseconds
+	if (shtns->cu_flags & CUSHT_PROFILING) {
+		cudaEventSynchronize(shtns->gpu_timer[2]);		// wait for the events to happen
+		cudaEventElapsedTime(&t1_ms, shtns->gpu_timer[0], shtns->gpu_timer[1]);
+		cudaEventElapsedTime(&t2_ms, shtns->gpu_timer[1], shtns->gpu_timer[2]);
+	}
+	*time_1 = t1_ms*1e-3;	*time_2 = t2_ms*1e-3;
+	return (t1_ms+t2_ms)*1e-3;
 }
 
 static void destroy_cuda_buffer_fft(shtns_cfg shtns)
@@ -243,12 +276,12 @@ static int optimize_nwarp(int* nwarp, int n_target, int nw, float loss_max, cons
 	return nb;
 }
 
-int init_cuda_program(shtns_cfg shtns, const char* gpu_arch_target, const int sizeof_real = 8)
+int init_cuda_program(shtns_cfg shtns, const char* gpu_arch_target)
 {
 	const int nwarp_target = (shtns->nlat_2 + WARPSZE-1)/WARPSZE;		// number of 'warps' needed for nlat_2 points
 	const bool hi_llim = (shtns->mmax > 0  &&  
-		shtns->lmax > ((sizeof_real == 4) ? SHT_L_RESCALE_FLY_FLOAT : SHT_L_RESCALE_FLY));	// special rescaling needed
-	bool sh2ish_fuse = (SHT_ALLOW_SH2ISH_FUSE  &&  !hi_llim);		// never fuse hi_llim
+		shtns->lmax > ((shtns->sizeof_real_g == 4) ? SHT_L_RESCALE_FLY_FLOAT : SHT_L_RESCALE_FLY));	// special rescaling needed
+	bool sh2ish_fuse = (SHT_ALLOW_SH2ISH_FUSE  &&  shtns->lmax < 1024);		// don't fuse when polar optimization is profitable
 	int nwarp_s=4;		// 1 to 4 warps is a good choice on V100 for vector or when sh2ish is disabled. Usually, 4 is a bit better.
 	int nwarp_a=1;		// 1 WARP is by far the best choice here, at least on V100
 	const int nw_a=1;	// only one point per thread possible for analysis
@@ -267,13 +300,18 @@ int init_cuda_program(shtns_cfg shtns, const char* gpu_arch_target, const int si
 		nw_s=4;
 		lspan_a = (nf_a > 1) ? 32 : 16;		// 16 for nf_a=1
 		if (hi_llim  &&  nf_s==1  &&  shtns->howmany % 3 == 0)	nf_s=3;
-		if (shtns->howmany % 4 == 0) { nf_a=4;		if (hi_llim) { nf_s=4;	nw_s=2; } }
+		if (shtns->howmany % 4 == 0) { nf_a=4;	if (hi_llim) { nf_s=4;	nw_s=2; } }	// nw_s=2 also allows fusion with sh2ish
+		if (shtns->sizeof_real == 4) {	// maximize nf_s
+			if (nf_a==4 && shtns->sizeof_real_g==8) nf_a=2;	// actually a better value for real data with double recurrence
+			for (int k=8; k>0; k--) if (shtns->howmany % k == 0) { nf_s=k; nw_s=2; break; }
+		}
 	} else {	// assume MI100
 		if (nwarp_target > 2  &&  !hi_llim)	nf_s=1;
 	}
 	if (shtns->howmany % 4 == 0  &&  nwarp_target == 1)	nf_s=4;
 	if (hi_llim)	nwarp_s=1;
 #endif
+	//if (nf_s==4 && shtns->howmany / nf_s * nwarp_target / nw_s < 25) nf_s=2;		// ensure enough parallelism is exposed?
 	if (shtns->mmax == 0) {
 		lspan_a *= 2;
 		sh2ish_fuse = false;	// don't fuse mmax=0
@@ -308,11 +346,14 @@ int init_cuda_program(shtns_cfg shtns, const char* gpu_arch_target, const int si
 	if (sh2ish_fuse) {
 		// for scalar synthesis we should try to fuse sh2ish and leg_m_kernel for better performance.
 		// this requires a larger blocksize (nwarp_s), up to MAX_THREADS_PER_BLOCK.
-		nwarp_s0 = 8;		// start with maximum number of warps per block
+		if (nw_s == 4 && nwarp_s == 1) {  nw_s=2; nwarp_s=2; }	// MI250: nw_s=4 does not work well with fuse
+		nwarp_s0 = MAX_THREADS_PER_BLOCK/WARPSZE;		// start with maximum number of warps per block
 		if (SHT_VERBOSE > 1) printf("optimize scalar synthesis:\n");
 		nblocks_s0 = optimize_nwarp(&nwarp_s0, nwarp_target, nw_s, 1.14f);
-		if (nblocks_s0 > 2) sh2ish_fuse = false;	// disable sh2ish_fuse, very likely slower or only marginally faster
-		if (nw_s == 4) sh2ish_fuse = false;			// MI250
+		if (nwarp_s0==1  && nblocks_s0<=MAX_THREADS_PER_BLOCK/WARPSZE) { nwarp_s0=nblocks_s0;  nblocks_s0=1; }	// if one warp and several blocks, do one block and several warps!
+		if (nblocks_s0 > 1) sh2ish_fuse = false;	// disable sh2ish_fuse, very likely slower or only marginally faster
+		if (nw_s == 4 && shtns->sizeof_real==8) sh2ish_fuse = false;			// MI250
+		if (hi_llim && shtns->sizeof_real == 8) sh2ish_fuse = false;	// don't fuse hi_llim double-precision.
 	}
 
 	// also store into plan the kernel launch parameters:
@@ -345,9 +386,10 @@ int init_cuda_program(shtns_cfg shtns, const char* gpu_arch_target, const int si
 	s += sprintf(s, "#define NW_S %d\n", nw_s);
 	s += sprintf(s, "#define MPOS_SCALE %g\n", shtns->mpos_scale_analys);
 	s += sprintf(s, "#define NLAT_2 %d\n", shtns->nlat_2);
-	if (sizeof_real == 4)
-		 s += sprintf(s, "#define SHT_ACCURACY 1.0e-15f\n#define SHT_SCALE_FACTOR 7.2057594037927936e16f\ntypedef float real;\n");		// for single-precision
-	else s += sprintf(s, "#define SHT_ACCURACY 1.0e-33\n#define SHT_SCALE_FACTOR 2.0370359763344860863e90\ntypedef double real;\n");	// for double-precision
+	s += sprintf(s, "typedef %s real;\n", (shtns->sizeof_real == 4) ? "float" : "double");	// single or double-precision data
+	if (shtns->sizeof_real_g == 4)
+		 s += sprintf(s, "typedef float real_g;\n#define SHT_ACCURACY 1.0e-15f\n#define SHT_SCALE_FACTOR 7.2057594037927936e16f\n");	// for single-precision recurrence
+	else s += sprintf(s, "typedef double real_g;\n#define SHT_ACCURACY 1.0e-33\n#define SHT_SCALE_FACTOR 2.0370359763344860863e90\n");	// for double-precision recurrence
 	#if SHT_VERBOSE > 1
 		printf("%s", src);		// displays the defines for debug purposes
 	#endif
@@ -459,6 +501,7 @@ void cushtns_release_gpu(shtns_cfg shtns)
 	if (shtns->gpu_staging_mem) cudaFree(shtns->gpu_staging_mem);
 	if (shtns->cu_flags & CUSHT_OWN_XFER_STREAM) cudaStreamDestroy(shtns->xfer_stream);
 	destroy_cuda_buffer_fft(shtns);
+	cushtns_profiling(shtns, 0);		// frees resources allocated for profiling
 	// TODO: arrays possibly shared between different shtns_cfg should be deallocated ONLY if not used by other shtns_cfg.
 	if (shtns->d_clm) cudaFree(shtns->d_clm);
 	shtns->d_clm = 0;		// disable gpu.
@@ -495,6 +538,7 @@ int cushtns_init_gpu(shtns_cfg shtns)
 	double *d_clm = 0;
 	int err_count = 0;
 	int device_id = -1;
+	bool fast_fp64 = true;	// assume GPU has good fp64 performance
 
 	cudaDeviceProp prop;
 	cudaGetDevice(&device_id);
@@ -505,6 +549,7 @@ int cushtns_init_gpu(shtns_cfg shtns)
 	printf("  cuda GPU #%d \"%s\" found (warp size = %d, compute capabilities = %d.%d", device_id, prop.name, prop.warpSize, prop.major, prop.minor);
 	char gpu_arch_target[16];
 	sprintf(gpu_arch_target, "_%d", prop.major*10 + prop.minor);		// the gpu_arch we will compile for!
+	if (prop.major < 6 || prop.minor != 0) fast_fp64 = false;			// devices known with poor fp64 performance
 	#elif SHTNS_GPU == 2
 	printf("  hip GPU #%d \"%s\" found (warp size = %d", device_id, prop.gcnArchName, prop.warpSize);
 	const char* gpu_arch_target = prop.gcnArchName;
@@ -515,18 +560,21 @@ int cushtns_init_gpu(shtns_cfg shtns)
 	if (prop.major < 3) return -1;			// failure, SHTns requires compute cap. >= 3 (warp shuffle instructions)
 	if (shtns->nlat % 4) return -1;			// failure, nlat must be a multiple of 4.
 
+	const int sizeof_real_g = (shtns->lmax > SHT_L_RESCALE_FLY_FLOAT && fast_fp64) ? sizeof(double) : sizeof_real;		// decide if recurrence happens in double precision or not.
+	shtns->sizeof_real_g = sizeof_real_g;
+
 	const long nlm0 = nlm_calc(LMAX+4, MMAX, MRES);
 	// Allocate the coefficients vectors alm, ...
-	size_t sze = nlm0 + 3*nlm0/2 + 4*nlat_2  +  (CACHE_LINE_GPU/sizeof_real-1)*2;
+	size_t sze = (nlm0 + 4*nlat_2)*sizeof_real_g/sizeof_real + 3*nlm0/2 +   +  (CACHE_LINE_GPU/sizeof_real-1)*2;
 	if (shtns->x2lm != shtns->xlm)  sze += 3*nlm0/2 +  (CACHE_LINE_GPU/sizeof_real-1);		// reserve space for x2lm
 	if (shtns->mx_stdt) sze += ( 2*nlm + (CACHE_LINE_GPU/sizeof_real-1) ) * ((shtns->mx_van == shtns->mx_stdt) ? 1 : 2);
 	sze += (3*nlm0/2 +1)/2 + (CACHE_LINE_GPU/sizeof_real-1);		// float buffers, in double units
 	err = cudaMalloc(&buf, (sze + MAX_THREADS_PER_BLOCK-1)*sizeof_real);	// allow some overflow.
 	if (err != cudaSuccess) err_count ++;
 	if (err_count == 0) {
-		d_clm = (double*) buf;		align_ptr(&buf, nlm0*sizeof_real,  CACHE_LINE_GPU);
+		d_clm = (double*) buf;		align_ptr(&buf, nlm0*sizeof_real_g,  CACHE_LINE_GPU);
 		d_xlm = (double*) buf;		align_ptr(&buf, 3*nlm0/2 * sizeof_real, CACHE_LINE_GPU);
-		err_count += gpu_upload_convert(d_clm, shtns->clm, nlm0, sizeof_real);
+		err_count += gpu_upload_convert(d_clm, shtns->clm, nlm0, sizeof_real_g);
 		err_count += gpu_upload_convert(d_xlm, shtns->xlm, 3*nlm0/2, sizeof_real);
 		if (shtns->x2lm != shtns->xlm) {		// different arrays for Schmidt normalization
 			d_x2lm = (double*) buf;		align_ptr(&buf, 3*nlm0/2 * sizeof_real, CACHE_LINE_GPU);
@@ -542,12 +590,12 @@ int cushtns_init_gpu(shtns_cfg shtns)
 			}
 		}
 		// Allocate the device input vector cos(theta) and gauss weights, sin(theta) and 1/sin(theta)
-		d_ct = (double*) buf;			align_ptr(&buf, 4*nlat_2*sizeof_real, CACHE_LINE_GPU);
+		d_ct = (double*) buf;			align_ptr(&buf, 4*nlat_2*sizeof_real_g, CACHE_LINE_GPU);
 
-		err_count += gpu_upload_convert(d_ct, shtns->ct, nlat_2, sizeof_real);
-		err_count += gpu_upload_convert(((char*)d_ct) +   nlat_2*sizeof_real, shtns->wg, nlat_2, sizeof_real);
-		err_count += gpu_upload_convert(((char*)d_ct) + 2*nlat_2*sizeof_real, shtns->st, nlat_2, sizeof_real);
-		err_count += gpu_upload_convert(((char*)d_ct) + 3*nlat_2*sizeof_real, shtns->st_1, nlat_2, sizeof_real);
+		err_count += gpu_upload_convert(d_ct, shtns->ct, nlat_2, sizeof_real_g);
+		err_count += gpu_upload_convert(((char*)d_ct) +   nlat_2*sizeof_real_g, shtns->wg, nlat_2, sizeof_real_g);
+		err_count += gpu_upload_convert(((char*)d_ct) + 2*nlat_2*sizeof_real_g, shtns->st, nlat_2, sizeof_real_g);
+		err_count += gpu_upload_convert(((char*)d_ct) + 3*nlat_2*sizeof_real_g, shtns->st_1, nlat_2, sizeof_real_g);
 	}
 
 	shtns->d_xlm = d_xlm;
@@ -558,7 +606,7 @@ int cushtns_init_gpu(shtns_cfg shtns)
 	shtns->d_mx_van = d_mx_van;
 
 	err_count += init_cuda_buffer_fft(shtns, device_id, sizeof_real);
-	err_count += init_cuda_program(shtns, gpu_arch_target, sizeof_real);
+	err_count += init_cuda_program(shtns, gpu_arch_target);
 
 	if (err_count != 0) {
 		cushtns_release_gpu(shtns);
@@ -716,13 +764,16 @@ void cuda_SH_to_spat(shtns_cfg shtns, std::complex<real>* d_Qlm, real *d_Vr, con
 	
 	if (sizeof(real) != shtns->sizeof_real) { printf("ERROR: SHTns plan not prepared for fp%ld data\n", sizeof(real)*8);	exit(1); }
 
+	if (S==0) profiling_record_time(shtns, 0, shtns->comp_stream);
 	if (S==0  &&  (SHT_ALLOW_SH2ISH_FUSE==0 || shtns->nwarp[2]==0)) {
 		d_qlm = (std::complex<real>*) shtns->gpu_buf_in;
 		sh2ishioka_gpu(shtns, d_Qlm, d_qlm, llim, mmax, S);
 	} else
 		if (d_Vr == (real*) d_Qlm) { printf("ERROR: cuda_SH_to_spat must have distinct in and out fields");	exit(1); }
 	legendre(shtns, S, d_qlm, d_Vr, llim, mmax);
+	if (S==0) profiling_record_time(shtns, 1, shtns->comp_stream);
 	fourier_to_spat_gpu(shtns, d_Vr, mmax, sizeof(real));	// in-place
+	if (S==0) profiling_record_time(shtns, 2, shtns->comp_stream);
 }
 
 /// Perform SH transform on data that is already on the GPU. d_Qlm and d_Vr are pointers to GPU memory (obtained by cudaMalloc() for instance)
@@ -735,7 +786,9 @@ void cuda_spat_to_SH(shtns_cfg shtns, real *d_Vr, std::complex<real>* d_Qlm, con
 
 	if (sizeof(real) != shtns->sizeof_real) { printf("ERROR: SHTns plan not prepared for fp%ld data\n", sizeof(real)*8);	exit(1); }
 
+	if (S==0) profiling_record_time(shtns, 0, shtns->comp_stream);
 	spat_to_fourier_gpu(shtns, d_Vr, mmax, sizeof(real));
+	if (S==0) profiling_record_time(shtns, 1, shtns->comp_stream);
 	if (S==0) {
 		std::complex<real>* d_Qlm_ish = (std::complex<real>*) shtns->gpu_buf_in;
 		ilegendre(shtns, S, d_Vr, d_Qlm_ish, llim);
@@ -744,6 +797,7 @@ void cuda_spat_to_SH(shtns_cfg shtns, real *d_Vr, std::complex<real>* d_Qlm, con
 		if (d_Vr == (real*) d_Qlm) { printf("ERROR: cuda_spat_to_SH must have distinct in and out fields");	exit(1); }
 		ilegendre(shtns, S, d_Vr, d_Qlm, llim);
 	}
+	if (S==0) profiling_record_time(shtns, 2, shtns->comp_stream);
 }
 
 
@@ -897,7 +951,7 @@ void cu_spat_to_SHqst_float(shtns_cfg shtns, float *Vr, float *Vt, float *Vp, cp
  * TRANSFORMS OF HOST DATA, INCLUDING TRANSFERS TO GPU *
  *******************************************************/ 
 
-cudaError_t copy_convert_field_to_gpu(void* dst, void* src, long n, int sizeof_real)
+cudaError_t copy_convert_field_to_gpu(void* dst, void* src, long n, int sizeof_real, cudaStream_t strm)
 {
 	cudaError_t err = cudaSuccess;
 	if (sizeof_real == 4) {
@@ -905,10 +959,10 @@ cudaError_t copy_convert_field_to_gpu(void* dst, void* src, long n, int sizeof_r
 		float* tmp_f = (float*) malloc(n*sizeof(float));
 		for (int i=0; i<n; i++) tmp_f[i] = ((double*) src)[i];
 		// copy spectral data to GPU
-		err = cudaMemcpy(dst, tmp_f, n*sizeof(float), cudaMemcpyHostToDevice);
+		err = cudaMemcpyAsync(dst, tmp_f, n*sizeof(float), cudaMemcpyHostToDevice, strm);
 		free(tmp_f);
 	} else {
-		err = cudaMemcpy(dst, src, n*sizeof(double), cudaMemcpyHostToDevice);
+		err = cudaMemcpyAsync(dst, src, n*sizeof(double), cudaMemcpyHostToDevice, strm);
 	}
 	return err;
 }
@@ -934,7 +988,7 @@ void SH_to_spat_gpu(shtns_cfg shtns, cplx *Qlm, double *Vr, const long int llim)
 	if (howmany > 1  &&  2*shtns->spec_dist > shtns->nlm_stride) { printf("ERROR: distance between field too large, unsupported\n."); return; }
 
 	// copy spectral data to GPU
-	err = copy_convert_field_to_gpu(d_qlm, Qlm, 2*nlm_pad, shtns->sizeof_real);
+	err = copy_convert_field_to_gpu(d_qlm, Qlm, 2*nlm_pad, shtns->sizeof_real, shtns->comp_stream);
 	if (err != cudaSuccess) { CUDA_ERROR_CHECK;	return; }
 
 	// SHT on the GPU
@@ -980,12 +1034,12 @@ void SHsphtor_to_spat_gpu(shtns_cfg shtns, cplx *Slm, cplx *Tlm, double *Vt, dou
 	// (convert and) transfer to gpu
 	if (Slm) {
 		d_Slm = d_vtp;		
-		err = copy_convert_field_to_gpu(d_Slm, Slm, 2*nlm_pad, sizeof_real);
+		err = copy_convert_field_to_gpu(d_Slm, Slm, 2*nlm_pad, sizeof_real, shtns->comp_stream);
 		if (err != cudaSuccess) { CUDA_ERROR_CHECK;	return; }
 	}
 	if (Tlm) {
 		d_Tlm = d_vtp + nlm_stride*sizeof_real;
-		err = copy_convert_field_to_gpu(d_Tlm, Tlm, 2*nlm_pad, sizeof_real);
+		err = copy_convert_field_to_gpu(d_Tlm, Tlm, 2*nlm_pad, sizeof_real, shtns->comp_stream);
 		if (err != cudaSuccess) { CUDA_ERROR_CHECK;	return; }
 	}
 
@@ -1130,10 +1184,10 @@ void spat_to_SH_gpu(shtns_cfg shtns, double *Vr, cplx *Qlm, const long int llim)
 	if (shtns->sizeof_real == 4) {		// convert double to float
 		float* tmp_f = (float*) malloc(sizeof(float)*shtns->nspat);
 		for (int i=0; i<shtns->nspat; i++) tmp_f[i] = Vr[i];
-		err = cudaMemcpy(d_q, tmp_f, shtns->nspat * sizeof(float), cudaMemcpyHostToDevice);
+		err = cudaMemcpyAsync(d_q, tmp_f, shtns->nspat * sizeof(float), cudaMemcpyHostToDevice, shtns->comp_stream);
 		free(tmp_f);
 	} else
-	err = cudaMemcpy(d_q, Vr, shtns->nspat * sizeof(double), cudaMemcpyHostToDevice);
+	err = cudaMemcpyAsync(d_q, Vr, shtns->nspat * sizeof(double), cudaMemcpyHostToDevice, shtns->comp_stream);
 	if (err != cudaSuccess) { CUDA_ERROR_CHECK;	return; }
 
 	// SHT on the GPU
@@ -1175,8 +1229,8 @@ void spat_to_SHsphtor_gpu(shtns_cfg shtns, double *Vt, double *Vp, cplx *Slm, cp
 	
 	if (shtns->sizeof_real == 4) {	// fp32, for testing purposes
 		float* d_vtp = (float*) shtns->gpu_staging_mem;
-		copy_convert_field_to_gpu(d_vtp, Vt, nspat, sizeof(float));
-		copy_convert_field_to_gpu(d_vtp+spat_stride, Vp, nspat, sizeof(float));
+		copy_convert_field_to_gpu(d_vtp, Vt, nspat, sizeof(float), shtns->comp_stream);
+		copy_convert_field_to_gpu(d_vtp+spat_stride, Vp, nspat, sizeof(float), shtns->comp_stream);
 		cu_spat_to_SHsphtor_float(shtns, d_vtp, d_vtp + spat_stride, (cplx_f*) d_vtp, (cplx_f*)(d_vtp+nlm_stride), llim);
 		long nlm_pad = (howmany==1) ? shtns->nlm : shtns->spec_dist*howmany;
 		err = cudaMemcpy(Slm, d_vtp, 2*nlm_pad*sizeof(float), cudaMemcpyDeviceToHost);

@@ -21,6 +21,29 @@
 
 /// common sht functions and api calls
 
+inline double shtns_wtime() {
+	#ifdef _OPENMP
+	return omp_get_wtime();
+	#else
+	return 0;
+	#endif
+}
+
+double SH_to_spat_time(shtns_cfg shtns, cplx *Qlm, double *Vr) {
+	double t = shtns_wtime();
+	SH_to_spat(shtns, Qlm, Vr);
+	t = shtns_wtime() - t;
+	if (shtns->cpu_timer >= 0) shtns->cpu_timer = t;
+	return t;
+}
+double spat_to_SH_time(shtns_cfg shtns, double *Vr, cplx *Qlm) {
+	double t = shtns_wtime();
+	spat_to_SH(shtns, Vr, Qlm);
+	t = shtns_wtime() - t;
+	if (shtns->cpu_timer >= 0) shtns->cpu_timer = t;
+	return t;
+}
+
 /* regular transforms */
 
 void SH_to_spat(shtns_cfg shtns, cplx *Qlm, double *Vr) {

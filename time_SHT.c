@@ -313,6 +313,7 @@ void test_SHT()
 	long int jj,i;
 	clock_t tcpu;
 	double ts, ta, ts2, ta2;
+	double ts_leg, ts_fft, ts_wall, ta_leg, ta_fft, ta_wall;
 	double gflop = 1e-6 * (NLAT*(NLM*4 +(MMAX+1)*2 + MMAX*log2(MMAX+1) + 5*NPHI*log2(NPHI)));		// Million floating point ops
 
 	for (i=0;i<NLM*batch;i++) Slm[i] = Slm0[i];	// restore test case...
@@ -320,11 +321,12 @@ void test_SHT()
 	tcpu = clock();
 	ts2 = wtime();
 	for (jj=0; jj< SHT_ITER; jj++) {
-		SH_to_spat(shtns, Slm,Sh);
+		SH_to_spat_time(shtns, Slm,Sh);
 	}
 	ts2 = wtime() - ts2;
 	tcpu = clock() - tcpu;
 	ts = tcpu / (1000.*SHT_ITER);
+	ts_wall = shtns_profiling_read_time(shtns, &ts_leg, &ts_fft);
 
 	for (i=0;i<NLM*batch;i++) Slm[i] = 1e30 -I*1e31;	// fill destination with garbage
 
@@ -332,11 +334,13 @@ void test_SHT()
 	ta2 = wtime();
 	spat_to_SH(shtns, Sh,Slm);
 	for (jj=1; jj< SHT_ITER; jj++) {
-		spat_to_SH(shtns, Sh,Tlm);
+		spat_to_SH_time(shtns, Sh,Tlm);
 	}
 	ta2 = wtime() - ta2;
 	tcpu = clock() - tcpu;
 	ta = tcpu / (1000.*SHT_ITER*batch);
+	ta_wall = shtns_profiling_read_time(shtns, &ta_fft, &ta_leg);
+	
 	ts2 *= 1000./(SHT_ITER*batch);
 	ta2 *= 1000./(SHT_ITER*batch);
   #ifdef _OPENMP
@@ -344,7 +348,13 @@ void test_SHT()
   #else
 	printf("   SHT time (lmax=%d): \t synthesis = %f ms [%f Gflops] \t analysis = %f ms [%f Gflops] \n", LMAX, ts2, gflop/ts2, ta2, gflop/ta2);
   #endif
-	scal_error(Slm, Slm0, LMAX);
+	printf("   split time (ms) (lmax=%d): \t synthesis leg = %f, fft = %f, total = %f \t analysis ileg = %f, fft = %f, wall = %f\n", LMAX, ts_leg*1000, ts_fft*1000, ts_wall*1000, ta_leg*1000, ta_fft*1000, ta_wall*1000);
+	double err_max = scal_error(Slm, Slm0, LMAX);
+	{	// record timings and accuracy in machine readable file
+		FILE* fp = fopen("sht_timings.txt","a");
+		fprintf(fp, "%d %d %d %d %d %d\t%.4g\t%.4g\t%.4g\t%.4g\t%.4g\t%.4g\t%.3g #lmax mmax mres nlat nphi batch sy leg fft an ileg ifft err %s\n", LMAX,MMAX,MRES,NLAT,NPHI,batch, ts_wall*1000, ts_leg*1000, ts_fft*1000, ta_wall*1000, ta_leg*1000, ta_fft*1000, err_max, shtns_get_build_info());
+		fclose(fp);
+	}
 	return;
 }
 
@@ -807,6 +817,7 @@ int main(int argc, char *argv[])
 	}
 	shtns_set_grid_auto(shtns, shtmode | layout | layout_opts, polaropt, nlorder, &NLAT, &NPHI);
 
+	shtns_profiling(shtns, 1);		// enable internal profiling
 	shtns_print_cfg(shtns);
 
 /*

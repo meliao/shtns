@@ -95,6 +95,9 @@ void cushtns_set_streams(shtns_cfg shtns, shtns_gpu_stream_t compute_stream, sht
 void cushtns_release_gpu(shtns_cfg);
 ///@}
 
+void cushtns_profiling(shtns_cfg, int on);
+double cushtns_profiling_read_time(shtns_cfg, double* time_1, double* time_2);
+
 ///@}
 
 #ifdef __cplusplus
