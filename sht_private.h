@@ -198,6 +198,7 @@ struct shtns_info {		// MUST start with "int nlm;"
 	unsigned short gridDim_x[3];	// third value is for synthesis when nwarp[3] > 0
 	unsigned short gridDim_y[2];
 	unsigned char nwarp[3];			// third value is for scalar synthesis with sh2ish_fuse, or set to 0 to disable sh2ish
+	unsigned char lspan_a;			// for the record, not actually used.
 	CUmodule gpu_module;			// not sure this is needed
 	#ifdef VKFFT_BACKEND
 		VkFFTApplication vkfft_plan;

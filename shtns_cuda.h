@@ -98,6 +98,7 @@ void cushtns_release_gpu(shtns_cfg);
 void cushtns_profiling(shtns_cfg, int on);
 double cushtns_profiling_read_time(shtns_cfg, double* time_1, double* time_2);
 
+const char* cushtns_get_cfg_info(shtns_cfg);
 ///@}
 
 #ifdef __cplusplus

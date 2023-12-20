@@ -939,7 +939,7 @@ void shtns_print_cfg(shtns_cfg shtns)
 {
 	printf("Lmax=%d, Mmax*Mres=%d, Mres=%d, Nlm=%d  [%d threads, ",LMAX, MMAX*MRES, MRES, NLM, shtns->nthreads);
 	#ifdef SHTNS_GPU
-		if (shtns->d_clm) printf("gpu ready, ");
+		if (shtns->d_clm) printf("gpu fp%d/fp%d, ",shtns->sizeof_real*8, shtns->sizeof_real_g*8);
 	#endif
 	if (shtns->norm & SHT_REAL_NORM) printf("'real' norm, ");
 	if (shtns->norm & SHT_NO_CS_PHASE) printf("no Condon-Shortley phase, ");
@@ -961,6 +961,9 @@ void shtns_print_cfg(shtns_cfg shtns)
 		printf("%5s ",sht_type[it]);
 	fprint_ftable(stdout, shtns->ftable);
 	printf("\n");
+	#ifdef SHTNS_GPU
+		if (shtns->d_clm) printf("gpu cfg: %s\n", cushtns_get_cfg_info(shtns));
+	#endif
 }
 
 

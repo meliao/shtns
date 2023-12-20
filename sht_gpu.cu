@@ -21,8 +21,7 @@
 
 /* TODO
  * 1) use static polar optimization (from constant memory ?)
- * 2) find optimal threads/block for minor kernels too (e.g. sphtor2scal)
- * 3) implement transposed layout, with appropriate transpose + fft
+ * 2) implement transposed layout, with appropriate transpose + fft
  */
 
 /* Session with S. Chauveau from nvidia:
@@ -260,6 +259,20 @@ void read_line_int(FILE* fp, int* val)
 	if (x) sscanf(x, "%d", val);		// convert to int
 }
 
+extern "C"
+const char* cushtns_get_cfg_info(shtns_cfg shtns)
+{
+	static char s[160];
+	if (shtns->d_clm == 0) return 0;
+	sprintf(s,"blocks=(%d,%d,%d) ", shtns->gridDim_x[0], shtns->gridDim_x[1], shtns->gridDim_x[2]);
+	sprintf(s,"blksze=(%d,%d,%d) ", shtns->nwarp[0]*WARPSZE, shtns->nwarp[1]*WARPSZE, shtns->nwarp[2]*WARPSZE);
+	sprintf(s,"nf=(%d,%d) ", shtns->howmany/shtns->gridDim_y[0], shtns->howmany/shtns->gridDim_y[1]);
+	sprintf(s,"nw_s=%d ", (shtns->nlat_2 + shtns->gridDim_x[0]*shtns->nwarp[0]*WARPSZE-1) / (shtns->gridDim_x[0]*shtns->nwarp[0]*WARPSZE));
+	sprintf(s,"lspan_a=%d", shtns->lspan_a);
+	sprintf(s,"fp%d/fp%d", shtns->sizeof_real*8, shtns->sizeof_real_g*8);
+	return s;
+}
+
 /// use some apriori metric to choose a good blocksize. An optimal one would require to measure.
 static int optimize_nwarp(int* nwarp, int n_target, int nw, float loss_max, const bool div_by_2=false)
 {
@@ -319,7 +332,7 @@ int init_cuda_program(shtns_cfg shtns, const char* gpu_arch_target)
 	if (hi_llim  &&  nw_s > 2) nw_s=2;	// nw_s = 1 or 2 only with hi_llim
 	lspan_a /= nf_a;
 
-	#if SHT_VERBOSE > 1
+	if (getenv("SHTNS_GPU_CONF"))
 	{	// override from sht_gpu.conf file
 		FILE *fp = fopen("sht_gpu.conf", "r");
 		if (fp) {
@@ -329,7 +342,6 @@ int init_cuda_program(shtns_cfg shtns, const char* gpu_arch_target)
 			fclose(fp);
 		}
 	}
-	#endif
 
 	// for analysis, simple:
 	if (SHT_VERBOSE > 1) printf("optimize analysis:\n");
@@ -363,6 +375,7 @@ int init_cuda_program(shtns_cfg shtns, const char* gpu_arch_target)
 	shtns->gridDim_x[2] = sh2ish_fuse ? nblocks_s0 : 0;
 	shtns->gridDim_y[0] = shtns->howmany / nf_s;
 	shtns->gridDim_y[1] = shtns->howmany / nf_a;
+	shtns->lspan_a = lspan_a;
 	#if SHT_VERBOSE > 1
 		printf("launch params: nblocks=(%d, %d, %d)\n", shtns->gridDim_x[0], shtns->gridDim_x[1], shtns->gridDim_x[2]);
 	#endif
@@ -401,7 +414,7 @@ int init_cuda_program(shtns_cfg shtns, const char* gpu_arch_target)
 		s[k]=0;	// zero-terminated
 		fclose(fp);
 	} else 	snprintf(s, sze_src-10-(s-src), "%s", src_leg);		// copy embedded kernel source
-	//printf(src);
+	if (getenv("SHTNS_PRINT_SRC")) printf("%s", src);		// allows to dump the whole kernel source
 
 	nvrtcProgram prog;
 	nvrtcResult rtc_res = nvrtcCreateProgram(&prog, src, "shtns.cu", 0, NULL, NULL);
@@ -560,7 +573,11 @@ int cushtns_init_gpu(shtns_cfg shtns)
 	if (prop.major < 3) return -1;			// failure, SHTns requires compute cap. >= 3 (warp shuffle instructions)
 	if (shtns->nlat % 4) return -1;			// failure, nlat must be a multiple of 4.
 
-	const int sizeof_real_g = (shtns->lmax > SHT_L_RESCALE_FLY_FLOAT && fast_fp64) ? sizeof(double) : sizeof_real;		// decide if recurrence happens in double precision or not.
+	int sizeof_real_g = (shtns->lmax > SHT_L_RESCALE_FLY_FLOAT && fast_fp64) ? sizeof(double) : sizeof_real;		// decide if recurrence happens in double precision or not.
+	if (sizeof_real==4) {
+		const char* vv = getenv("SHTNS_GPU_REC_PREC");		// 1 for float, everything else for double
+		if (vv) 	sizeof_real_g = (atoi(vv)==1) ? 4 : 8;
+	}
 	shtns->sizeof_real_g = sizeof_real_g;
 
 	const long nlm0 = nlm_calc(LMAX+4, MMAX, MRES);
