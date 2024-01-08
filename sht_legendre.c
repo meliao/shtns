@@ -465,6 +465,16 @@ void legendre_precomp(shtns_cfg shtns, enum shtns_norm norm, int with_cs_phase, 
 			}
 		}
 
+	/* ALT RECURRENCE */
+	double* glm = (double *) malloc( (2* LMAX + 4) * sizeof(double) );
+	glm[0] = 1.0;	glm[1] = 1.0;
+	for (int l=2; l<=lmax; l++) 	glm[l] = glm[l-2] * alm[2*l-2];
+	glm[LMAX+1] = alm[0];
+	glm[LMAX+2] = alm[1];
+	for (int l=2; l<=lmax; l++)		glm[LMAX+1+l] = alm[2*l-1] * glm[l-1]/glm[l];
+	shtns->glm = glm;
+	/* END ALT RECURRENCE */
+
 	#ifdef SHTNS_ISHIOKA
 		/// PRE-COMPUTE VALUES FOR NEW RECURRENCE OF ISHIOKA (2018)
 		/// see https://doi.org/10.2151/jmsj.2018-019

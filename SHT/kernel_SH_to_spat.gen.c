@@ -102,17 +102,17 @@ S			if (BpF != NULL) memset(BpF, 0, sizeof(v2d) * NLAT_2);
 T			if (BtF != NULL) memset(BtF, 0, sizeof(v2d) * NLAT_2);
 		#endif
  		l=1;
-		alm = shtns->alm;
-Q		Ql0[0] = (double) Qlm[0];		// l=0
+		alm = shtns->glm;
+Q		Ql0[0] = alm[0] * (double) Qlm[0];		// l=0
 		do {		// for m=0, compress the complex Q,S,T to double
-Q			Ql0[l] = creal( Qlm[l] );	//	Ql[l+1] = (double) Qlm[l+1];
-S			Sl0[l-1] = creal( Slm[l] );	//	Sl[l] = (double) Slm[l+1];
-T			Tl0[l-1] = creal( Tlm[l] );	//	Tl[l] = (double) Tlm[l+1];
+Q			Ql0[l] = creal( Qlm[l] ) * alm[l];	//	Ql[l+1] = (double) Qlm[l+1];
+S			Sl0[l-1] = creal( Slm[l] ) * alm[l];	//	Sl[l] = (double) Slm[l+1];
+T			Tl0[l-1] = creal( Tlm[l] ) * alm[l];	//	Tl[l] = (double) Tlm[l+1];
 			++l;
 		} while(l<=llim);
 		k=it0;
 		do {
-			l=0;	al = alm;
+			l=0;	al = alm + LMAX+1;
 			rnd cost[NWAY], y0[NWAY], y1[NWAY];
 V			rnd sint[NWAY], dy0[NWAY], dy1[NWAY];
 Q			rnd re[NWAY], ro[NWAY];
@@ -142,8 +142,8 @@ T				pe[j] = -dy1[j] * vall(Tl0[0]);
 			al+=2;	l+=2;
 			while(l<llim) {
 				for (int j=0; j<NWAY; ++j) {
-V					dy0[j] = vall(al[1])*(cost[j]*dy1[j] + y1[j]*sint[j]) + vall(al[0])*dy0[j];
-					y0[j]  = vall(al[1])*(cost[j]*y1[j]) + vall(al[0])*y0[j];
+V					dy0[j] = vall(al[0])*(cost[j]*dy1[j] + y1[j]*sint[j]) + dy0[j];
+					y0[j]  = vall(al[0])*(cost[j]*y1[j]) + y0[j];
 				}
 				for (int j=0; j<NWAY; ++j) {
 Q					re[j] += y0[j] * vall(Ql0[l]);
@@ -151,20 +151,20 @@ S					to[j] += dy0[j] * vall(Sl0[l-1]);
 T					po[j] -= dy0[j] * vall(Tl0[l-1]);
 				}
 				for (int j=0; j<NWAY; ++j) {
-V					dy1[j] = vall(al[3])*(cost[j]*dy0[j] + y0[j]*sint[j]) + vall(al[2])*dy1[j];
-					y1[j]  = vall(al[3])*(cost[j]*y0[j]) + vall(al[2])*y1[j];
+V					dy1[j] = vall(al[1])*(cost[j]*dy0[j] + y0[j]*sint[j]) + dy1[j];
+					y1[j]  = vall(al[1])*(cost[j]*y0[j]) + y1[j];
 				}
 				for (int j=0; j<NWAY; ++j) {
 Q					ro[j] += y1[j] * vall(Ql0[l+1]);
 S					te[j] += dy1[j] * vall(Sl0[l]);
 T					pe[j] -= dy1[j] * vall(Tl0[l]);
 				}
-				al+=4;	l+=2;
+				al+=2;	l+=2;
 			}
 			if (l==llim) {
 				for (int j=0; j<NWAY; ++j) {
-V					dy0[j] = vall(al[1])*(cost[j]*dy1[j] + y1[j]*sint[j]) + vall(al[0])*dy0[j];
-					y0[j]  = vall(al[1])*cost[j]*y1[j] + vall(al[0])*y0[j];
+V					dy0[j] = vall(al[0])*(cost[j]*dy1[j] + y1[j]*sint[j]) + dy0[j];
+					y0[j]  = vall(al[0])*cost[j]*y1[j] + y0[j];
 				}
 				for (int j=0; j<NWAY; ++j) {
 Q					re[j] += y0[j] * vall(Ql0[l]);

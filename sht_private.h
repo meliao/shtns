@@ -165,6 +165,7 @@ struct shtns_info {		// MUST start with "int nlm;"
 	double *xlm;	// epsilon_lm * alpha_lm
 	double *x2lm;	// epsilon_lm * alpha_lm, scaled for analysis (different from xlm only with Schmidt semi-normalization)
 	#endif
+	double* glm;
 
 	void* ftable[SHT_NVAR][SHT_NTYP];		// pointers to transform functions.
 
