@@ -466,13 +466,17 @@ void legendre_precomp(shtns_cfg shtns, enum shtns_norm norm, int with_cs_phase, 
 		}
 
 	/* ALT RECURRENCE */
-	double* glm = (double *) malloc( (2* LMAX + 4) * sizeof(double) );
+	double* glm = (double *) malloc( (((norm==sht_schmidt) ? 3:2)* LMAX + 4) * sizeof(double) );
+	shtns->glm = glm;		shtns->glm_analys = glm;
 	glm[0] = 1.0;	glm[1] = 1.0;
 	for (int l=2; l<=lmax; l++) 	glm[l] = glm[l-2] * alm[2*l-2];
 	glm[LMAX+1] = alm[0];
 	glm[LMAX+2] = alm[1];
 	for (int l=2; l<=lmax; l++)		glm[LMAX+1+l] = alm[2*l-1] * glm[l-1]/glm[l];
-	shtns->glm = glm;
+	if (norm == sht_schmidt) {
+		for (int l=0; l<=lmax; l++) 	glm[2*LMAX+2 + l] = glm[l] * (2*l+1);		// normalize analysis for Schmidt
+		shtns->glm_analys = glm + 2*LMAX+2;
+	}
 	/* END ALT RECURRENCE */
 
 	#ifdef SHTNS_ISHIOKA

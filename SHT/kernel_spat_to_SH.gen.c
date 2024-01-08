@@ -116,7 +116,7 @@ Q			q_[l] = 0.0;
 V			v_[2*l] = 0.0;		v_[2*l+1] = 0.0;
 		}
 		do {
-			al = alm;
+			al = shtns->glm + LMAX+1;
 			rnd cost[NW], y0[NW], y1[NW];
 V			rnd sint[NW], dy0[NW], dy1[NW];
 Q			rnd rerk[NW], rork[NW];		// help the compiler to cache into registers.
@@ -137,18 +137,18 @@ V				perk[j] = vread(peori, (k+j)*2);		pork[j] = vread(peori, (k+j)*2+1);
 			al+=2;	l=1;
 			while(l<llim) {
 V				for (int j=0; j<blk_sze; ++j) {
-V					dy0[j] = vall(al[1])*(cost[j]*dy1[j] + y1[j]*sint[j]) + vall(al[0])*dy0[j];;
-V					y0[j]  = vall(al[1])*(cost[j]*y1[j]) + vall(al[0])*y0[j];
+V					dy0[j] = vall(al[0])*(cost[j]*dy1[j] + y1[j]*sint[j]) + dy0[j];;
+V					y0[j]  = vall(al[0])*(cost[j]*y1[j]) + y0[j];
 V				}
 Q				rnd q0 = vall(0.0);		rnd q1 = vall(0.0);
 V				rnd s0 = vall(0.0);		rnd s1 = vall(0.0);
 V				rnd t0 = vall(0.0);		rnd t1 = vall(0.0);
 				for (int j=0; j<blk_sze; ++j) {
-QX					y0[j]  = vall(al[1])*(cost[j]*y1[j]) + vall(al[0])*y0[j];
+QX					y0[j]  = vall(al[0])*(cost[j]*y1[j]) + y0[j];
 Q					q1 += y1[j] * rork[j];
 V					s1 += dy1[j] * terk[j];
 V					t1 += dy1[j] * perk[j];
-QX					y1[j]  = vall(al[3])*(cost[j]*y0[j]) + vall(al[2])*y1[j];
+QX					y1[j]  = vall(al[1])*(cost[j]*y0[j]) + y1[j];
 Q					q0 += y0[j] * rerk[j];
 V					s0 += dy0[j] * tork[j];
 V					t0 += dy0[j] * pork[j];
@@ -161,10 +161,10 @@ V				vstor2(v_+2*l-2, 0, vread2(v_+2*l-2, 0) + v2d_reduce(s1, t1) );
 V				vstor2(v_+2*l, 0, vread2(v_+2*l, 0) + v2d_reduce(s0, t0) );
 V				#endif
 V				for (int j=0; j<blk_sze; ++j) {
-V					dy1[j] = vall(al[3])*(cost[j]*dy0[j] + y0[j]*sint[j]) + vall(al[2])*dy1[j];
-V					y1[j]  = vall(al[3])*(cost[j]*y0[j]) + vall(al[2])*y1[j];
+V					dy1[j] = vall(al[1])*(cost[j]*dy0[j] + y0[j]*sint[j]) + dy1[j];
+V					y1[j]  = vall(al[1])*(cost[j]*y0[j]) + y1[j];
 V				}
-				al+=4;	l+=2;
+				al+=2;	l+=2;
 			}
 			if (l==llim) {
 Q				rnd q1 = vall(0.0);
@@ -179,9 +179,10 @@ V				vstor2(v_+2*l-2, 0, vread2(v_+2*l-2, 0) + v2d_reduce(s1, t1) );
 			}
 			k+=NW;
 		} while (k < nk);
+		al = shtns->glm_analys;
 		for (l=1; l<=llim; ++l) {
-Q			Qlm[l] = q_[l-1];
-V			Slm[l] = v_[2*l-2]*l_2[l];		Tlm[l] = -v_[2*l-1]*l_2[l];
+Q			Qlm[l] = q_[l-1] * al[l];
+V			Slm[l] = v_[2*l-2]*l_2[l]*al[l];		Tlm[l] = -v_[2*l-1]*l_2[l]*al[l];
 		}
 		#ifdef SHT_VAR_LTR
 			for (l=llim+1; l<= LMAX; ++l) {
