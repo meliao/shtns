@@ -88,7 +88,7 @@ V	l_2 = shtns->l_2;
 
 	if (im == 0)
 	{		// im=0 : evrything is REAL
-		alm = shtns->blm;
+		alm = shtns->alm2;
 Q	//	double r0 = 0.0;
 		// compute symmetric and antisymmetric parts. (do not weight here, it is cheaper to weight y0)
 Q	//	SYM_ASYM_M0_Q(BrF, reori, r0)
@@ -116,7 +116,7 @@ Q			q_[l] = 0.0;
 V			v_[2*l] = 0.0;		v_[2*l+1] = 0.0;
 		}
 		do {
-			al = shtns->glm + LMAX+1;
+			al = alm;
 			rnd cost[NW], y0[NW], y1[NW];
 V			rnd sint[NW], dy0[NW], dy1[NW];
 Q			rnd rerk[NW], rork[NW];		// help the compiler to cache into registers.
@@ -180,6 +180,7 @@ V				vstor2(v_+2*l-2, 0, vread2(v_+2*l-2, 0) + v2d_reduce(s1, t1) );
 			k+=NW;
 		} while (k < nk);
 		al = shtns->glm_analys;
+Q		Qlm[0] *= al[0];
 		for (l=1; l<=llim; ++l) {
 Q			Qlm[l] = q_[l-1] * al[l];
 V			Slm[l] = v_[2*l-2]*l_2[l]*al[l];		Tlm[l] = -v_[2*l-1]*l_2[l]*al[l];

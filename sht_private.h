@@ -165,8 +165,9 @@ struct shtns_info {		// MUST start with "int nlm;"
 	double *xlm;	// epsilon_lm * alpha_lm
 	double *x2lm;	// epsilon_lm * alpha_lm, scaled for analysis (different from xlm only with Schmidt semi-normalization)
 	#endif
-	double* glm;
-	double* glm_analys;
+	double* alm2;	// coefficient list for Legendre function MODIFIED recurrence (size NLM)
+	double* glm;	// coefficient list for correction of Legendre MODIFIED recurrence (size NLM)
+	double* glm_analys;		// same as glm, but for analysis (may also point to glm).
 
 	void* ftable[SHT_NVAR][SHT_NTYP];		// pointers to transform functions.
 

@@ -77,7 +77,7 @@ static int test_long_double()
 /// writes nval, and returns val such as the result is val.SHT_SCALE_FACTOR^(nval)
 static double sint_pow_n_ext(double cost, int n, int *nval)
 {
-	double s2 = (1.-cost)*(1.+cost);		// sin(t)^2 = 1 - cos(t)^2 >= 0
+	double s2 = 1. - cost*cost;		// sin(t)^2 = 1 - cos(t)^2 >= 0
 	int ns2 = 0;
 	int nv = 0;
 
@@ -167,11 +167,11 @@ done:
 /// \returns the first degree l of non-zero value.
 int legendre_sphPlm_array(shtns_cfg shtns, const int lmax, const int im, const double x, double *yl)
 {
-	double *al;
+	const double *al;
 	double ymm, ymmp1;
-	int l, m, ny, lnz;
+	int l, ny, lnz;
 
-	m = im*MRES;
+	const int m = im*MRES;
 #ifdef LEG_RANGE_CHECK
 	if ( (lmax>LMAX+1) || (lmax<m) || (im>MMAX) ) shtns_runerr("argument out of range in legendre_sphPlm");
 #endif
@@ -237,11 +237,11 @@ int legendre_sphPlm_array(shtns_cfg shtns, const int lmax, const int im, const d
 /// \returns the first degree l of non-zero value.
 int legendre_sphPlm_deriv_array(shtns_cfg shtns, const int lmax, const int im, const double x, const double sint, double *yl, double *dyl)
 {
-	double *al;
+	const double *al;
 	double st, y0, y1, dy0, dy1;
-	int l,m, ny, lnz;
+	int l, ny, lnz;
 
-	m = im*MRES;
+	const int m = im*MRES;
 #ifdef LEG_RANGE_CHECK
 	if ((lmax > LMAX+1)||(lmax < m)||(im>MMAX)) shtns_runerr("argument out of range in legendre_sphPlm_deriv_array");
 #endif
@@ -421,12 +421,20 @@ void legendre_precomp(shtns_cfg shtns, enum shtns_norm norm, int with_cs_phase, 
 		if (n_alloc > 5)	ylm = xlm + 3*nlm0/2;
 		shtns->x2lm = ylm;
 	#endif
+	// FOR ALT RECURRENCE:
+		const long nlm1 = nlm_calc(LMAX+2, MMAX, MRES);
+		double* const glm = (double *) malloc( (((norm==sht_schmidt) ? 3:2)* nlm1 + 2) * sizeof(double) );
+		double* const alm2 = glm + nlm1;
+		shtns->glm = glm;
+		shtns->alm2 = alm2;
+		shtns->glm_analys = glm + ((norm==sht_schmidt) ? 2*nlm1 : 0);
 
 /// - Precompute the factors alm and blm of the recurrence relation :
 	#pragma omp parallel for private(t1, t2) schedule(dynamic)
 	for (int im=0; im<=MMAX; ++im) {
 		const long m = im*MRES;
 		long lm = im*(2*lmax - (im-1)*MRES);
+
 		if ((norm == sht_schmidt)||(norm == sht_for_rotations)) {		/// <b> For Schmidt semi-normalized </b>
 			t2 = SQRT(2*m+1);
 			alm[lm] /= t2;		/// starting value divided by \f$ \sqrt{2m+1} \f$ 
@@ -466,16 +474,17 @@ void legendre_precomp(shtns_cfg shtns, enum shtns_norm norm, int with_cs_phase, 
 		}
 
 	/* ALT RECURRENCE */
-	double* glm = (double *) malloc( (((norm==sht_schmidt) ? 3:2)* LMAX + 4) * sizeof(double) );
-	shtns->glm = glm;		shtns->glm_analys = glm;
-	glm[0] = 1.0;	glm[1] = 1.0;
-	for (int l=2; l<=lmax; l++) 	glm[l] = glm[l-2] * alm[2*l-2];
-	glm[LMAX+1] = alm[0];
-	glm[LMAX+2] = alm[1];
-	for (int l=2; l<=lmax; l++)		glm[LMAX+1+l] = alm[2*l-1] * glm[l-1]/glm[l];
-	if (norm == sht_schmidt) {
-		for (int l=0; l<=lmax; l++) 	glm[2*LMAX+2 + l] = glm[l] * (2*l+1);		// normalize analysis for Schmidt
-		shtns->glm_analys = glm + 2*LMAX+2;
+	{	const long lm0 = (im>0) ? nlm_calc(LMAX+2, im-1, MRES) : 0;
+		const long lm = im*(2*lmax - (im-1)*MRES);
+		glm[lm0] = alm[lm];			glm[lm0+1] = alm[lm];
+		for (int l=2; l<=lmax-m; l++) 		glm[lm0+l] = glm[lm0+l-2] * alm[lm+2*l-2];
+		alm2[lm0] = 1.0;
+		alm2[lm0+1] = alm[lm+1];
+		for (int l=2; l<=lmax-m; l++)		alm2[lm0+l] = alm[lm+2*l-1] * glm[lm0+l-1]/glm[lm0+l];
+		if (norm == sht_schmidt) {
+			double* glm_a = shtns->glm_analys;
+			for (int l=m; l<=lmax; l++) 	glm_a[lm0+l-m] = glm[lm0+l-m] * (2*l+1);		// normalize analysis for Schmidt
+		}
 	}
 	/* END ALT RECURRENCE */
 

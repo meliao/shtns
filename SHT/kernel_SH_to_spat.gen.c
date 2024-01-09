@@ -111,8 +111,9 @@ T			Tl0[l-1] = creal( Tlm[l] ) * alm[l];	//	Tl[l] = (double) Tlm[l+1];
 			++l;
 		} while(l<=llim);
 		k=it0;
+		alm = shtns->alm2;
 		do {
-			l=0;	al = alm + LMAX+1;
+			l=0;	al = alm;
 			rnd cost[NWAY], y0[NWAY], y1[NWAY];
 V			rnd sint[NWAY], dy0[NWAY], dy1[NWAY];
 Q			rnd re[NWAY], ro[NWAY];
