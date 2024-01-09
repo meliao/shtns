@@ -46,9 +46,6 @@
   #define COS cos
   #define SIN sin
   #define FABS fabs
-  #define legendre_sphPlm_hp legendre_sphPlm
-  #define legendre_sphPlm_array_hp legendre_sphPlm_array
-  #define legendre_sphPlm_deriv_array_hp legendre_sphPlm_deriv_array
 #else
   int long_double_caps = 0;
   typedef long double real;
@@ -56,10 +53,6 @@
   #define COS cosl
   #define SIN sinl
   #define FABS fabsl
-
-// scale factor applied for LMAX larger than SHT_L_RESCALE. Allows accurate transforms up to l=2700 with 64 bit double precision.
-#define SHT_LEG_SCALEF 1.1018032079253110206e-280
-#define SHT_L_RESCALE 1536
 
 // returns 1 for large exponent only => useless.
 // returns 2 for extended precision only => ok to improve gauss points.
@@ -75,31 +68,6 @@ static int test_long_double()
 	if (tt > 1.0) 	p |= 2;		// bit 1 set for extended precision
 	long_double_caps = p;
 	return p;
-}
-
-/// \internal high precision version of \ref a_sint_pow_n
-static real a_sint_pow_n_hp(real val, real cost, long int n)
-{
-	real s2 = (1.-cost)*(1.+cost);		// sin(t)^2 = 1 - cos(t)^2
-	long int k = n >> 7;
-	if (sizeof(s2) > 8) k = 0;		// enough accuracy, we do not bother.
-
-#ifdef LEG_RANGE_CHECK
-	if (s2 < 0) return NAN;		// sin(t)^2 < 0 !
-#endif
-
-	if (n&1) val *= SQRT(s2);	// = sin(t)
-	do {
-		if (n&2) val *= s2;
-		n >>= 1;
-		s2 *= s2;
-	} while(n > k);
-	n >>= 1;
-	while(n > 0) {		// take care of very large power n
-		n--;
-		val *= s2;		
-	}
-	return val;		// = sint(t)^n
 }
 #endif
 
@@ -189,44 +157,6 @@ done:
 	return ymmp1;
 }
 
-#if HAVE_LONG_DOUBLE_WIDER
-static double legendre_sphPlm_hp(shtns_cfg shtns, const int l, const int im, double x)
-{
-	double *al;
-	int i,m;
-	real ymm, ymmp1;
-
-	if (long_double_caps < 3) legendre_sphPlm(shtns, l, im, x);		// not worth it.
-
-	m = im*MRES;
-#ifdef LEG_RANGE_CHECK
-	if ( (l>LMAX+1) || (l<m) || (im>MMAX) ) shtns_runerr("argument out of range in legendre_sphPlm");
-#endif
-
-	al = alm_im(shtns, im);
-	ymm = al[0];		// l=m
-	if (m>0) ymm *= SHT_LEG_SCALEF;
-	ymmp1 = ymm;
-	if (l==m) goto done;
-
-	ymmp1 = al[1] * (x*ymmp1);				// l=m+1
-	al+=2;
-	if (l == m+1) goto done;
-
-	for (i=m+2; i<l; i+=2) {
-		ymm   = al[1]*(x*ymmp1) + al[0]*ymm;
-		ymmp1 = al[3]*(x*ymm) + al[2]*ymmp1;
-		al+=4;
-	}
-	if (i==l) {
-		ymmp1 = al[1]*(x*ymmp1) + al[0]*ymm;
-	}
-done:
-	if (m>0) ymmp1 *= a_sint_pow_n_hp(1.0/SHT_LEG_SCALEF, x, m);
-	return ((double) ymmp1);
-}
-#endif
-
 
 /// \internal Compute values of legendre polynomials noramalized for spherical harmonics,
 /// for a range of l=m..lmax, at given m and x, using recurrence.
@@ -294,64 +224,6 @@ int legendre_sphPlm_array(shtns_cfg shtns, const int lmax, const int im, const d
 	return lnz;
 }
 
-#if HAVE_LONG_DOUBLE_WIDER
-/// \internal high precision version of \ref legendre_sphPlm_array
-static void legendre_sphPlm_array_hp(shtns_cfg shtns, const int lmax, const int im, const double cost, double *yl)
-{
-	double *al;
-	long int l,m;
-	int rescale = 0;		// flag for rescale.
-	real ymm, ymmp1, x;
-
-	if (long_double_caps < 3) {		// not worth it.
-		legendre_sphPlm_array(shtns, lmax, im, cost, yl);	return;
-	}
-
-	m = im*MRES;
-#ifdef LEG_RANGE_CHECK
-	if ((lmax > LMAX+1)||(lmax < m)||(im>MMAX)) shtns_runerr("argument out of range in legendre_sphPlm_array");
-#endif
-
-	x = cost;
-	al = alm_im(shtns, im);
-	yl -= m;			// shift pointer
-	ymm = al[0];	// l=m
-	if (m>0) {
-		if ((lmax <= SHT_L_RESCALE) || (sizeof(ymm) > 8)) {
-			ymm = a_sint_pow_n_hp(ymm, x, m);
-		} else {
-			rescale = 1;
-			ymm *= SHT_LEG_SCALEF;
-		}
-	}
-	yl[m] = ymm;
-	if (lmax==m) goto done;		// done.
-
-	ymmp1 = ymm * al[1] * x;		// l=m+1
-	yl[m+1] = ymmp1;
-	al+=2;
-	if (lmax==m+1) goto done;		// done.
-
-	for (l=m+2; l<lmax; l+=2) {
-		ymm   = al[1]*(x*ymmp1) + al[0]*ymm;
-		ymmp1 = al[3]*(x*ymm)   + al[2]*ymmp1;
-		yl[l] = ymm;
-		yl[l+1] = ymmp1;
-		al+=4;
-	}
-	if (l==lmax) {
-		yl[l] = al[1]*(x*ymmp1) + al[0]*ymm;
-	}
-done:
-	if (rescale != 0) {
-		ymm = a_sint_pow_n_hp(1.0/SHT_LEG_SCALEF, x, m);
-		for (l=m; l<=lmax; ++l) {		// rescale.
-			yl[l] *= ymm;
-		}
-	}
-	return;
-}
-#endif
 
 /// \internal Compute values of a legendre polynomial normalized for spherical harmonics derivatives, for a range of l=m..lmax, using recurrence.
 /// Requires a previous call to \ref legendre_precomp(). Output is not directly compatible with GSL :
@@ -435,81 +307,6 @@ int legendre_sphPlm_deriv_array(shtns_cfg shtns, const int lmax, const int im, c
 	}
 	return lnz;
 }
-
-#if HAVE_LONG_DOUBLE_WIDER
-/// \internal high precision version of \ref legendre_sphPlm_deriv_array
-static void legendre_sphPlm_deriv_array_hp(shtns_cfg shtns, const int lmax, const int im, const double cost, const double sint, double *yl, double *dyl)
-{
-	double *al;
-	long int l,m;
-	int rescale = 0;		// flag for rescale.
-	real x, st, y0, y1, dy0, dy1;
-
-	if (long_double_caps < 3) {		// not worth it.
-		legendre_sphPlm_deriv_array(shtns, lmax, im, cost, sint, yl, dyl);	return;
-	}
-
-	x = cost;
-	m = im*MRES;
-#ifdef LEG_RANGE_CHECK
-	if ((lmax > LMAX+1)||(lmax < m)||(im>MMAX)) shtns_runerr("argument out of range in legendre_sphPlm_deriv_array");
-#endif
-	al = alm_im(shtns, im);
-	yl -= m;	dyl -= m;			// shift pointers
-
-	st = sint;
-	y0 = al[0];
-	dy0 = 0.0;
-	if (m>0) {		// m > 0
-		l = m-1;
-		if ((lmax <= SHT_L_RESCALE) || (sizeof(y0) > 8)) {
-			if (l&1) {
-				y0 = a_sint_pow_n_hp(y0, x, l-1) * sint;		// avoid computation of sqrt
-			} else  y0 = a_sint_pow_n_hp(y0, x, l);
-		} else {
-			rescale = 1;
-			y0 *= SHT_LEG_SCALEF;
-		}
-		dy0 = x*m*y0;
-		st *= st;			// st = sin(theta)^2 is used in the recurrence for m>0
-	}
-	yl[m] = y0;		// l=m
-	dyl[m] = dy0;
-	if (lmax==m) goto done;		// done.
-
-	y1 = al[1] * (x * y0);
-	dy1 = al[1]*( x*dy0 - st*y0 );
-	yl[m+1] = y1;		// l=m+1
-	dyl[m+1] = dy1;
-	if (lmax==m+1) goto done;		// done.
-	al+=2;
-
-	for (l=m+2; l<lmax; l+=2) {
-		y0 = al[1]*(x*y1) + al[0]*y0;
-		dy0 = al[1]*(x*dy1 - y1*st) + al[0]*dy0;
-		yl[l] = y0;		dyl[l] = dy0;
-		y1 = al[3]*(x*y0) + al[2]*y1;
-		dy1 = al[3]*(x*dy0 - y0*st) + al[2]*dy1;
-		yl[l+1] = y1;		dyl[l+1] = dy1;
-		al+=4;
-	}
-	if (l==lmax) {
-		yl[l] = al[1]*(x*y1) + al[0]*y0;
-		dyl[l] = al[1]*(x*dy1 - y1*st) + al[0]*dy0;
-	}
-done:
-	if (rescale != 0) {
-		l = m-1;			// compute  sin(theta)^(m-1)
-		if (l&1) {
-			y0 = a_sint_pow_n_hp(1.0/SHT_LEG_SCALEF, x, l-1) * sint;		// avoid computation of sqrt
-		} else  y0 = a_sint_pow_n_hp(1.0/SHT_LEG_SCALEF, x, l);
-		for (l=m; l<=lmax; ++l) {
-			yl[l] *= y0;		dyl[l] *= y0;		// rescale
-		}
-	}
-	return;
-}
-#endif
 
 /// Same as legendre_sphPlm_deriv_array for x=0 and sint=1 (equator).
 /// Depending on the parity of l, either ylm or dylm/dtheta is zero. So we store only the non-zero values.
