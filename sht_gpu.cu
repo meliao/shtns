@@ -327,7 +327,7 @@ int init_cuda_program(shtns_cfg shtns, const char* gpu_arch_target)
 	//if (nf_s==4 && shtns->howmany / nf_s * nwarp_target / nw_s < 25) nf_s=2;		// ensure enough parallelism is exposed?
 	if (shtns->mmax == 0) {
 		lspan_a *= 2;
-		sh2ish_fuse = false;	// don't fuse mmax=0
+		//sh2ish_fuse = false;	// don't fuse mmax=0
 	}
 	if (hi_llim  &&  nw_s > 2) nw_s=2;	// nw_s = 1 or 2 only with hi_llim
 	lspan_a /= nf_a;
@@ -589,6 +589,9 @@ int cushtns_init_gpu(shtns_cfg shtns)
 	if (shtns->x2lm != shtns->xlm)  sze += 3*nlm0/2 +  (CACHE_LINE_GPU/sizeof_real-1);		// reserve space for x2lm
 	if (shtns->mx_stdt) sze += ( 2*nlm + (CACHE_LINE_GPU/sizeof_real-1) ) * ((shtns->mx_van == shtns->mx_stdt) ? 1 : 2);
 	sze += (3*nlm0/2 +1)/2 + (CACHE_LINE_GPU/sizeof_real-1);		// float buffers, in double units
+	const long nlm1 = nlm_calc(LMAX+2, MMAX, MRES);
+	sze += nlm1*sizeof_real_g/sizeof_real + (CACHE_LINE_GPU/sizeof_real-1);
+	sze += nlm1 + (CACHE_LINE_GPU/sizeof_real-1);
 	err = cudaMalloc(&buf, (sze + MAX_THREADS_PER_BLOCK-1)*sizeof_real);	// allow some overflow.
 	if (err != cudaSuccess) err_count ++;
 	if (err_count == 0) {
@@ -600,6 +603,14 @@ int cushtns_init_gpu(shtns_cfg shtns)
 			d_x2lm = (double*) buf;		align_ptr(&buf, 3*nlm0/2 * sizeof_real, CACHE_LINE_GPU);
 			err_count += gpu_upload_convert(d_x2lm, shtns->x2lm, 3*nlm0/2, sizeof_real);
 		} else d_x2lm = d_xlm;
+		
+		// for reduced recurrence, usful for single precision, for which ishioka's recurrence loses too much accuracy.
+		double* d_glm = (double*) buf;		align_ptr(&buf, nlm1 * sizeof_real, CACHE_LINE_GPU);
+		double* d_alm2 = (double*) buf;		align_ptr(&buf, nlm1 * sizeof_real_g, CACHE_LINE_GPU);
+		err_count += gpu_upload_convert(d_glm, shtns->glm, nlm1, sizeof_real);
+		err_count += gpu_upload_convert(d_alm2, shtns->alm2, nlm1, sizeof_real_g);
+		shtns->d_glm = d_glm;
+		shtns->d_alm2 = d_alm2;
 
 		if (shtns->mx_stdt) {
 			d_mx_van = d_mx_stdt = (double*) buf;	align_ptr(&buf, 2*nlm*sizeof_real, CACHE_LINE_GPU);	// Allocate the device matrix for d(sin(t))/dt
@@ -743,7 +754,8 @@ static void legendre(shtns_cfg shtns, const int S, const void *ql, void *q, cons
 	int par_idx = (sh2ish_fuse) ? 2 : 0;
 
 	int llim_ = llim;
-	void* params[11] = {&shtns->d_clm, &shtns->d_ct, &ql, &q, &llim_, &nlat_2, &shtns->nphi, &shtns->nlat_padded, &nlm_stride, &shtns->nlat, &shtns->d_xlm};
+	//void* params[11] = {&shtns->d_clm, &shtns->d_ct, &ql, &q, &llim_, &nlat_2, &shtns->nphi, &shtns->nlat_padded, &nlm_stride, &shtns->nlat, &shtns->d_xlm};
+	void* params[11] = {&shtns->d_alm2, &shtns->d_ct, &ql, &q, &llim_, &nlat_2, &shtns->nphi, &shtns->nlat_padded, &nlm_stride, &shtns->nlat, &shtns->d_glm};
 	cuLaunchKernel(shtns->gpu_kernels[S], 
 			shtns->gridDim_x[par_idx], shtns->gridDim_y[0], mmax+1,		// grid dim
 			shtns->nwarp[par_idx]*WARPSZE, 1, 1,					// block dim

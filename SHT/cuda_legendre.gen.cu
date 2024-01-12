@@ -108,6 +108,7 @@ __device__ __forceinline__ bool polar_skip_sint2(float sint2, int llim, int m) {
 	return false;
 }
 
+//#define SHTNS_ISHIOKA
 
 /// requirements : blockSize must be 1 in the y- and z-direction and BLKSZE_S in the x-direction.
 /// llim MUST BE <= 1800, unless HI_LLIM=1
@@ -146,6 +147,7 @@ void leg_m_kernel(
 	real_g y0[NW];
 	real_g y1[NW];
 	real_g ct2[NW];
+#ifdef SHTNS_ISHIOKA
 	#ifndef COST_CACHE
 	real cost_[NW];
 	#define COST(i,j) cost_[i]
@@ -153,6 +155,7 @@ void leg_m_kernel(
 	__shared__ real cost_[NW][BLOCKSIZE];
 	#define COST(i,j) cost_[i][j]
 	#endif
+#endif
 	#pragma unroll
 	for (int i=0; i<NW; i++) {
 		const int it = BLOCKSIZE*NW * blockIdx.x + ((HI_LLIM) ? NW*j+i : j+i*BLOCKSIZE);
@@ -164,6 +167,7 @@ void leg_m_kernel(
 			ak[j] = al[j+2];
 			#if BLKSZE_SH2ISH > 0
 			if (S==0) {
+			  #ifdef SHTNS_ISHIOKA
 				int xofs = 3*(j>>1);	// load xlm coeffs once for all fields
 				real x0 = xlm[xofs+2*(j&1)];
 				real x1 = xlm[xofs+1];		// only used for j&2==0
@@ -175,14 +179,19 @@ void leg_m_kernel(
 					if (use_x1)	ql_ += x1 * ql[qofs + 4];
 					qk[f][j] = ql_;
 				}
+			  #else
+				#pragma unroll
+				for (int f=0; f<NFIELDS; f++)	qk[f][j] = ql[2*j + (b*NFIELDS+f)*ql_dist] * xlm[j];
+			  #endif
 			} else
 			#endif
 				#pragma unroll
 				for (int f=0; f<NFIELDS; f++)	qk[f][j] = ql[j + (b*NFIELDS+f)*ql_dist];		// keep only real part
 		}
-
+	#ifdef SHTNS_ISHIOKA
 		#pragma unroll
 		for (int i=0; i<NW; i++) {	COST(i,j) = ct2[i];		ct2[i] *= ct2[i];	}	// cos(theta)^2
+	#endif
 
 		real re[NFIELDS][NW], ro[NFIELDS][NW];
 		#pragma unroll
@@ -194,15 +203,23 @@ void leg_m_kernel(
 			}
 		}
 		int l = 0;
+	#ifdef SHTNS_ISHIOKA
 		#pragma unroll
 		for (int i=0; i<NW; i++) y0[i] = (S==1 && !ROBERT_FORM) ? rsqrt(1 - ct2[i]) : 1;    // for vectors, divide by sin(theta) -- except in Robert form
 		#pragma unroll
 		for (int i=0; i<NW; i++) y1[i] = (al[1]*ct2[i] + al[0])*y0[i];
+	#else
+		#pragma unroll
+		for (int i=0; i<NW; i++) y0[i] = (S==1 && !ROBERT_FORM) ? al[0]*rsqrt(1 - ct2[i]*ct2[i]) : al[0];    // for vectors, divide by sin(theta) -- except in Robert form
+		#pragma unroll
+		for (int i=0; i<NW; i++) y1[i] = (al[1]*ct2[i])*y0[i];
+	#endif
 
 		al+=2;
 		if (BLOCKSIZE > WARPSZE) { __syncthreads(); } else { _syncwarp; }
 
 		while (l<=llim - LSPAN) {	// compute even and odd parts
+		  #ifdef SHTNS_ISHIOKA
 			for (int k = 0; k<LSPAN; k+=4) {
 				#pragma unroll
 				for (int i=0; i<NW; i++) {
@@ -229,10 +246,31 @@ void leg_m_kernel(
 			}
 			al += LSPAN;
 			l  += LSPAN;
+		  #else
+			for (int k = 0; k<LSPAN; k+=2) {
+				#pragma unroll
+				for (int i=0; i<NW; i++) {
+					real y0g = y0[i];
+					real y1g = y1[i];
+					#pragma unroll
+					for (int f=0; f<NFIELDS; f++) {
+						re[f][i] += y0g * qk[f][k];		// real
+						ro[f][i] += y1g * qk[f][k+1];	// real
+					}
+				}
+				#pragma unroll
+				for (int i=0; i<NW; i++) y0[i] += (ak[k]*ct2[i]) * y1[i];
+				#pragma unroll
+				for (int i=0; i<NW; i++) y1[i] += (ak[k+1]*ct2[i]) * y0[i];
+			}
+			al += LSPAN;
+			l  += LSPAN;
+		  #endif
 			if (BLOCKSIZE > WARPSZE) { __syncthreads(); } else { _syncwarp; }
 			if ((l+j <= llim) && (BLOCKSIZE==LSPAN || j<LSPAN)) {
 				#if BLKSZE_SH2ISH > 0
 				if (S==0) {
+				  #ifdef SHTNS_ISHIOKA
 					int xofs = 3*((l+j)>>1);	// load xlm coeffs once for all fields
 					real x0 = xlm[xofs+2*((l+j)&1)];
 					real x1 = xlm[xofs+1];		// only used for j&2==0
@@ -244,6 +282,10 @@ void leg_m_kernel(
 						if (use_x1)	ql_ += x1 * ql[qofs + 4];
 						qk[f][j] = ql_;
 					}
+				  #else
+					#pragma unroll
+					for (int f=0; f<NFIELDS; f++)	qk[f][j] = ql[2*(j+l) + (b*NFIELDS+f)*ql_dist] * xlm[l+j];
+				  #endif
 				} else
 				#endif
 					#pragma unroll
@@ -255,6 +297,7 @@ void leg_m_kernel(
 		}
 		int k=0;
 		while (l<llim) {	// compute even and odd parts
+		  #ifdef SHTNS_ISHIOKA
 			#pragma unroll
 			for (int i=0; i<NW; i++) {
 				real y0g = y0[i];
@@ -270,6 +313,22 @@ void leg_m_kernel(
 				y0[i] = y1[i];
 				y1[i] = tmp;
 			}
+		  #else
+			#pragma unroll
+			for (int i=0; i<NW; i++) {
+				real y0g = y0[i];
+				real y1g = y1[i];
+				#pragma unroll
+				for (int f=0; f<NFIELDS; f++) {
+					re[f][i] += y0g * qk[f][k];	// real
+					ro[f][i] += y1g * qk[f][k+1];	// real
+				}
+			}
+			#pragma unroll
+			for (int i=0; i<NW; i++) y0[i] += (ak[k]*ct2[i]) * y1[i];
+			#pragma unroll
+			for (int i=0; i<NW; i++) y1[i] += (ak[k+1]*ct2[i]) * y0[i];
+		  #endif
 			l+=2;	k+=2;
 		}
 		if (l==llim) {
@@ -290,8 +349,13 @@ void leg_m_kernel(
 				// store mangled for complex fft
 				#pragma unroll
 				for (int f=0; f<NFIELDS; f++) {
+				  #ifdef SHTNS_ISHIOKA
 					q[it*k_inc              + (b*NFIELDS+f)*q_dist] = re[f][i]+ro[f][i]*COST(i,j);
 					q[(nlat_2*2-1-it)*k_inc + (b*NFIELDS+f)*q_dist] = re[f][i]-ro[f][i]*COST(i,j);
+				  #else
+					q[it*k_inc              + (b*NFIELDS+f)*q_dist] = re[f][i]+ro[f][i];
+					q[(nlat_2*2-1-it)*k_inc + (b*NFIELDS+f)*q_dist] = re[f][i]-ro[f][i];
+				  #endif
 				}
 			}
 		}
@@ -302,9 +366,17 @@ void leg_m_kernel(
 		const int m = im*MRES;
 		int l = (im*(2*(LMAX+1)-MRES-m))>>1;
 		#if BLKSZE_SH2ISH > 0
+			#ifdef SHTNS_ISHIOKA
 			if (S==0)	xlm += 3*im*(2*(LMAX+4)+MRES-m)/4;
+			#else
+			if (S==0)	xlm += im*(LMAX+3) - (m*(im-1))/2;
+			#endif
 		#endif
+		#ifdef SHTNS_ISHIOKA
 		al += l+m;
+		#else
+		al += im*(LMAX+3) - (m*(im-1))/2;
+		#endif
 		ql += 2*(l + S*im);	// allow vector transforms where llim = lmax+1
 
 		if ((LSPAN==BLOCKSIZE || j<LSPAN) && (m+j<=llim)) 	ak[j] = al[j+2];
@@ -313,10 +385,14 @@ void leg_m_kernel(
 				real x0, x1;
 				bool use_x1;
 				if (S==0) {
+				  #ifdef SHTNS_ISHIOKA
 					int xofs = 3*(j>>2);	// load xlm coeffs once for all fields
 					x0 = xlm[xofs+(j&2)];
 					x1 = xlm[xofs+1];		// only used for j&2==0
 					use_x1 = (((j&2)==0) & (j+2 <2*(llim-m)));	// l-m even
+				  #else
+					x0 = xlm[j>>1];
+				  #endif
 				}
 				#endif
 				#pragma unroll
@@ -325,7 +401,9 @@ void leg_m_kernel(
 					real ql_ = ql[qofs];
 					#if BLKSZE_SH2ISH > 0
 					if (S==0) {		ql_ *= x0;
+					  #ifdef SHTNS_ISHIOKA
 						if (use_x1)	ql_ += x1 * ql[qofs + 4];
+					  #endif
 					}
 					#endif
 					qk[f][j] = ql_;
@@ -336,10 +414,14 @@ void leg_m_kernel(
 				real x0, x1;
 				bool use_x1;
 				if (S==0) {
+				  #ifdef SHTNS_ISHIOKA
 					int xofs = 3*(j>>2) + 3*BLOCKSIZE/4;	// load xlm coeffs once for all fields
 					x0 = xlm[xofs+(j&2)];
 					x1 = xlm[xofs+1];		// only used for j&2==0
 					use_x1 = (((j&2)==0) & (j+BLOCKSIZE+2 <2*(llim-m)));	// l-m even
+				  #else
+					x0 = xlm[(j>>1) + BLOCKSIZE/2];
+				  #endif
 				}
 				#endif
 				#pragma unroll
@@ -348,17 +430,24 @@ void leg_m_kernel(
 					real ql_ = ql[qofs];
 					#if BLKSZE_SH2ISH > 0
 					if (S==0) {		ql_ *= x0;
+					  #ifdef SHTNS_ISHIOKA
 						if (use_x1)	ql_ += x1 * ql[qofs + 4];
+					  #endif
 					}
 					#endif
 					qk[f][j+BLOCKSIZE] = ql_;
 				}
 			}
 
+	#ifdef SHTNS_ISHIOKA
 		#pragma unroll
 		for (int i=0; i<NW; i++) {	COST(i,j) = ct2[i];		ct2[i] *= ct2[i];	}	// cos(theta)^2
 		#pragma unroll
 		for (int i=0; i<NW; i++) 	y1[i] = 1 - ct2[i];		// y1 = sin(theta)^2
+	#else
+		#pragma unroll
+		for (int i=0; i<NW; i++) 	y1[i] = 1 - ct2[i]*ct2[i];		// y1 = sin(theta)^2
+	#endif
 		#pragma unroll
 		for (int i=0; i<NW; i++) 	y0[i] = 1;
 
@@ -429,11 +518,17 @@ void leg_m_kernel(
 			} while(l >>= 1);
 		}
 
+	#ifdef SHTNS_ISHIOKA
 		#pragma unroll
 		for (int i=0; i<NW; i++) y1[i] = (al[1]*ct2[i] + al[0])*y0[i];
+	#else
+		#pragma unroll
+		for (int i=0; i<NW; i++) y1[i] = (al[1]*ct2[i])*y0[i];
+	#endif
 
 		l=m;		al+=2;
 		while (l<=llim - LSPAN) {	// compute even and odd parts
+		  #ifdef SHTNS_ISHIOKA
 			for (int k = 0; k<LSPAN; k+=4) {
 				real_g tmp[NW];
 				#pragma unroll
@@ -482,6 +577,42 @@ void leg_m_kernel(
 				#pragma unroll
 				for (int i=0; i<NW; i++)	y1[i] += tmp[i] * y0[i];
 			}
+		  #else
+			for (int k = 0; k<LSPAN; k+=2) {
+				if ((!HI_LLIM) || (ny==0)) {
+					#pragma unroll
+					for (int i=0; i<NW; i++) {
+						real y0g = y0[i];
+						#pragma unroll
+						for (int f=0; f<NFIELDS; f++) {
+							rer[f][i] += y0g * qk[f][2*k];	// real
+							rei[f][i] += y0g * qk[f][2*k+1];	// imag
+						}
+						y0g = y1[i];
+						#pragma unroll
+						for (int f=0; f<NFIELDS; f++) {
+							ror[f][i] += y0g * qk[f][2*k+2];	// real
+							roi[f][i] += y0g * qk[f][2*k+3];	// imag
+						}
+					}
+				}
+				#if HI_LLIM==1
+				else if (fabs(y0[NW-1]) > SHT_ACCURACY*SHT_SCALE_FACTOR + 1)
+				{	// rescale when value is significant
+					++ny;
+					#pragma unroll
+					for (int i=0; i<NW; i++) {
+						y0[i] *= 1/SHT_SCALE_FACTOR;
+						y1[i] *= 1/SHT_SCALE_FACTOR;
+					}
+				}
+				#endif
+				#pragma unroll
+				for (int i=0; i<NW; i++) y0[i] += (ak[k]*ct2[i]) * y1[i];
+				#pragma unroll
+				for (int i=0; i<NW; i++) y1[i] += (ak[k+1]*ct2[i]) * y0[i];
+			}
+		  #endif
 			al += LSPAN;
 			l  += LSPAN;
 			if (BLOCKSIZE > WARPSZE) { __syncthreads(); } else { _syncwarp; }
@@ -490,11 +621,15 @@ void leg_m_kernel(
 				real x0, x1;
 				bool use_x1;
 				if (S==0) {
+				  #ifdef SHTNS_ISHIOKA
 					int ll = 2*(l-m)+j;
 					int xofs = 3*(ll>>2);	// load xlm coeffs once for all fields
 					x0 = xlm[xofs+(ll&2)];
 					x1 = xlm[xofs+1];		// only used for j&2==0
 					use_x1 = (((ll&2)==0) & (ll+2 <2*(llim-m)));	// l-m even
+				  #else
+					x0 = xlm[(l-m)+(j>>1)];
+				  #endif
 				}
 				#endif
 				#pragma unroll
@@ -503,7 +638,9 @@ void leg_m_kernel(
 					real ql_ = ql[qofs];
 					#if BLKSZE_SH2ISH > 0
 					if (S==0) {		ql_ *= x0;
+					  #ifdef SHTNS_ISHIOKA
 						if (use_x1)	ql_ += x1 * ql[qofs + 4];
+					  #endif
 					}
 					#endif
 					qk[f][j] = ql_;
@@ -514,11 +651,15 @@ void leg_m_kernel(
 				real x0, x1;
 				bool use_x1;
 				if (S==0) {
+				  #ifdef SHTNS_ISHIOKA
 					int ll = 2*(l-m)+j+BLOCKSIZE;
 					int xofs = 3*(ll>>2);	// load xlm coeffs once for all fields
 					x0 = xlm[xofs+(ll&2)];
 					x1 = xlm[xofs+1];		// only used for j&2==0
 					use_x1 = (((ll&2)==0) & (ll+2 <2*(llim-m)));	// l-m even
+				  #else
+					x0 = xlm[(l-m)+(j>>1)+BLOCKSIZE/2];
+				  #endif
 				}
 				#endif
 				#pragma unroll
@@ -527,7 +668,9 @@ void leg_m_kernel(
 					real ql_ = ql[qofs];
 					#if BLKSZE_SH2ISH > 0
 					if (S==0) {		ql_ *= x0;
+					  #ifdef SHTNS_ISHIOKA
 						if (use_x1)	ql_ += x1 * ql[qofs + 4];
+					  #endif
 					}
 					#endif
 					qk[f][BLOCKSIZE+j] = ql_;
@@ -538,12 +681,15 @@ void leg_m_kernel(
 		}
 		int k=0;
 		while (l<llim) {	// compute even and odd parts
+		  #ifdef SHTNS_ISHIOKA
 			real_g tmp[NW];
 			#pragma unroll
 			for (int i=0; i<NW; i++)	tmp[i] = ak[k+1]*ct2[i] + ak[k];
+		  #endif
 			if ((!HI_LLIM) || (ny==0)) {
 				#pragma unroll
 				for (int i=0; i<NW; i++) {
+				  #ifdef SHTNS_ISHIOKA
 					real y0g = y0[i];
 					#pragma unroll
 					for (int f=0; f<NFIELDS; f++) {
@@ -552,6 +698,20 @@ void leg_m_kernel(
 						ror[f][i] += y0g * qk[f][2*k+2];	// real
 						roi[f][i] += y0g * qk[f][2*k+3];	// imag
 					}
+				  #else
+					real y0g = y0[i];
+					#pragma unroll
+					for (int f=0; f<NFIELDS; f++) {
+						rer[f][i] += y0g * qk[f][2*k];	// real
+						rei[f][i] += y0g * qk[f][2*k+1];	// imag
+					}
+					y0g = y1[i];
+					#pragma unroll
+					for (int f=0; f<NFIELDS; f++) {
+						ror[f][i] += y0g * qk[f][2*k+2];	// real
+						roi[f][i] += y0g * qk[f][2*k+3];	// imag
+					}
+				  #endif
 				}
 			}
 			#if HI_LLIM==1
@@ -565,6 +725,7 @@ void leg_m_kernel(
 				}
 			}
 			#endif
+		  #ifdef SHTNS_ISHIOKA
 			#pragma unroll
 			for (int i=0; i<NW; i++) tmp[i] = tmp[i] * y1[i] + y0[i];
 			#pragma unroll
@@ -572,6 +733,13 @@ void leg_m_kernel(
 			l+=2;	k+=2;
 			#pragma unroll
 			for (int i=0; i<NW; i++) y1[i] = tmp[i];
+		  #else
+			#pragma unroll
+			for (int i=0; i<NW; i++) y0[i] += (ak[k]*ct2[i]) * y1[i];
+			#pragma unroll
+			for (int i=0; i<NW; i++) y1[i] += (ak[k+1]*ct2[i]) * y0[i];
+			l+=2;	k+=2;
+		  #endif
 		}
 		if (l==llim) {
 			if ((!HI_LLIM) || (ny==0)) {
@@ -591,10 +759,17 @@ void leg_m_kernel(
 		for (int f=0; f<NFIELDS; f++) {
 			#pragma unroll
 			for (int i=0; i<NW; i++) {
-				real t    = rer[f][i]+ror[f][i]*COST(i,j);	// recycle y0 as temporary value
+			  #ifdef SHTNS_ISHIOKA
+				real t    = rer[f][i]+ror[f][i]*COST(i,j);
 				rer[f][i] = rer[f][i]-ror[f][i]*COST(i,j);
 				ror[f][i] = rei[f][i]-roi[f][i]*COST(i,j);
 				rei[f][i] = rei[f][i]+roi[f][i]*COST(i,j);
+			  #else
+				real t    = rer[f][i]+ror[f][i];
+				rer[f][i] = rer[f][i]-ror[f][i];
+				ror[f][i] = rei[f][i]-roi[f][i];
+				rei[f][i] = rei[f][i]+roi[f][i];
+			  #endif
 				roi[f][i] = t;
 			}
 		}
@@ -686,7 +861,9 @@ void ileg_m_kernel(const real_g* __restrict__ al, const real_g* __restrict__ ct,
 		if (BLOCKSIZE > WARPSZE) {	__syncthreads(); } else { _syncwarp_fence; }
 
 		y0 = (it < nlat_2) ? ct[it + nlat_2] : 0;		// weights are stored just after ct.
+	#if 1
 		cost *= cost;	// ct2
+	#endif
 		
 		// transpose reo to my_reo
 		#pragma unroll
@@ -694,8 +871,13 @@ void ileg_m_kernel(const real_g* __restrict__ al, const real_g* __restrict__ ct,
 			int it = j % (BLOCKSIZE/NW) + k*(BLOCKSIZE/NW);
 			my_reo[k] = yl[(2*f0  + (ll&1))*l_inc + it];
 		}
+	  #if 1
 		if (S==1) y0 *= (ROBERT_FORM) ? 1/(1-cost) : rsqrt(1 - cost);
 		y1 = (ak[1]*cost + ak[0]) * y0;
+	  #else
+		if (S==1) y0 *= (ROBERT_FORM) ? 1/(1-cost*cost) : rsqrt(1 - cost*cost);
+		y1 = (ak[1]*cost) * y0;
+	  #endif
 		if (WARPSZE < LSPAN+2  &&  j<LSPAN+2-WARPSZE)	ak[WARPSZE+j] = al[WARPSZE+j];		// sometimes a bit more than a warp is needed
 
 		al+=2;
@@ -704,10 +886,17 @@ void ileg_m_kernel(const real_g* __restrict__ al, const real_g* __restrict__ ct,
 			if (BLOCKSIZE > WARPSZE) {	__syncthreads(); } else { _syncwarp_fence; }
 				#pragma unroll
 				for (int k=0; k<LSPAN/2; k+=2) {		// compute a block of the matrix, write it in shared mem.
+				   #if 1
 					real_g c0 = ak[2*k+3]*cost + ak[2*k+2];
 					real_g c1 = ak[2*k+5]*cost + ak[2*k+4];
 					yl[k*l_inc +j]     = y0;		// l and l+1
 					yl[(k+1)*l_inc +j] = y1;		// l+2 and l+3
+				  #else
+					real_g c0 = ak[k+2]*cost;
+					real_g c1 = ak[k+3]*cost;
+					yl[k*l_inc +j]     = y0;		// l
+					yl[(k+1)*l_inc +j] = y1;		// l+1
+				  #endif
 					y0 += c0 * y1;
 					y1 += c1 * y0;
 				}

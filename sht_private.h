@@ -191,6 +191,8 @@ struct shtns_info {		// MUST start with "int nlm;"
 	double* d_xlm;
 	double* d_x2lm;
 	double* d_ct;
+	double* d_alm2;
+	double* d_glm;
 	double* d_mx_stdt;
 	double* d_mx_van;
 	double* gpu_staging_mem;	// for auto-offload only
