@@ -414,7 +414,10 @@ int init_cuda_program(shtns_cfg shtns, const char* gpu_arch_target)
 		s[k]=0;	// zero-terminated
 		fclose(fp);
 	} else 	snprintf(s, sze_src-10-(s-src), "%s", src_leg);		// copy embedded kernel source
-	if (getenv("SHTNS_PRINT_SRC")) printf("%s", src);		// allows to dump the whole kernel source
+	if (getenv("SHTNS_PRINT_SRC")) {		// allows to dump the whole kernel source to a file
+		FILE *fp = fopen("_shtns_gen_tmp_.cu", "w");
+		if (fp) {	 fprintf(fp, "%s", src);	fclose(fp);		}
+	}
 
 	nvrtcProgram prog;
 	nvrtcResult rtc_res = nvrtcCreateProgram(&prog, src, "shtns.cu", 0, NULL, NULL);
