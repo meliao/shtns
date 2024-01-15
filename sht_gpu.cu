@@ -779,7 +779,8 @@ static void ilegendre(shtns_cfg shtns, const int S, const void *q, void* ql, con
 	if (llim < mmax*mres) mmax = llim / mres;	// truncate mmax too !
 
 	int llim_ = llim;
-	void* params[10] = {&shtns->d_clm, &shtns->d_ct, &q, &ql, &llim_, &nlat_2, &shtns->nphi, &shtns->nlat_padded, &shtns->nlat, &shtns->nlm_stride};
+	//void* params[10] = {&shtns->d_clm, &shtns->d_ct, &q, &ql, &llim_, &nlat_2, &shtns->nphi, &shtns->nlat_padded, &shtns->nlat, &shtns->nlm_stride};
+	void* params[10] = {&shtns->d_alm2, &shtns->d_ct, &q, &ql, &llim_, &nlat_2, &shtns->nphi, &shtns->nlat_padded, &shtns->nlat, &shtns->nlm_stride};
 	cuLaunchKernel(shtns->gpu_kernels[2+S], 		// analysis kernels
 			shtns->gridDim_x[1], shtns->gridDim_y[1], mmax+1,		// grid dim
 			blksze, 1, 1,					// block dim

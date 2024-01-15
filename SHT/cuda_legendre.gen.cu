@@ -836,7 +836,11 @@ void ileg_m_kernel(const real_g* __restrict__ al, const real_g* __restrict__ ct,
 	const int padding = 2;		// padding = 0 is very bad for performance (shared-memory bank conflicts).
 	const int l_inc = BLOCKSIZE+padding;
 	__shared__ real_g ak[LSPAN+2];	// cache
+  #ifdef SHTNS_ISHIOKA
 	const int NROWS = M0_ONLY ? ( (LSPAN>4*NFIELDS) ? LSPAN/2 : 2*NFIELDS ) : ( (LSPAN>8*NFIELDS) ? LSPAN/2 : 4*NFIELDS );
+  #else
+	const int NROWS = M0_ONLY ? ( (LSPAN>2*NFIELDS) ? LSPAN : 2*NFIELDS ) : ( (LSPAN>4*NFIELDS) ? LSPAN : 4*NFIELDS );
+  #endif
 	__shared__ real yl[NROWS*l_inc - padding];		// yl is also used for even/odd computation.
 
 	real_g cost = (it < nlat_2) ? ct[it] : 0;
@@ -856,22 +860,26 @@ void ileg_m_kernel(const real_g* __restrict__ al, const real_g* __restrict__ ct,
 			real x0 = (it < nlat_2) ? q[it              + f*q_dist] : 0;	// north
 			real x1 = (it < nlat_2) ? q[nlat_2*2-1 - it + f*q_dist] : 0;	// south
 			yl[f*2*l_inc +j]     = x0+x1;			// even
+		  #ifdef SHTNS_ISHIOKA
 			yl[(f*2+1)*l_inc +j] = (x0-x1)*((real)cost);	// odd
+		  #else
+			yl[(f*2+1)*l_inc +j] = x0-x1;	// odd
+		  #endif
 		}
 		if (BLOCKSIZE > WARPSZE) {	__syncthreads(); } else { _syncwarp_fence; }
 
 		y0 = (it < nlat_2) ? ct[it + nlat_2] : 0;		// weights are stored just after ct.
-	#if 1
+	#ifdef SHTNS_ISHIOKA
 		cost *= cost;	// ct2
 	#endif
-		
+
 		// transpose reo to my_reo
 		#pragma unroll
 		for (int k=0; k<NW; k++) {
 			int it = j % (BLOCKSIZE/NW) + k*(BLOCKSIZE/NW);
 			my_reo[k] = yl[(2*f0  + (ll&1))*l_inc + it];
 		}
-	  #if 1
+	  #ifdef SHTNS_ISHIOKA
 		if (S==1) y0 *= (ROBERT_FORM) ? 1/(1-cost) : rsqrt(1 - cost);
 		y1 = (ak[1]*cost + ak[0]) * y0;
 	  #else
@@ -884,24 +892,31 @@ void ileg_m_kernel(const real_g* __restrict__ al, const real_g* __restrict__ ct,
 		int l = 0;
 		do {
 			if (BLOCKSIZE > WARPSZE) {	__syncthreads(); } else { _syncwarp_fence; }
+			#ifdef SHTNS_ISHIOKA
 				#pragma unroll
 				for (int k=0; k<LSPAN/2; k+=2) {		// compute a block of the matrix, write it in shared mem.
-				   #if 1
 					real_g c0 = ak[2*k+3]*cost + ak[2*k+2];
 					real_g c1 = ak[2*k+5]*cost + ak[2*k+4];
 					yl[k*l_inc +j]     = y0;		// l and l+1
 					yl[(k+1)*l_inc +j] = y1;		// l+2 and l+3
-				  #else
+					y0 += c0 * y1;
+					y1 += c1 * y0;
+				}
+				// re-assign each thread an l (transpose)
+				const int itl = (ll >> 1)*l_inc + j % (BLOCKSIZE/NW);
+			#else
+				#pragma unroll
+				for (int k=0; k<LSPAN; k+=2) {		// compute a block of the matrix, write it in shared mem.
 					real_g c0 = ak[k+2]*cost;
 					real_g c1 = ak[k+3]*cost;
 					yl[k*l_inc +j]     = y0;		// l
 					yl[(k+1)*l_inc +j] = y1;		// l+1
-				  #endif
 					y0 += c0 * y1;
 					y1 += c1 * y0;
 				}
-			// now re-assign each thread an l (transpose)
-			const int itl = (ll >> 1)*l_inc + j % (BLOCKSIZE/NW);
+				// re-assign each thread an l (transpose)
+				const int itl = ll*l_inc + j % (BLOCKSIZE/NW);
+			#endif
 
 			if (BLOCKSIZE > WARPSZE) {	__syncthreads(); } else { _syncwarp_fence; }
 
@@ -926,7 +941,7 @@ void ileg_m_kernel(const real_g* __restrict__ al, const real_g* __restrict__ ct,
 				}
 				for (int a=2; a<NACC; a+=2) {
 					qll[0] += qll[a];
-				}				
+				}
 			}
 
 			static_assert(BLOCKSIZE/NW <= WARPSZE, "Block size must not exceed LSPAN*NFIELDS*WARPSZE");

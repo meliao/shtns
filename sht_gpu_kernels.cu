@@ -684,6 +684,51 @@ void sh2ishioka_gpu(shtns_cfg shtns, std::complex<real>* d_Qlm, std::complex<rea
 	CUDA_ERROR_CHECK;
 }
 
+/// performs: Ql[2*l] = qq[2*l]*xlm[3*l] + qq[2*l-2]*xlm[3*l+1];   Ql[2*l+1] = qq[2*l+1] * xlm[3*l+2];
+/// includes zero-out for unused modes.
+template<typename real> __global__ void
+reduced2sh_kernel_alt(const int NFIELDS, const real* __restrict__ xlm, const real* __restrict__ ql_ish, real* ql,
+	const int llim, const int lmax, const int mmax, const int mres, const int S, const int ql_ish_dist=0, const int ql_dist=0)
+{
+	const int im = blockIdx.y;
+	const int ll = blockDim.x * blockIdx.x + threadIdx.x;
+	const int m = im*mres;
+
+	if ((ll>>1) > lmax+S-m) return;		// be sure to include zero-out for llim<l<=lmax AND zero-out for m>mmax
+
+	// first load matrix coefficients into registers
+	//xlm += 3*im*(2*(lmax+4) -m+mres)/4;		// correct offset needed !!!
+	real x0 = xlm[ll>>1];
+
+	const int b = (blockIdx.z*blockDim.z + threadIdx.z) * NFIELDS;
+	int q_ofs = ll;
+	real q = 0.0;
+	if (im==0) {
+		ql_ish += b*ql_ish_dist + (ll>>1);
+		ql += q_ofs + b*ql_dist;
+		const bool read = (ll>>1) <= llim-m && ((ll&1)==0);
+		for (int k=NFIELDS-1; k>=0; k--) {
+			if (read)  q = ql_ish[k*ql_ish_dist] * x0;	// only real part (ll&1 == 0)
+			ql[k*ql_dist] = q;	// coalesced store
+		}
+	} else {
+		printf("ERROR m>0 NOT IMPLEMENTED!!!\n");
+		return;
+		q_ofs += im*(((lmax+1+S)*2) -m+mres);
+		ql_ish += b*ql_ish_dist + q_ofs;
+		ql += q_ofs + b*ql_dist;
+		const bool read = (ll>>1) <= llim-m;
+		const bool add2 = ((ll&2)==0) && (ll >= 4) && read;
+		for (int k=NFIELDS-1; k>=0; k--) {
+			if (read)  q = ql_ish[k*ql_ish_dist] * x0;
+			if (add2) {	// l-m even
+				q += ql_ish[k*ql_ish_dist -4] * x1;		// contribution of l-2
+			}
+			ql[k*ql_dist] = q;	// coalesced store
+		}
+	}
+}
+
 template<typename real=double>
 void ishioka2sh_gpu(shtns_cfg shtns, std::complex<real>* d_Qlm_ish, std::complex<real>* d_Qlm, int llim, int mmax, int S=0)
 {
@@ -710,8 +755,11 @@ void ishioka2sh_gpu(shtns_cfg shtns, std::complex<real>* d_Qlm_ish, std::complex
 
 	dim3 blocks((nelem_max+blksze-1)/blksze, shtns->mmax+1, nblk_z);
 	dim3 threads(blksze, 1, blksze_z);
-	const real* xlm = (real*) shtns->d_x2lm;
-	ishioka2sh_kernel_alt <<< blocks, threads, 0, shtns->comp_stream >>>
+//	const real* xlm = (real*) shtns->d_x2lm;
+//	ishioka2sh_kernel_alt <<< blocks, threads, 0, shtns->comp_stream >>>
+//		(nfields, xlm, (real*) d_Qlm_ish, (real*) d_Qlm, llim, shtns->lmax, mmax, shtns->mres, S, shtns->nlm_stride, shtns->spec_dist*2);
+	const real* xlm = (real*) shtns->d_glm;
+	reduced2sh_kernel_alt <<< blocks, threads, 0, shtns->comp_stream >>>
 		(nfields, xlm, (real*) d_Qlm_ish, (real*) d_Qlm, llim, shtns->lmax, mmax, shtns->mres, S, shtns->nlm_stride, shtns->spec_dist*2);
 #endif
 	CUDA_ERROR_CHECK;
