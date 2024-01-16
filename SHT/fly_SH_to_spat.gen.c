@@ -211,6 +211,7 @@ S			Sl0[l-1] = (double) Slm[l];	//	Sl[l] = (double) Slm[l+1];
 T			Tl0[l-1] = (double) Tlm[l];	//	Tl[l] = (double) Tlm[l+1];
 			++l;
 		} while(l<=llim);
+Q		Ql0[0] *= alm[0];		// mean value kept for the end, stored in Ql0: higher accuracry
 		k=0;
 		do {
 			l=0;	al = alm;
@@ -224,7 +225,7 @@ T			rnd pe[NWAY], po[NWAY];
 V				sint[j] = -vread(st, j+k);
 				y0[j] = vall(al[0]);
 V				dy0[j] = vall(0.0);
-Q				re[j] = y0[j] * vall(Ql0[0]);
+Q				re[j] = vall(0.0);		//y0[j] * vall(Ql0[0]);
 S				to[j] = dy0[j];
 T				po[j] = dy0[j];
 			}
@@ -277,6 +278,10 @@ T					po[j] -= dy0[j] * vall(Tl0[l-1]);
 Q			for (int j=0; j<NWAY; ++j) {
 Q				rnd s = re[j] - ro[j];		re[j] = re[j] + ro[j];
 Q				ro[j] = s;
+Q			}
+Q			for (int j=0; j<NWAY; ++j) {	// add mean value at the end for higher accuracy
+Q				re[j] += vall(Ql0[0]);  // north
+Q				ro[j] += vall(Ql0[0]);	// south
 Q			}
 V			for (int j=0; j<NWAY; ++j) {			
 S				rnd ts = te[j] - to[j];	te[j] = te[j] + to[j];

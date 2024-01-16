@@ -76,7 +76,6 @@ V	#define wi(l) vall( ((double*) VWl)[4*(l)+3] )
 	long int nk,k,l,m;
 	double *alm, *al;
 	double *ct, *st;
-V	int robert_form;
 QX	double Ql0[llim+2];
 V	v2d VWl[llim*2+4];
   #ifdef SHTNS_ISHIOKA
@@ -89,7 +88,7 @@ Q	v2d QQl[llim+2];
 		nk = ((unsigned)(nk+VSIZE2-1)) / VSIZE2;
 		it0 = ((unsigned)(it0+VSIZE2-1)) / VSIZE2;
 	#endif
-V	robert_form = shtns->robert_form;
+V	const int robert_form = shtns->robert_form;
 
 	if (im == 0)
 	{	//	im=0;
@@ -105,13 +104,15 @@ T			if (BtF != NULL) memset(BtF, 0, sizeof(v2d) * NLAT_2);
 		alm = shtns->glm;
 Q		Ql0[0] = alm[0] * (double) Qlm[0];		// l=0
 		do {		// for m=0, compress the complex Q,S,T to double
-Q			Ql0[l] = creal( Qlm[l] ) * alm[l];	//	Ql[l+1] = (double) Qlm[l+1];
-S			Sl0[l-1] = creal( Slm[l] ) * alm[l];	//	Sl[l] = (double) Slm[l+1];
-T			Tl0[l-1] = creal( Tlm[l] ) * alm[l];	//	Tl[l] = (double) Tlm[l+1];
+			double a = alm[l];
+Q			Ql0[l] = creal( Qlm[l] ) * a;	//	Ql[l+1] = (double) Qlm[l+1];
+S			Sl0[l-1] = creal( Slm[l] ) * a;	//	Sl[l] = (double) Slm[l+1];
+T			Tl0[l-1] = creal( Tlm[l] ) * a;	//	Tl[l] = (double) Tlm[l+1];
 			++l;
 		} while(l<=llim);
-		k=it0;
 		alm = shtns->alm2;
+Q		Ql0[0] *= alm[0];
+		k=it0;
 		do {
 			l=0;	al = alm;
 			rnd cost[NWAY], y0[NWAY], y1[NWAY];
@@ -124,7 +125,7 @@ T			rnd pe[NWAY], po[NWAY];
 V				sint[j] = -vread(st, j+k);
 				y0[j] = vall(al[0]);
 V				dy0[j] = vall(0.0);
-Q				re[j] = y0[j] * vall(Ql0[0]);
+Q				re[j] = vall(0.0);	//y0[j] * vall(Ql0[0]);		// keep mean value for the end: higher accuracy
 S				to[j] = dy0[j];
 T				po[j] = dy0[j];
 			}
@@ -177,6 +178,10 @@ T					po[j] -= dy0[j] * vall(Tl0[l-1]);
 Q			for (int j=0; j<NWAY; ++j) {
 Q				rnd s = re[j] - ro[j];		re[j] = re[j] + ro[j];
 Q				ro[j] = s;
+Q			}
+Q			for (int j=0; j<NWAY; ++j) {	// add mean value at the end for higher accuracy
+Q				re[j] += vall(Ql0[0]);	// north
+Q				ro[j] += vall(Ql0[0]);	// south
 Q			}
 V			for (int j=0; j<NWAY; ++j) {			
 S				rnd ts = te[j] - to[j];	te[j] = te[j] + to[j];

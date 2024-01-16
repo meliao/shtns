@@ -192,6 +192,9 @@ Q			#endif
 Q			rer[k] = n+s;			ror[k] = n-s;
 Q			r0 += (n+s)*wg[k];
 Q		} while(++k < nk*VSIZE2);
+Q		{	rnd vr0 = vall(r0 * shtns->weight_norm_1);
+Q			int k=0; do {	vstor(rer, k, vread(rer, k) - vr0 );	} while(++k < nk);	// remove mean from even
+Q		}
 		alm0_rescale = alm[0] * shtns->nphi;	// alm[0] takes into account the fftw normalization, *nphi cancels it
 V		Slm[0] = 0.0;		Tlm[0] = 0.0;		// l=0 is zero for the vector transform.
 Q		Qlm[0] = r0 * alm0_rescale;			// l=0 is done.
