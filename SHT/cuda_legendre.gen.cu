@@ -108,7 +108,7 @@ __device__ __forceinline__ bool polar_skip_sint2(float sint2, int llim, int m) {
 	return false;
 }
 
-//#define SHTNS_ISHIOKA
+#define SHTNS_ISHIOKA
 
 /// requirements : blockSize must be 1 in the y- and z-direction and BLKSZE_S in the x-direction.
 /// llim MUST BE <= 1800, unless HI_LLIM=1
@@ -217,6 +217,15 @@ void leg_m_kernel(
 
 		al+=2;
 		if (BLOCKSIZE > WARPSZE) { __syncthreads(); } else { _syncwarp; }
+
+		__shared__ real mean[NFIELDS];	
+		if (S==0) {				// TODO: this hack could be made cleaner
+			if (j<NFIELDS) {
+				mean[j] = y0[0] * qk[j][0];		// mean value may be much larger: we keep it separated for better accuracy (especially in fp32)
+				qk[j][0] = 0;						// we are done with the mean ==> set to zero
+			}
+			if (BLOCKSIZE > WARPSZE) { __syncthreads(); } else { _syncwarp; }
+		}
 
 		while (l<=llim - LSPAN) {	// compute even and odd parts
 		  #ifdef SHTNS_ISHIOKA
@@ -350,12 +359,15 @@ void leg_m_kernel(
 				#pragma unroll
 				for (int f=0; f<NFIELDS; f++) {
 				  #ifdef SHTNS_ISHIOKA
-					q[it*k_inc              + (b*NFIELDS+f)*q_dist] = re[f][i]+ro[f][i]*COST(i,j);
-					q[(nlat_2*2-1-it)*k_inc + (b*NFIELDS+f)*q_dist] = re[f][i]-ro[f][i]*COST(i,j);
+					real north = re[f][i]+ro[f][i]*COST(i,j);
+					real south = re[f][i]-ro[f][i]*COST(i,j);
 				  #else
-					q[it*k_inc              + (b*NFIELDS+f)*q_dist] = re[f][i]+ro[f][i];
-					q[(nlat_2*2-1-it)*k_inc + (b*NFIELDS+f)*q_dist] = re[f][i]-ro[f][i];
+					real north = re[f][i]+ro[f][i];
+					real south = re[f][i]-ro[f][i];
 				  #endif
+					if (S==0)	{	north += mean[f];	south += mean[f];	}		// mean added at the very end for improved accuracy when mean >> std
+					q[it*k_inc              + (b*NFIELDS+f)*q_dist] = north;
+					q[(nlat_2*2-1-it)*k_inc + (b*NFIELDS+f)*q_dist] = south;
 				}
 			}
 		}
@@ -853,13 +865,41 @@ void ileg_m_kernel(const real_g* __restrict__ al, const real_g* __restrict__ ct,
 		real my_reo[NW];			// in registers
 
 		q += b*NFIELDS*q_dist;
+
+		// HANDLE THE MEAN SEPARATELY. THIS IS ESPECIALLY IMPORTANT IN FP32 TO AVOID ACCURACY ISSUES
+		#pragma unroll
+		for (int f=0; f<NFIELDS; f++) my_reo[f] = 0;	// first, we use my_reo to store the mean of each field, as NW >= NFIELDS
+		if (S==0) {
+			for (int k=j; k<nlat_2; k+=BLOCKSIZE) {
+				real w = ct[nlat_2 +k];
+				#pragma unroll
+				for (int f=0; f<NFIELDS; f++)	my_reo[f] += w * (q[k + f*q_dist]  +  q[nlat_2*2-1 - k + f*q_dist]);
+			}
+				// reduction of my_reo[f] : sum accross all threads
+				#pragma unroll
+				for (int f=0; f<NFIELDS; f++)  yl[f*l_inc + j] = my_reo[f];	// store to shared mem
+				#pragma unroll
+				for (int ofs=BLOCKSIZE/2; ofs>=1; ofs/=2) {	// /!\ BLOCKSIZE must be power of 2 here. TODO: remove this limitation
+					__syncthreads();
+					if (j<ofs) {
+						#pragma unroll
+						for (int f=0; f<NFIELDS; f++) yl[f*l_inc + j] += yl[f*l_inc + j + ofs];
+					}
+				}
+				// TODO: could be optimized once everything is in a warp, can be distributed among NFIELDS.
+				__syncthreads();
+				if (it<NFIELDS)  ql[llim+1  + (b*NFIELDS+it)*ql_dist] = yl[it*l_inc];		// store the mean for future assembly, in ishioka2sh_kernel()
+				#pragma unroll
+				for (int f=0; f<NFIELDS; f++) my_reo[f] = yl[f*l_inc] * nphi/(2.*3.1415926535897932384626433832795);
+		}
+
 		if (j < LSPAN+2) ak[j] = al[j];
 
 		#pragma unroll
 		for (int f=0; f<NFIELDS; f++) {
 			real x0 = (it < nlat_2) ? q[it              + f*q_dist] : 0;	// north
 			real x1 = (it < nlat_2) ? q[nlat_2*2-1 - it + f*q_dist] : 0;	// south
-			yl[f*2*l_inc +j]     = x0+x1;			// even
+			yl[f*2*l_inc +j]     = (x0+x1) - my_reo[f];			// even, subtract mean
 		  #ifdef SHTNS_ISHIOKA
 			yl[(f*2+1)*l_inc +j] = (x0-x1)*((real)cost);	// odd
 		  #else
