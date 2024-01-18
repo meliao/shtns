@@ -367,6 +367,7 @@ int init_cuda_program(shtns_cfg shtns, const char* gpu_arch_target)
 		if (nw_s == 4 && shtns->sizeof_real==8) sh2ish_fuse = false;			// MI250
 		if (hi_llim && shtns->sizeof_real == 8) sh2ish_fuse = false;	// don't fuse hi_llim double-precision.
 	}
+	//if (nf_a * shtns->nlat_2 <= 512   &&   !ISHIOKA)  ==> we can include ish2sh into the ilegendre kernel.
 
 	// also store into plan the kernel launch parameters:
 	shtns->nwarp[0] = nwarp_s;		shtns->nwarp[1] = nwarp_a;		shtns->nwarp[2] = sh2ish_fuse ? nwarp_s0 : 0;
@@ -400,9 +401,15 @@ int init_cuda_program(shtns_cfg shtns, const char* gpu_arch_target)
 	s += sprintf(s, "#define MPOS_SCALE %g\n", shtns->mpos_scale_analys);
 	s += sprintf(s, "#define NLAT_2 %d\n", shtns->nlat_2);
 	s += sprintf(s, "typedef %s real;\n", (shtns->sizeof_real == 4) ? "float" : "double");	// single or double-precision data
-	if (shtns->sizeof_real_g == 4)
+	if (shtns->sizeof_real_g == 4) {
 		 s += sprintf(s, "typedef float real_g;\n#define SHT_ACCURACY 1.0e-15f\n#define SHT_SCALE_FACTOR 7.2057594037927936e16f\n");	// for single-precision recurrence
-	else s += sprintf(s, "typedef double real_g;\n#define SHT_ACCURACY 1.0e-33\n#define SHT_SCALE_FACTOR 2.0370359763344860863e90\n");	// for double-precision recurrence
+	} else {
+		//s += sprintf(s, "#define SHT_HI_PREC 2\n");		// improve numerical accuracy by using full FP64 for m=0 (not only recurrence, but also accumulators) ==> TODO: some work needed in kernels.
+		s += sprintf(s, "typedef double real_g;\n#define SHT_ACCURACY 1.0e-33\n#define SHT_SCALE_FACTOR 2.0370359763344860863e90\n");	// for double-precision recurrence
+	}
+	s += sprintf(s, "#define SHT_HI_PREC %d\n", (shtns->sizeof_real == 4) ? 1 : 0);		// improve numerical accuracy by computing the mean separately for scalar (S=0) transforms.
+	if (!getenv("SHTNS_LEG_NOISH"))  s += sprintf(s, "#define LEG_ISHIOKA\n");
+	if (!getenv("SHTNS_ILEG_NOISH"))  s += sprintf(s, "#define ILEG_ISHIOKA\n");
 	#if SHT_VERBOSE > 1
 		printf("%s", src);		// displays the defines for debug purposes
 	#endif
@@ -755,7 +762,7 @@ static void legendre(shtns_cfg shtns, const int S, const void *ql, void *q, cons
 
 	int llim_ = llim;
 	void* params[11] = {&shtns->d_clm, &shtns->d_ct, &ql, &q, &llim_, &nlat_2, &shtns->nphi, &shtns->nlat_padded, &nlm_stride, &shtns->nlat, &shtns->d_xlm};
-	//void* params[11] = {&shtns->d_alm2, &shtns->d_ct, &ql, &q, &llim_, &nlat_2, &shtns->nphi, &shtns->nlat_padded, &nlm_stride, &shtns->nlat, &shtns->d_glm};
+	if (getenv("SHTNS_LEG_NOISH")) {	params[0] = &shtns->d_alm2;		params[10] = &shtns->d_glm;  }
 	cuLaunchKernel(shtns->gpu_kernels[S], 
 			shtns->gridDim_x[par_idx], shtns->gridDim_y[0], mmax+1,		// grid dim
 			shtns->nwarp[par_idx]*WARPSZE, 1, 1,					// block dim
@@ -780,7 +787,7 @@ static void ilegendre(shtns_cfg shtns, const int S, const void *q, void* ql, con
 
 	int llim_ = llim;
 	void* params[10] = {&shtns->d_clm, &shtns->d_ct, &q, &ql, &llim_, &nlat_2, &shtns->nphi, &shtns->nlat_padded, &shtns->nlat, &shtns->nlm_stride};
-	//void* params[10] = {&shtns->d_alm2, &shtns->d_ct, &q, &ql, &llim_, &nlat_2, &shtns->nphi, &shtns->nlat_padded, &shtns->nlat, &shtns->nlm_stride};
+	if (getenv("SHTNS_ILEG_NOISH"))  params[0] = &shtns->d_alm2;
 	cuLaunchKernel(shtns->gpu_kernels[2+S], 		// analysis kernels
 			shtns->gridDim_x[1], shtns->gridDim_y[1], mmax+1,		// grid dim
 			blksze, 1, 1,					// block dim

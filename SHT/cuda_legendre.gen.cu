@@ -108,8 +108,6 @@ __device__ __forceinline__ bool polar_skip_sint2(float sint2, int llim, int m) {
 	return false;
 }
 
-#define SHTNS_ISHIOKA
-
 /// requirements : blockSize must be 1 in the y- and z-direction and BLKSZE_S in the x-direction.
 /// llim MUST BE <= 1800, unless HI_LLIM=1
 template<int S> __global__
@@ -147,7 +145,7 @@ void leg_m_kernel(
 	real_g y0[NW];
 	real_g y1[NW];
 	real_g ct2[NW];
-#ifdef SHTNS_ISHIOKA
+#ifdef LEG_ISHIOKA
 	#ifndef COST_CACHE
 	real cost_[NW];
 	#define COST(i,j) cost_[i]
@@ -167,7 +165,7 @@ void leg_m_kernel(
 			ak[j] = al[j+2];
 			#if BLKSZE_SH2ISH > 0
 			if (S==0) {
-			  #ifdef SHTNS_ISHIOKA
+			  #ifdef LEG_ISHIOKA
 				int xofs = 3*(j>>1);	// load xlm coeffs once for all fields
 				real x0 = xlm[xofs+2*(j&1)];
 				real x1 = xlm[xofs+1];		// only used for j&2==0
@@ -188,12 +186,16 @@ void leg_m_kernel(
 				#pragma unroll
 				for (int f=0; f<NFIELDS; f++)	qk[f][j] = ql[j + (b*NFIELDS+f)*ql_dist];		// keep only real part
 		}
-	#ifdef SHTNS_ISHIOKA
+	#ifdef LEG_ISHIOKA
 		#pragma unroll
 		for (int i=0; i<NW; i++) {	COST(i,j) = ct2[i];		ct2[i] *= ct2[i];	}	// cos(theta)^2
 	#endif
 
+	#if SHT_HI_PREC & 2
+		real_g re[NFIELDS][NW], ro[NFIELDS][NW];
+	#else
 		real re[NFIELDS][NW], ro[NFIELDS][NW];
+	#endif
 		#pragma unroll
 		for (int f=0; f<NFIELDS; f++) {
 			#pragma unroll
@@ -203,7 +205,7 @@ void leg_m_kernel(
 			}
 		}
 		int l = 0;
-	#ifdef SHTNS_ISHIOKA
+	#ifdef LEG_ISHIOKA
 		#pragma unroll
 		for (int i=0; i<NW; i++) y0[i] = (S==1 && !ROBERT_FORM) ? rsqrt(1 - ct2[i]) : 1;    // for vectors, divide by sin(theta) -- except in Robert form
 		#pragma unroll
@@ -218,7 +220,8 @@ void leg_m_kernel(
 		al+=2;
 		if (BLOCKSIZE > WARPSZE) { __syncthreads(); } else { _syncwarp; }
 
-		__shared__ real mean[NFIELDS];	
+	#if SHT_HI_PREC & 1
+		__shared__ real mean[NFIELDS];
 		if (S==0) {				// TODO: this hack could be made cleaner
 			if (j<NFIELDS) {
 				mean[j] = y0[0] * qk[j][0];		// mean value may be much larger: we keep it separated for better accuracy (especially in fp32)
@@ -226,9 +229,10 @@ void leg_m_kernel(
 			}
 			if (BLOCKSIZE > WARPSZE) { __syncthreads(); } else { _syncwarp; }
 		}
+	#endif
 
 		while (l<=llim - LSPAN) {	// compute even and odd parts
-		  #ifdef SHTNS_ISHIOKA
+		  #ifdef LEG_ISHIOKA
 			for (int k = 0; k<LSPAN; k+=4) {
 				#pragma unroll
 				for (int i=0; i<NW; i++) {
@@ -279,7 +283,7 @@ void leg_m_kernel(
 			if ((l+j <= llim) && (BLOCKSIZE==LSPAN || j<LSPAN)) {
 				#if BLKSZE_SH2ISH > 0
 				if (S==0) {
-				  #ifdef SHTNS_ISHIOKA
+				  #ifdef LEG_ISHIOKA
 					int xofs = 3*((l+j)>>1);	// load xlm coeffs once for all fields
 					real x0 = xlm[xofs+2*((l+j)&1)];
 					real x1 = xlm[xofs+1];		// only used for j&2==0
@@ -306,7 +310,7 @@ void leg_m_kernel(
 		}
 		int k=0;
 		while (l<llim) {	// compute even and odd parts
-		  #ifdef SHTNS_ISHIOKA
+		  #ifdef LEG_ISHIOKA
 			#pragma unroll
 			for (int i=0; i<NW; i++) {
 				real y0g = y0[i];
@@ -358,14 +362,16 @@ void leg_m_kernel(
 				// store mangled for complex fft
 				#pragma unroll
 				for (int f=0; f<NFIELDS; f++) {
-				  #ifdef SHTNS_ISHIOKA
+				  #ifdef LEG_ISHIOKA
 					real north = re[f][i]+ro[f][i]*COST(i,j);
 					real south = re[f][i]-ro[f][i]*COST(i,j);
 				  #else
 					real north = re[f][i]+ro[f][i];
 					real south = re[f][i]-ro[f][i];
 				  #endif
+				  #if SHT_HI_PREC & 1
 					if (S==0)	{	north += mean[f];	south += mean[f];	}		// mean added at the very end for improved accuracy when mean >> std
+				  #endif
 					q[it*k_inc              + (b*NFIELDS+f)*q_dist] = north;
 					q[(nlat_2*2-1-it)*k_inc + (b*NFIELDS+f)*q_dist] = south;
 				}
@@ -378,13 +384,13 @@ void leg_m_kernel(
 		const int m = im*MRES;
 		int l = (im*(2*(LMAX+1)-MRES-m))>>1;
 		#if BLKSZE_SH2ISH > 0
-			#ifdef SHTNS_ISHIOKA
+			#ifdef LEG_ISHIOKA
 			if (S==0)	xlm += 3*im*(2*(LMAX+4)+MRES-m)/4;
 			#else
 			if (S==0)	xlm += im*(LMAX+3) - (m*(im-1))/2;
 			#endif
 		#endif
-		#ifdef SHTNS_ISHIOKA
+		#ifdef LEG_ISHIOKA
 		al += l+m;
 		#else
 		al += im*(LMAX+3) - (m*(im-1))/2;
@@ -397,7 +403,7 @@ void leg_m_kernel(
 				real x0, x1;
 				bool use_x1;
 				if (S==0) {
-				  #ifdef SHTNS_ISHIOKA
+				  #ifdef LEG_ISHIOKA
 					int xofs = 3*(j>>2);	// load xlm coeffs once for all fields
 					x0 = xlm[xofs+(j&2)];
 					x1 = xlm[xofs+1];		// only used for j&2==0
@@ -413,7 +419,7 @@ void leg_m_kernel(
 					real ql_ = ql[qofs];
 					#if BLKSZE_SH2ISH > 0
 					if (S==0) {		ql_ *= x0;
-					  #ifdef SHTNS_ISHIOKA
+					  #ifdef LEG_ISHIOKA
 						if (use_x1)	ql_ += x1 * ql[qofs + 4];
 					  #endif
 					}
@@ -426,7 +432,7 @@ void leg_m_kernel(
 				real x0, x1;
 				bool use_x1;
 				if (S==0) {
-				  #ifdef SHTNS_ISHIOKA
+				  #ifdef LEG_ISHIOKA
 					int xofs = 3*(j>>2) + 3*BLOCKSIZE/4;	// load xlm coeffs once for all fields
 					x0 = xlm[xofs+(j&2)];
 					x1 = xlm[xofs+1];		// only used for j&2==0
@@ -442,7 +448,7 @@ void leg_m_kernel(
 					real ql_ = ql[qofs];
 					#if BLKSZE_SH2ISH > 0
 					if (S==0) {		ql_ *= x0;
-					  #ifdef SHTNS_ISHIOKA
+					  #ifdef LEG_ISHIOKA
 						if (use_x1)	ql_ += x1 * ql[qofs + 4];
 					  #endif
 					}
@@ -451,7 +457,7 @@ void leg_m_kernel(
 				}
 			}
 
-	#ifdef SHTNS_ISHIOKA
+	#ifdef LEG_ISHIOKA
 		#pragma unroll
 		for (int i=0; i<NW; i++) {	COST(i,j) = ct2[i];		ct2[i] *= ct2[i];	}	// cos(theta)^2
 		#pragma unroll
@@ -530,7 +536,7 @@ void leg_m_kernel(
 			} while(l >>= 1);
 		}
 
-	#ifdef SHTNS_ISHIOKA
+	#ifdef LEG_ISHIOKA
 		#pragma unroll
 		for (int i=0; i<NW; i++) y1[i] = (al[1]*ct2[i] + al[0])*y0[i];
 	#else
@@ -540,7 +546,7 @@ void leg_m_kernel(
 
 		l=m;		al+=2;
 		while (l<=llim - LSPAN) {	// compute even and odd parts
-		  #ifdef SHTNS_ISHIOKA
+		  #ifdef LEG_ISHIOKA
 			for (int k = 0; k<LSPAN; k+=4) {
 				real_g tmp[NW];
 				#pragma unroll
@@ -633,7 +639,7 @@ void leg_m_kernel(
 				real x0, x1;
 				bool use_x1;
 				if (S==0) {
-				  #ifdef SHTNS_ISHIOKA
+				  #ifdef LEG_ISHIOKA
 					int ll = 2*(l-m)+j;
 					int xofs = 3*(ll>>2);	// load xlm coeffs once for all fields
 					x0 = xlm[xofs+(ll&2)];
@@ -650,7 +656,7 @@ void leg_m_kernel(
 					real ql_ = ql[qofs];
 					#if BLKSZE_SH2ISH > 0
 					if (S==0) {		ql_ *= x0;
-					  #ifdef SHTNS_ISHIOKA
+					  #ifdef LEG_ISHIOKA
 						if (use_x1)	ql_ += x1 * ql[qofs + 4];
 					  #endif
 					}
@@ -663,7 +669,7 @@ void leg_m_kernel(
 				real x0, x1;
 				bool use_x1;
 				if (S==0) {
-				  #ifdef SHTNS_ISHIOKA
+				  #ifdef LEG_ISHIOKA
 					int ll = 2*(l-m)+j+BLOCKSIZE;
 					int xofs = 3*(ll>>2);	// load xlm coeffs once for all fields
 					x0 = xlm[xofs+(ll&2)];
@@ -680,7 +686,7 @@ void leg_m_kernel(
 					real ql_ = ql[qofs];
 					#if BLKSZE_SH2ISH > 0
 					if (S==0) {		ql_ *= x0;
-					  #ifdef SHTNS_ISHIOKA
+					  #ifdef LEG_ISHIOKA
 						if (use_x1)	ql_ += x1 * ql[qofs + 4];
 					  #endif
 					}
@@ -693,7 +699,7 @@ void leg_m_kernel(
 		}
 		int k=0;
 		while (l<llim) {	// compute even and odd parts
-		  #ifdef SHTNS_ISHIOKA
+		  #ifdef LEG_ISHIOKA
 			real_g tmp[NW];
 			#pragma unroll
 			for (int i=0; i<NW; i++)	tmp[i] = ak[k+1]*ct2[i] + ak[k];
@@ -701,7 +707,7 @@ void leg_m_kernel(
 			if ((!HI_LLIM) || (ny==0)) {
 				#pragma unroll
 				for (int i=0; i<NW; i++) {
-				  #ifdef SHTNS_ISHIOKA
+				  #ifdef LEG_ISHIOKA
 					real y0g = y0[i];
 					#pragma unroll
 					for (int f=0; f<NFIELDS; f++) {
@@ -737,7 +743,7 @@ void leg_m_kernel(
 				}
 			}
 			#endif
-		  #ifdef SHTNS_ISHIOKA
+		  #ifdef LEG_ISHIOKA
 			#pragma unroll
 			for (int i=0; i<NW; i++) tmp[i] = tmp[i] * y1[i] + y0[i];
 			#pragma unroll
@@ -771,7 +777,7 @@ void leg_m_kernel(
 		for (int f=0; f<NFIELDS; f++) {
 			#pragma unroll
 			for (int i=0; i<NW; i++) {
-			  #ifdef SHTNS_ISHIOKA
+			  #ifdef LEG_ISHIOKA
 				real t    = rer[f][i]+ror[f][i]*COST(i,j);
 				rer[f][i] = rer[f][i]-ror[f][i]*COST(i,j);
 				ror[f][i] = rei[f][i]-roi[f][i]*COST(i,j);
@@ -829,7 +835,11 @@ template<int S> __global__
 __launch_bounds__(64,1)
 #endif
 void ileg_m_kernel(const real_g* __restrict__ al, const real_g* __restrict__ ct, const real* __restrict__ q, real *ql, const int llim, 
-	const int nlat_2, const int nphi, const int m_inc, const int q_dist, const int ql_dist)
+	const int nlat_2, const int nphi, const int m_inc, const int q_dist, const int ql_dist
+#if BLKSZE_SH2ISH > 0
+	//, const real* __restrict__ xlm
+#endif
+)
 {
 	const int BLOCKSIZE=BLKSZE_A;
 	const int NFIELDS=NF_A;
@@ -848,7 +858,7 @@ void ileg_m_kernel(const real_g* __restrict__ al, const real_g* __restrict__ ct,
 	const int padding = 2;		// padding = 0 is very bad for performance (shared-memory bank conflicts).
 	const int l_inc = BLOCKSIZE+padding;
 	__shared__ real_g ak[LSPAN+2];	// cache
-  #ifdef SHTNS_ISHIOKA
+  #ifdef ILEG_ISHIOKA
 	const int NROWS = M0_ONLY ? ( (LSPAN>4*NFIELDS) ? LSPAN/2 : 2*NFIELDS ) : ( (LSPAN>8*NFIELDS) ? LSPAN/2 : 4*NFIELDS );
   #else
 	const int NROWS = M0_ONLY ? ( (LSPAN>2*NFIELDS) ? LSPAN : 2*NFIELDS ) : ( (LSPAN>4*NFIELDS) ? LSPAN : 4*NFIELDS );
@@ -866,10 +876,11 @@ void ileg_m_kernel(const real_g* __restrict__ al, const real_g* __restrict__ ct,
 
 		q += b*NFIELDS*q_dist;
 
+	#if SHT_HI_PREC & 1
 		// HANDLE THE MEAN SEPARATELY. THIS IS ESPECIALLY IMPORTANT IN FP32 TO AVOID ACCURACY ISSUES
-		#pragma unroll
-		for (int f=0; f<NFIELDS; f++) my_reo[f] = 0;	// first, we use my_reo to store the mean of each field, as NW >= NFIELDS
 		if (S==0) {
+			#pragma unroll
+			for (int f=0; f<NFIELDS; f++) my_reo[f] = 0;	// first, we use my_reo to store the mean of each field, as NW >= NFIELDS
 			for (int k=j; k<nlat_2; k+=BLOCKSIZE) {
 				real w = ct[nlat_2 +k];
 				#pragma unroll
@@ -880,18 +891,19 @@ void ileg_m_kernel(const real_g* __restrict__ al, const real_g* __restrict__ ct,
 				for (int f=0; f<NFIELDS; f++)  yl[f*l_inc + j] = my_reo[f];	// store to shared mem
 				#pragma unroll
 				for (int ofs=BLOCKSIZE/2; ofs>=1; ofs/=2) {	// /!\ BLOCKSIZE must be power of 2 here. TODO: remove this limitation
-					__syncthreads();
+					if (BLOCKSIZE > WARPSZE) {	__syncthreads(); } else { _syncwarp_fence; }
 					if (j<ofs) {
 						#pragma unroll
 						for (int f=0; f<NFIELDS; f++) yl[f*l_inc + j] += yl[f*l_inc + j + ofs];
 					}
 				}
 				// TODO: could be optimized once everything is in a warp, can be distributed among NFIELDS.
-				__syncthreads();
+				if (BLOCKSIZE > WARPSZE) {	__syncthreads(); } else { _syncwarp_fence; }
 				if (it<NFIELDS)  ql[llim+1  + (b*NFIELDS+it)*ql_dist] = yl[it*l_inc];		// store the mean for future assembly, in ishioka2sh_kernel()
 				#pragma unroll
-				for (int f=0; f<NFIELDS; f++) my_reo[f] = yl[f*l_inc] * nphi/(2.*3.1415926535897932384626433832795);
+				for (int f=0; f<NFIELDS; f++) my_reo[f] = yl[f*l_inc] * nphi/(2.*3.1415926535897932384626433832795);	// TODO: this needs to change with normalization
 		}
+	#endif
 
 		if (j < LSPAN+2) ak[j] = al[j];
 
@@ -899,8 +911,12 @@ void ileg_m_kernel(const real_g* __restrict__ al, const real_g* __restrict__ ct,
 		for (int f=0; f<NFIELDS; f++) {
 			real x0 = (it < nlat_2) ? q[it              + f*q_dist] : 0;	// north
 			real x1 = (it < nlat_2) ? q[nlat_2*2-1 - it + f*q_dist] : 0;	// south
-			yl[f*2*l_inc +j]     = (x0+x1) - my_reo[f];			// even, subtract mean
-		  #ifdef SHTNS_ISHIOKA
+		  #if SHT_HI_PREC & 1
+			yl[f*2*l_inc +j]     = (x0+x1) - ((S==0) ? my_reo[f] : 0);	// even, subtract mean
+		  #else
+			yl[f*2*l_inc +j]     = x0+x1;		// even
+		  #endif
+		  #ifdef ILEG_ISHIOKA
 			yl[(f*2+1)*l_inc +j] = (x0-x1)*((real)cost);	// odd
 		  #else
 			yl[(f*2+1)*l_inc +j] = x0-x1;	// odd
@@ -909,7 +925,7 @@ void ileg_m_kernel(const real_g* __restrict__ al, const real_g* __restrict__ ct,
 		if (BLOCKSIZE > WARPSZE) {	__syncthreads(); } else { _syncwarp_fence; }
 
 		y0 = (it < nlat_2) ? ct[it + nlat_2] : 0;		// weights are stored just after ct.
-	#ifdef SHTNS_ISHIOKA
+	#ifdef ILEG_ISHIOKA
 		cost *= cost;	// ct2
 	#endif
 
@@ -919,7 +935,7 @@ void ileg_m_kernel(const real_g* __restrict__ al, const real_g* __restrict__ ct,
 			int it = j % (BLOCKSIZE/NW) + k*(BLOCKSIZE/NW);
 			my_reo[k] = yl[(2*f0  + (ll&1))*l_inc + it];
 		}
-	  #ifdef SHTNS_ISHIOKA
+	  #ifdef ILEG_ISHIOKA
 		if (S==1) y0 *= (ROBERT_FORM) ? 1/(1-cost) : rsqrt(1 - cost);
 		y1 = (ak[1]*cost + ak[0]) * y0;
 	  #else
@@ -932,7 +948,7 @@ void ileg_m_kernel(const real_g* __restrict__ al, const real_g* __restrict__ ct,
 		int l = 0;
 		do {
 			if (BLOCKSIZE > WARPSZE) {	__syncthreads(); } else { _syncwarp_fence; }
-			#ifdef SHTNS_ISHIOKA
+			#ifdef ILEG_ISHIOKA
 				#pragma unroll
 				for (int k=0; k<LSPAN/2; k+=2) {		// compute a block of the matrix, write it in shared mem.
 					real_g c0 = ak[2*k+3]*cost + ak[2*k+2];
@@ -993,6 +1009,10 @@ void ileg_m_kernel(const real_g* __restrict__ al, const real_g* __restrict__ ct,
 				if ( ((j % (BLOCKSIZE/NW)) == 0) && ((l+ll)<=llim) ) {	// write result
 					#if NLAT_2 <= BLKSZE_A
 						// no atomicAdd needed if (nlat_2 <= BLOCKSIZE), which can be decided before compilation
+						#ifndef ILEG_ISHIOKA
+							//if (S==0)	ql[ql_ofs + (l+ll)] = qll[0] * xlm[l+ll];	// this can be done here without the need for another kernel... maybe ?
+							//else
+						#endif
 						ql[ql_ofs] = qll[0];
 					#else
 						atomicAdd_sht(ql+ql_ofs, qll[0]);		// VERY slow atomic add on Kepler.
@@ -1012,7 +1032,11 @@ void ileg_m_kernel(const real_g* __restrict__ al, const real_g* __restrict__ ct,
 		y0 = cost * cost;			// cos(theta)^2
 		int l = (im*(2*(LMAX+1)-MRES-m))>>1;
 		y1 = 1 - y0;		// sin(theta)^2
+	  #ifdef ILEG_ISHIOKA
 		al += l+m;
+	  #else
+		al += im*(LMAX+3) - (m*(im-1))/2;
+	  #endif
 		if (j < LSPAN+2) ak[j] = al[j];
 		ql += 2*(l + S*im);	// allow vector transforms where llim = lmax+1
 
@@ -1036,9 +1060,15 @@ void ileg_m_kernel(const real_g* __restrict__ al, const real_g* __restrict__ ct,
 		#endif
 
 		q += b*NFIELDS*q_dist;
+	  #ifdef ILEG_ISHIOKA
 		const real cost_ = cost;
 		const real sgn = (j^1)-j;	//	1-2*(j&1);	// +/-
 		const real costx = shfl_xor(cost_, 1)*sgn;		// neighboor cost for "reverse" exchange
+	  #else
+		const real cost_ = 1;
+		const real sgn = (j^1)-j;	//	1-2*(j&1);	// +/-
+		const real costx = sgn;		// neighboor cost for "reverse" exchange
+	  #endif
 		#pragma unroll
 		for (int f=0; f<NFIELDS; f++) {
 			real qer = (it < nlat_2) ? q[im*m_inc        + it            + f*q_dist] : 0;	// north imag (ani)
@@ -1062,7 +1092,9 @@ void ileg_m_kernel(const real_g* __restrict__ al, const real_g* __restrict__ ct,
 				my_reo[k] = yl[ofs + k*(BLOCKSIZE/NW)];
 			}
 
+	  #ifdef ILEG_ISHIOKA
 		cost = y0;		// cos(theta)^2
+	  #endif
 		#if HI_LLIM==1
 		int ny = 0;
 		#endif
@@ -1102,10 +1134,18 @@ void ileg_m_kernel(const real_g* __restrict__ al, const real_g* __restrict__ ct,
 		}
 
 		if (it < nlat_2)     y0 *= ct[it + nlat_2];		// include quadrature weights.
+	  #ifdef ILEG_ISHIOKA
 		y1 = (ak[1]*cost + ak[0]) * y0;
+	  #else
+		y1 = ak[1]*cost * y0;
+	  #endif
 
 		l=m;		al+=2+LSPAN;
+	  #ifdef ILEG_ISHIOKA
 		const int itl = (ll>>2)*l_inc + (j % (BLOCKSIZE/NW));		// transposed work (at given l)
+	  #else
+		const int itl = (ll>>1)*l_inc + (j % (BLOCKSIZE/NW));		// transposed work (at given l)
+	  #endif
 	#if HI_LLIM==1
 		static_assert(BLOCKSIZE == WARPSZE, "with HI_LLIM, block size must equal warp size");
 		#if WARPSZE == 32
@@ -1113,9 +1153,14 @@ void ileg_m_kernel(const real_g* __restrict__ al, const real_g* __restrict__ ct,
 		#else
 		unsigned long long y_zero = _ballot(ny);
 		#endif
+		#ifdef ILEG_ISHIOKA
 		if (ny) for (int k=0; k<LSPAN/2; k++)  yl[k*l_inc +j] = 0;
+		#else
+		if (ny) for (int k=0; k<LSPAN; k++)  yl[k*l_inc +j] = 0;
+		#endif
 		while (y_zero && l <= llim) {
 			if (BLOCKSIZE > WARPSZE) {	__syncthreads(); } else { _syncwarp_fence; }
+		  #ifdef ILEG_ISHIOKA
 			#pragma unroll 4
 			for (int k=0; k<LSPAN/2; k+=2) {		// compute a block of the matrix, write it in shared mem.
 				real_g c0 = ak[2*k+3]*cost + ak[2*k+2];
@@ -1131,6 +1176,23 @@ void ileg_m_kernel(const real_g* __restrict__ al, const real_g* __restrict__ ct,
 				y0 += c0 * y1;
 				y1 += c1 * y0;
 			}
+		  #else
+			#pragma unroll 4
+			for (int k=0; k<LSPAN; k+=2) {		// compute a block of the matrix, write it in shared mem.
+				real_g c0 = ak[k+2]*cost;
+				real_g c1 = ak[k+3]*cost;
+					if (fabs(y0) > SHT_ACCURACY*SHT_SCALE_FACTOR + 1)
+					{	// rescale when value is significant
+						++ny;
+						y0 *= 1/SHT_SCALE_FACTOR;
+						y1 *= 1/SHT_SCALE_FACTOR;
+					}
+				if (ny==0) yl[k*l_inc +j]     = y0;		// l and l+1
+				if (ny==0) yl[(k+1)*l_inc +j] = y1;		// l+2 and l+3
+				y0 += c0 * y1;
+				y1 += c1 * y0;
+			}
+		  #endif
 
 			y_zero = _ballot(ny);	// at this point block is in sync (consistent view of shared memory).
 
@@ -1186,6 +1248,7 @@ void ileg_m_kernel(const real_g* __restrict__ al, const real_g* __restrict__ ct,
 
 		while (l <= llim) {
 			if (BLOCKSIZE > WARPSZE) {	__syncthreads(); } else { _syncwarp_fence; }
+		  #ifdef ILEG_ISHIOKA
 			#pragma unroll 4
 			for (int k=0; k<LSPAN/2; k+=2) {		// compute a block of the matrix, write it in shared mem.
 				real_g c0 = ak[2*k+3]*cost + ak[2*k+2];
@@ -1195,6 +1258,17 @@ void ileg_m_kernel(const real_g* __restrict__ al, const real_g* __restrict__ ct,
 				y0 += c0 * y1;
 				y1 += c1 * y0;
 			}
+		  #else
+			#pragma unroll 4
+			for (int k=0; k<LSPAN; k+=2) {		// compute a block of the matrix, write it in shared mem.
+				real_g c0 = ak[k+2]*cost;
+				real_g c1 = ak[k+3]*cost;
+				yl[k*l_inc +j]     = y0;		// l and l+1
+				yl[(k+1)*l_inc +j] = y1;		// l+2 and l+3
+				y0 += c0 * y1;
+				y1 += c1 * y0;
+			}
+		  #endif
 
 			if (BLOCKSIZE > WARPSZE) {	__syncthreads(); } else { _syncwarp_fence; }
 			// at this point block is in sync (consistent view of shared memory).
@@ -1239,6 +1313,9 @@ void ileg_m_kernel(const real_g* __restrict__ al, const real_g* __restrict__ ct,
 						qlri[0] += shfl_down(qlri[0], ofs, BLOCKSIZE/NW);
 					}
 					if ( ((j % (BLOCKSIZE/NW)) == 0) && ((l+(ll>>1))<=llim) ) {	// write result
+						#if NLAT_2 * NF_A <= 512  &&  !defined( ILEG_ISHIOKA )
+							//if (S==0)	qlri[0] *= xlm[ofs_to_be_determined + l+(ll>>1)];	// this can be done here without the need for another kernel... maybe ?
+						#endif
 						#if NLAT_2 <= BLKSZE_A
 							// no atomicAdd needed if (nlat_2 <= BLOCKSIZE), which can be decided before compilation
 							ql[ql_ofs]   = qlri[0];

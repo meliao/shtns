@@ -244,6 +244,37 @@ sh2ishioka_kernel_alt(const int NFIELDS, const real* __restrict__ xlm, const rea
 	}
 }
 
+template<typename real> __global__ void
+sh2reduced_kernel_alt(const int NFIELDS, const real* __restrict__ xlm, const real* __restrict__ ql, real* ql_ish,
+		const int llim, const int lmax, const int mres, const int S, const int ql_dist=0, const int ql_ish_dist=0)
+{
+	const int im = blockIdx.y;
+	const int ll = blockDim.x * blockIdx.x + threadIdx.x;
+	const int m = im*mres;
+	const int l  = ll >> 1;
+	const int llim_m = llim-m;
+
+	if (l>llim_m) return;		// nothing to do
+
+	// first load matrix coefficients into registers
+	xlm += im*(lmax+3) - (m*(im-1))/2;
+	real x0 = xlm[ll>>1];
+
+	// address calculation
+	const int q_ofs = im*(((lmax+1+S)*2) -m+mres);
+	const int b = (blockIdx.z*blockDim.z + threadIdx.z)*NFIELDS;
+	ql     += q_ofs + b*ql_dist + ll;
+	ql_ish += q_ofs + b*ql_ish_dist + ((im>0) ? ll : l);
+
+	const bool write = (im>0 || (ll&1)==0);
+	// loop over NFIELDS different fields
+	for (int k=NFIELDS-1; k>=0; k--) {
+		real q = ql[k*ql_dist] * x0;
+		if (write) {
+			ql_ish[k*ql_ish_dist] = q;   // coalesced store -- for im=0, compacting real parts together without imaginary part (0)
+		}
+	}
+}
 __global__ void
 sh2ishioka_kernel(const double* __restrict__ xlm, const double* __restrict__ ql, double* ql_ish, 
 	const int llim, const int lmax, const int mres, const int S, const int ql_dist=0, const int ql_ish_dist=0)
@@ -318,7 +349,7 @@ ishioka2sh_kernel_alt(const int NFIELDS, const real* __restrict__ xlm, const rea
 				q += ql_ish[k*ql_ish_dist -2] * x1;		// contribution of l-2
 			}
 			if (ll==0) {	// add the mean as late as possible
-				q += ql_ish[k*ql_ish_dist - (ll>>1) + llim + 1] * x0;
+				q += ql_ish[k*ql_ish_dist + llim + 1] * x0;
 			}
 			ql[k*ql_dist] = q;	// coalesced store
 		}
@@ -681,9 +712,15 @@ void sh2ishioka_gpu(shtns_cfg shtns, std::complex<real>* d_Qlm, std::complex<rea
 	}
 	dim3 blocks((nelem_max+blksze-1)/blksze, mmax+1, nblk_z);
 	dim3 threads(blksze, 1, blksze_z);
-	const real* xlm = (real*) shtns->d_xlm;
-	sh2ishioka_kernel_alt <<< blocks, threads, 0, shtns->comp_stream >>>
-		(nfields, xlm, (real*) d_Qlm, (real*) d_Qlm_ish, llim, shtns->lmax, shtns->mres, S, shtns->spec_dist*2, shtns->nlm_stride);
+	if (!getenv("SHTNS_LEG_NOISH")) {
+		const real* xlm = (real*) shtns->d_xlm;
+		sh2ishioka_kernel_alt <<< blocks, threads, 0, shtns->comp_stream >>>
+			(nfields, xlm, (real*) d_Qlm, (real*) d_Qlm_ish, llim, shtns->lmax, shtns->mres, S, shtns->spec_dist*2, shtns->nlm_stride);
+	} else {
+		const real* xlm = (real*) shtns->d_glm;
+		sh2reduced_kernel_alt <<< blocks, threads, 0, shtns->comp_stream >>>
+			(nfields, xlm, (real*) d_Qlm, (real*) d_Qlm_ish, llim, shtns->lmax, shtns->mres, S, shtns->spec_dist*2, shtns->nlm_stride);
+	}
 #endif
 	CUDA_ERROR_CHECK;
 }
@@ -701,7 +738,7 @@ reduced2sh_kernel_alt(const int NFIELDS, const real* __restrict__ xlm, const rea
 	if ((ll>>1) > lmax+S-m) return;		// be sure to include zero-out for llim<l<=lmax AND zero-out for m>mmax
 
 	// first load matrix coefficients into registers
-	//xlm += 3*im*(2*(lmax+4) -m+mres)/4;		// correct offset needed !!!
+	xlm += im*(lmax+3) - (m*(im-1))/2;
 	real x0 = xlm[ll>>1];
 
 	const int b = (blockIdx.z*blockDim.z + threadIdx.z) * NFIELDS;
@@ -710,14 +747,23 @@ reduced2sh_kernel_alt(const int NFIELDS, const real* __restrict__ xlm, const rea
 	if (im==0) {
 		ql_ish += b*ql_ish_dist + (ll>>1);
 		ql += q_ofs + b*ql_dist;
-		const bool read = (ll>>1) <= llim-m && ((ll&1)==0);
+		const bool read = (ll>>1) <= llim && ((ll&1)==0);
+		for (int k=NFIELDS-1; k>=0; k--) {
+			if (read)  q = ql_ish[k*ql_ish_dist] * x0;	// only real part (ll&1 == 0)
+			if (ll==0) {	// add the mean as late as possible
+				q += ql_ish[k*ql_ish_dist + llim + 1] * x0;
+			}
+			ql[k*ql_dist] = q;	// coalesced store
+		}
+	} else {
+		q_ofs += im*(((lmax+1+S)*2) -m+mres);
+		ql_ish += b*ql_ish_dist + q_ofs;
+		ql += q_ofs + b*ql_dist;
+		const bool read = (ll>>1) <= llim-m;
 		for (int k=NFIELDS-1; k>=0; k--) {
 			if (read)  q = ql_ish[k*ql_ish_dist] * x0;	// only real part (ll&1 == 0)
 			ql[k*ql_dist] = q;	// coalesced store
 		}
-	} else {
-		printf("ERROR m>0 NOT IMPLEMENTED!!!\n");
-		return;
 	}
 }
 
@@ -747,12 +793,15 @@ void ishioka2sh_gpu(shtns_cfg shtns, std::complex<real>* d_Qlm_ish, std::complex
 
 	dim3 blocks((nelem_max+blksze-1)/blksze, shtns->mmax+1, nblk_z);
 	dim3 threads(blksze, 1, blksze_z);
-	const real* xlm = (real*) shtns->d_x2lm;
-	ishioka2sh_kernel_alt <<< blocks, threads, 0, shtns->comp_stream >>>
-		(nfields, xlm, (real*) d_Qlm_ish, (real*) d_Qlm, llim, shtns->lmax, mmax, shtns->mres, S, shtns->nlm_stride, shtns->spec_dist*2);
-//	const real* xlm = (real*) shtns->d_glm;
-//	reduced2sh_kernel_alt <<< blocks, threads, 0, shtns->comp_stream >>>
-//		(nfields, xlm, (real*) d_Qlm_ish, (real*) d_Qlm, llim, shtns->lmax, mmax, shtns->mres, S, shtns->nlm_stride, shtns->spec_dist*2);
+	if (!getenv("SHTNS_ILEG_NOISH")) {
+		const real* xlm = (real*) shtns->d_x2lm;
+		ishioka2sh_kernel_alt <<< blocks, threads, 0, shtns->comp_stream >>>
+			(nfields, xlm, (real*) d_Qlm_ish, (real*) d_Qlm, llim, shtns->lmax, mmax, shtns->mres, S, shtns->nlm_stride, shtns->spec_dist*2);
+	} else {
+		const real* xlm = (real*) shtns->d_glm;
+		reduced2sh_kernel_alt <<< blocks, threads, 0, shtns->comp_stream >>>
+			(nfields, xlm, (real*) d_Qlm_ish, (real*) d_Qlm, llim, shtns->lmax, mmax, shtns->mres, S, shtns->nlm_stride, shtns->spec_dist*2);
+	}
 #endif
 	CUDA_ERROR_CHECK;
 }
