@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2010-2022 Centre National de la Recherche Scientifique.
+ * Copyright (c) 2010-2024 Centre National de la Recherche Scientifique.
  * written by Nathanael Schaeffer (CNRS, ISTerre, Grenoble, France).
  * 
  * nathanael.schaeffer@univ-grenoble-alpes.fr
@@ -465,13 +465,14 @@ sphtor2scal_kernel(const double* __restrict__ mx, const double* __restrict__ slm
 	}
 }
 
-template<typename real> __global__ void
+template<typename real, bool ISHIOKA=true> __global__ void
 sphtor2ish_kernel(const real* __restrict__ mx, const real* __restrict__ xlm,
 		const real* __restrict__ slm, const real* __restrict__ tlm, real *vlm, real *wlm, 
 		const int llim, const int lmax, const int mres, const int ql_dist=0, const int ql_ish_dist=0)
 {
 	// indices for overlapping blocks:
-	const int l0 = (blockDim.x-8) * blockIdx.x;		// some overlap needed
+	const int overlap = (ISHIOKA) ? 8 : 4;
+	const int l0 = (blockDim.x-overlap) * blockIdx.x;		// some overlap needed
 	const int j = threadIdx.x;
 	const int im = blockIdx.y;
 	const int b = blockIdx.z;
@@ -509,23 +510,28 @@ sphtor2ish_kernel(const real* __restrict__ mx, const real* __restrict__ xlm,
 		w = mimag*sl[(j^1)+2]  -  (ml*w + mu*tl[j+4]);
 	}
 
+	int x_ofs;
+	const int j2 = j - (j>>1);	//(j>>1)+(j&1);		==> only for ISHIOKA
+  if (ISHIOKA) {
 	__syncthreads();
 
-	const int j2 = j - (j>>1);	//(j>>1)+(j&1);
 	if ((j&2)==0) {
 		sl[j2] = v;
 		tl[j2] = w;
 	}
 
-	const int x_ofs = (3*im*(2*(lmax+4) -m+mres)>>2) + 3*((l0+j) >> 2);
+	x_ofs = (3*im*(2*(lmax+4) -m+mres)>>2) + 3*((l0+j) >> 2);
 
 	__syncthreads();
+  }
 
-	if ((j < blockDim.x-8) && (ll <= llim_m)) {
-		real x0 = xlm[x_ofs + (j&2)];   //M[ix + (j&2)];	// ix for l-m even, ix+2 for l-m odd
+	if ((j < blockDim.x-overlap) && (ll <= llim_m)) {
+		real x0;
+		if (ISHIOKA) x0 = xlm[x_ofs + (j&2)];   //M[ix + (j&2)];	// ix for l-m even, ix+2 for l-m odd
+		else         x0 = xlm[im*(lmax+3) - (m*(im-1))/2 + ((l0+j)>>1)];
 		v *= x0;
 		w *= x0;
-		if ((j&2)==0) {		// for l-m even
+		if (ISHIOKA && (j&2)==0) {		// for l-m even
 			real x2 = xlm[x_ofs +1];   //M[ix+1];			// contribution of l+2
 			v += x2 * sl[j2+2];
 			w += x2 * tl[j2+2];
@@ -595,7 +601,7 @@ scal2sphtor_kernel(const double* __restrict__ mx, const double* __restrict__ vlm
 	}
 }
 
-template<typename real> __global__ void
+template<typename real, bool ISHIOKA=true> __global__ void
 ish2sphtor_kernel(const real* __restrict__ mx, const real* __restrict__ xlm, const real* __restrict__ vlm, const real* __restrict__ wlm, 
 	real *slm, real *tlm, const int llim, const int lmax, const int mres, const int ql_ish_dist=0, const int ql_dist=0)
 {
@@ -617,14 +623,20 @@ ish2sphtor_kernel(const real* __restrict__ mx, const real* __restrict__ xlm, con
 	real w = 0.0;
 	{
 		if (l<=llim_m_p1) {
-			const int x_ofs = 3*im*(2*(lmax+4) -m+mres)/4;
-			real x = xlm[x_ofs + 3*(l>>1) + (j&2)];
-			real x2 = (l>=2) ? xlm[x_ofs + 3*(l>>1) -2] : 0.0;
+			real x,x2;
+			if (ISHIOKA) {
+				const int x_ofs = 3*im*(2*(lmax+4) -m+mres)/4;
+				x = xlm[x_ofs + 3*(l>>1) + (j&2)];
+				x2 = (l>=2) ? xlm[x_ofs + 3*(l>>1) -2] : 0.0;
+			} else {
+				const int x_ofs = im*(lmax+3) - (m*(im-1))/2;
+				x = xlm[x_ofs + l];
+			}
 			if (im!=0) {
 				const int i = q_ofs + 2*im + b*ql_ish_dist + l0+(j^1);		// xchg real and imag
 				v = vlm[i] * x;
 				w = wlm[i] * x;
-				if (((j&2)==0) && (l>0)) {	// l-m even and l-m>2
+				if (ISHIOKA && ((j&2)==0) && (l>0)) {	// l-m even and l-m>2
 					v += vlm[i-4] * x2;		// contribution of l-2
 					w += wlm[i-4] * x2;
 				}
@@ -632,7 +644,7 @@ ish2sphtor_kernel(const real* __restrict__ mx, const real* __restrict__ xlm, con
 				const int i = q_ofs + b*ql_ish_dist + l;
 				v = vlm[i] * x;
 				w = wlm[i] * x;
-				if (((j&2)==0) && (l>0)) {	// l-m even and l-m>2
+				if (ISHIOKA && ((j&2)==0) && (l>0)) {	// l-m even and l-m>2
 					v += vlm[i-2] * x2;		// contribution of l-2
 					w += wlm[i-2] * x2;
 				}
@@ -811,8 +823,13 @@ void sphtor2scal_gpu(shtns_cfg shtns, std::complex<real>* d_Slm, std::complex<re
 {
 	size_t blksze = ((shtns->lmax+3)*2+WARPSZE-1)/WARPSZE * WARPSZE;
 	if (blksze > MAX_THREADS_PER_BLOCK) blksze = MAX_THREADS_PER_BLOCK;
-	dim3 blocks((2*(shtns->lmax+3)+blksze-9)/(blksze-8), mmax+1, shtns->howmany);
+	const int overlap = (shtns->kernel_flags & CUSHT_NO_ISHIOKA) ? 4 : 8;
+	dim3 blocks((2*(shtns->lmax+3)+blksze-overlap-1)/(blksze-overlap), mmax+1, shtns->howmany);
 	dim3 threads(blksze, 1, 1);
+	if (shtns->kernel_flags & CUSHT_NO_ISHIOKA) {
+		sphtor2ish_kernel<real, false> <<< blocks, threads, blksze*3*sizeof(real), shtns->comp_stream >>>
+			((real*) shtns->d_mx_stdt, (real*) shtns->d_glm, (real*) d_Slm, (real*) d_Tlm, (real*) d_Vlm, (real*) d_Wlm, llim, shtns->lmax, shtns->mres, shtns->spec_dist*2, shtns->nlm_stride);
+	} else
 	sphtor2ish_kernel <<< blocks, threads, blksze*3*sizeof(real), shtns->comp_stream >>>
 		((real*) shtns->d_mx_stdt, (real*) shtns->d_xlm, (real*) d_Slm, (real*) d_Tlm, (real*) d_Vlm, (real*) d_Wlm, llim, shtns->lmax, shtns->mres, shtns->spec_dist*2, shtns->nlm_stride);
 	CUDA_ERROR_CHECK;
@@ -823,8 +840,13 @@ void scal2sphtor_gpu(shtns_cfg shtns, std::complex<real>* d_Vlm, std::complex<re
 {
 	size_t blksze = ((shtns->lmax+3)*2+WARPSZE-1)/WARPSZE * WARPSZE;
 	if (blksze > MAX_THREADS_PER_BLOCK) blksze = MAX_THREADS_PER_BLOCK;
-	dim3 blocks((2*(shtns->lmax+3)+blksze-5)/(blksze-4), shtns->mmax+1, shtns->howmany);
+	const int overlap = 4;
+	dim3 blocks((2*(shtns->lmax+3)+blksze-overlap-1)/(blksze-overlap), shtns->mmax+1, shtns->howmany);
 	dim3 threads(blksze, 1, 1);
+	if (shtns->kernel_flags & CUSHT_NO_ISHIOKA) {
+		ish2sphtor_kernel<real, false> <<< blocks, threads, (blksze+2)*2*sizeof(real), shtns->comp_stream >>>
+			((real*) shtns->d_mx_van, (real*) shtns->d_glm_analys, (real*) d_Vlm, (real*) d_Wlm, (real*)d_Slm, (real*)d_Tlm, llim, shtns->lmax, shtns->mres, shtns->nlm_stride, shtns->spec_dist*2);
+	} else
 	ish2sphtor_kernel <<< blocks, threads, (blksze+2)*2*sizeof(real), shtns->comp_stream >>>
 		((real*) shtns->d_mx_van, (real*) shtns->d_x2lm, (real*) d_Vlm, (real*) d_Wlm, (real*)d_Slm, (real*)d_Tlm, llim, shtns->lmax, shtns->mres, shtns->nlm_stride, shtns->spec_dist*2);
 	CUDA_ERROR_CHECK;
