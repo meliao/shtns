@@ -794,7 +794,7 @@ void ishioka2sh_gpu(shtns_cfg shtns, std::complex<real>* d_Qlm_ish, std::complex
 	dim3 blocks((nelem_max+blksze-1)/blksze, shtns->mmax+1, nblk_z);
 	dim3 threads(blksze, 1, blksze_z);
 	if (shtns->kernel_flags & CUSHT_NO_ISHIOKA) {
-		const real* xlm = (real*) shtns->d_glm;
+		const real* xlm = (real*) shtns->d_glm_analys;
 		reduced2sh_kernel_alt <<< blocks, threads, 0, shtns->comp_stream >>>
 			(nfields, xlm, (real*) d_Qlm_ish, (real*) d_Qlm, llim, shtns->lmax, mmax, shtns->mres, S, shtns->nlm_stride, shtns->spec_dist*2);
 	} else {

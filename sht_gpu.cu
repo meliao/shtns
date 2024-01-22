@@ -599,6 +599,7 @@ int cushtns_init_gpu(shtns_cfg shtns)
 	const long nlm1 = nlm_calc(LMAX+2, MMAX, MRES);
 	sze += nlm1*sizeof_real_g/sizeof_real + (CACHE_LINE_GPU/sizeof_real-1);
 	sze += nlm1 + (CACHE_LINE_GPU/sizeof_real-1);
+	if (shtns->glm != shtns->glm_analys)  sze += nlm1 + (CACHE_LINE_GPU/sizeof_real-1);		// reserve space for glm_analys if needed
 	err = cudaMalloc(&buf, (sze + MAX_THREADS_PER_BLOCK-1)*sizeof_real);	// allow some overflow.
 	if (err != cudaSuccess) err_count ++;
 	if (err_count == 0) {
@@ -618,6 +619,11 @@ int cushtns_init_gpu(shtns_cfg shtns)
 		err_count += gpu_upload_convert(d_alm2, shtns->alm2, nlm1, sizeof_real_g);
 		shtns->d_glm = d_glm;
 		shtns->d_alm2 = d_alm2;
+		if (shtns->glm != shtns->glm_analys) {
+			double* d_glm_a = (double*) buf;		align_ptr(&buf, nlm1 * sizeof_real, CACHE_LINE_GPU);
+			err_count += gpu_upload_convert(d_glm_a, shtns->glm_analys, nlm1, sizeof_real);
+			shtns->d_glm_analys = d_glm_a;
+		} else shtns->d_glm_analys = shtns->d_glm;
 
 		if (shtns->mx_stdt) {
 			d_mx_van = d_mx_stdt = (double*) buf;	align_ptr(&buf, 2*nlm*sizeof_real, CACHE_LINE_GPU);	// Allocate the device matrix for d(sin(t))/dt
