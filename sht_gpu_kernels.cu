@@ -712,13 +712,13 @@ void sh2ishioka_gpu(shtns_cfg shtns, std::complex<real>* d_Qlm, std::complex<rea
 	}
 	dim3 blocks((nelem_max+blksze-1)/blksze, mmax+1, nblk_z);
 	dim3 threads(blksze, 1, blksze_z);
-	if (!getenv("SHTNS_LEG_NOISH")) {
-		const real* xlm = (real*) shtns->d_xlm;
-		sh2ishioka_kernel_alt <<< blocks, threads, 0, shtns->comp_stream >>>
-			(nfields, xlm, (real*) d_Qlm, (real*) d_Qlm_ish, llim, shtns->lmax, shtns->mres, S, shtns->spec_dist*2, shtns->nlm_stride);
-	} else {
+	if (shtns->kernel_flags & CUSHT_NO_ISHIOKA) {	// no ishioka
 		const real* xlm = (real*) shtns->d_glm;
 		sh2reduced_kernel_alt <<< blocks, threads, 0, shtns->comp_stream >>>
+			(nfields, xlm, (real*) d_Qlm, (real*) d_Qlm_ish, llim, shtns->lmax, shtns->mres, S, shtns->spec_dist*2, shtns->nlm_stride);
+	} else {
+		const real* xlm = (real*) shtns->d_xlm;
+		sh2ishioka_kernel_alt <<< blocks, threads, 0, shtns->comp_stream >>>
 			(nfields, xlm, (real*) d_Qlm, (real*) d_Qlm_ish, llim, shtns->lmax, shtns->mres, S, shtns->spec_dist*2, shtns->nlm_stride);
 	}
 #endif
@@ -793,13 +793,13 @@ void ishioka2sh_gpu(shtns_cfg shtns, std::complex<real>* d_Qlm_ish, std::complex
 
 	dim3 blocks((nelem_max+blksze-1)/blksze, shtns->mmax+1, nblk_z);
 	dim3 threads(blksze, 1, blksze_z);
-	if (!getenv("SHTNS_ILEG_NOISH")) {
-		const real* xlm = (real*) shtns->d_x2lm;
-		ishioka2sh_kernel_alt <<< blocks, threads, 0, shtns->comp_stream >>>
-			(nfields, xlm, (real*) d_Qlm_ish, (real*) d_Qlm, llim, shtns->lmax, mmax, shtns->mres, S, shtns->nlm_stride, shtns->spec_dist*2);
-	} else {
+	if (shtns->kernel_flags & CUSHT_NO_ISHIOKA) {
 		const real* xlm = (real*) shtns->d_glm;
 		reduced2sh_kernel_alt <<< blocks, threads, 0, shtns->comp_stream >>>
+			(nfields, xlm, (real*) d_Qlm_ish, (real*) d_Qlm, llim, shtns->lmax, mmax, shtns->mres, S, shtns->nlm_stride, shtns->spec_dist*2);
+	} else {
+		const real* xlm = (real*) shtns->d_x2lm;
+		ishioka2sh_kernel_alt <<< blocks, threads, 0, shtns->comp_stream >>>
 			(nfields, xlm, (real*) d_Qlm_ish, (real*) d_Qlm, llim, shtns->lmax, mmax, shtns->mres, S, shtns->nlm_stride, shtns->spec_dist*2);
 	}
 #endif

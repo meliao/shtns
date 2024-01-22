@@ -835,7 +835,7 @@ template<int S> __global__
 __launch_bounds__(64,1)
 #endif
 void ileg_m_kernel(const real_g* __restrict__ al, const real_g* __restrict__ ct, const real* __restrict__ q, real *ql, const int llim, 
-	const int nlat_2, const int nphi, const int m_inc, const int q_dist, const int ql_dist
+	const int nlat_2, const int nphi, const int m_inc, const int q_dist, const int ql_dist, const real w_norm
 #if BLKSZE_SH2ISH > 0
 	//, const real* __restrict__ xlm
 #endif
@@ -901,7 +901,7 @@ void ileg_m_kernel(const real_g* __restrict__ al, const real_g* __restrict__ ct,
 				if (BLOCKSIZE > WARPSZE) {	__syncthreads(); } else { _syncwarp_fence; }
 				if (it<NFIELDS)  ql[llim+1  + (b*NFIELDS+it)*ql_dist] = yl[it*l_inc];		// store the mean for future assembly, in ishioka2sh_kernel()
 				#pragma unroll
-				for (int f=0; f<NFIELDS; f++) my_reo[f] = yl[f*l_inc] * nphi/(2.*3.1415926535897932384626433832795);	// TODO: this needs to change with normalization
+				for (int f=0; f<NFIELDS; f++) my_reo[f] = yl[f*l_inc] * w_norm;
 		}
 	#endif
 

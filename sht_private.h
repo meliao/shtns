@@ -143,6 +143,7 @@ struct shtns_info {		// MUST start with "int nlm;"
 	double *wg;					///< Gauss weights for Gauss-Legendre quadrature.
 	double *st_1;				///< 1/sin(theta);
 	double mpos_scale_analys;	///< scale factor for analysis, handles real-norm (0.5 or 1.0);
+	double weight_norm_1;		///< general scale factor for analysis
 
 	fftw_plan ifftc, fftc;
 	fftw_plan ifft_cplx, fft_cplx;		// for complex-valued spatial fields.
@@ -185,7 +186,7 @@ struct shtns_info {		// MUST start with "int nlm;"
 
 	#ifdef SHTNS_GPU
 	/* cuda stuff */
-	unsigned short cu_flags;
+	unsigned char cu_flags, kernel_flags;
 	unsigned char sizeof_real, sizeof_real_g;		// 4 for float, 8 for double
 	double* d_clm;
 	double* d_xlm;

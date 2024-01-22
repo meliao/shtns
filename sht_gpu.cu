@@ -44,9 +44,9 @@
 #error "GPU transform requires SHTNS_ISHIOKA"
 #endif
 
-#include "sht_gpu_kernels.cu"
+enum cushtns_flags { CUSHT_OFF=0, CUSHT_ON=1, CUSHT_OWN_XFER_STREAM=4, CUSHT_NO_ISHIOKA=32, CUSHT_PROFILING=64};
 
-enum cushtns_flags { CUSHT_OFF=0, CUSHT_ON=1, CUSHT_OWN_XFER_STREAM=4, CUSHT_PROFILING=64};
+#include "sht_gpu_kernels.cu"
 
 /// include a compilable version of cuda_legendre.gen.cu (zero-terminated) :
 const char *src_leg =
@@ -408,8 +408,7 @@ int init_cuda_program(shtns_cfg shtns, const char* gpu_arch_target)
 		s += sprintf(s, "typedef double real_g;\n#define SHT_ACCURACY 1.0e-33\n#define SHT_SCALE_FACTOR 2.0370359763344860863e90\n");	// for double-precision recurrence
 	}
 	s += sprintf(s, "#define SHT_HI_PREC %d\n", (shtns->sizeof_real == 4) ? 1 : 0);		// improve numerical accuracy by computing the mean separately for scalar (S=0) transforms.
-	if (!getenv("SHTNS_LEG_NOISH"))  s += sprintf(s, "#define LEG_ISHIOKA\n");
-	if (!getenv("SHTNS_ILEG_NOISH"))  s += sprintf(s, "#define ILEG_ISHIOKA\n");
+	if ((shtns->kernel_flags & CUSHT_NO_ISHIOKA) == 0) 	s += sprintf(s, "#define LEG_ISHIOKA\n#define ILEG_ISHIOKA\n");		// use ishioka's recurrence in gpu kernels
 	#if SHT_VERBOSE > 1
 		printf("%s", src);		// displays the defines for debug purposes
 	#endif
@@ -589,6 +588,7 @@ int cushtns_init_gpu(shtns_cfg shtns)
 		if (vv) 	sizeof_real_g = (atoi(vv)==1) ? 4 : 8;
 	}
 	shtns->sizeof_real_g = sizeof_real_g;
+	shtns->kernel_flags = (sizeof_real_g == 4) ? CUSHT_NO_ISHIOKA : 0;		// ishioka disabled for fp32 recurrence (accuracy issues)
 
 	const long nlm0 = nlm_calc(LMAX+4, MMAX, MRES);
 	// Allocate the coefficients vectors alm, ...
@@ -762,7 +762,7 @@ static void legendre(shtns_cfg shtns, const int S, const void *ql, void *q, cons
 
 	int llim_ = llim;
 	void* params[11] = {&shtns->d_clm, &shtns->d_ct, &ql, &q, &llim_, &nlat_2, &shtns->nphi, &shtns->nlat_padded, &nlm_stride, &shtns->nlat, &shtns->d_xlm};
-	if (getenv("SHTNS_LEG_NOISH")) {	params[0] = &shtns->d_alm2;		params[10] = &shtns->d_glm;  }
+	if (shtns->kernel_flags & CUSHT_NO_ISHIOKA) {	params[0] = &shtns->d_alm2;		params[10] = &shtns->d_glm;  }		// disable ishioka
 	cuLaunchKernel(shtns->gpu_kernels[S], 
 			shtns->gridDim_x[par_idx], shtns->gridDim_y[0], mmax+1,		// grid dim
 			shtns->nwarp[par_idx]*WARPSZE, 1, 1,					// block dim
@@ -786,8 +786,10 @@ static void ilegendre(shtns_cfg shtns, const int S, const void *q, void* ql, con
 	if (llim < mmax*mres) mmax = llim / mres;	// truncate mmax too !
 
 	int llim_ = llim;
-	void* params[10] = {&shtns->d_clm, &shtns->d_ct, &q, &ql, &llim_, &nlat_2, &shtns->nphi, &shtns->nlat_padded, &shtns->nlat, &shtns->nlm_stride};
-	if (getenv("SHTNS_ILEG_NOISH"))  params[0] = &shtns->d_alm2;
+	float w_norm_1_f = shtns->weight_norm_1;	// convert to float
+	void* params[11] = {&shtns->d_clm, &shtns->d_ct, &q, &ql, &llim_, &nlat_2, &shtns->nphi, &shtns->nlat_padded, &shtns->nlat, &shtns->nlm_stride, &shtns->weight_norm_1};
+	if (shtns->kernel_flags & CUSHT_NO_ISHIOKA)  params[0] = &shtns->d_alm2;	// no ishioka!
+	if (shtns->sizeof_real == 4) params[10] = &w_norm_1_f;		// weight_norm_1 as a float
 	cuLaunchKernel(shtns->gpu_kernels[2+S], 		// analysis kernels
 			shtns->gridDim_x[1], shtns->gridDim_y[1], mmax+1,		// grid dim
 			blksze, 1, 1,					// block dim

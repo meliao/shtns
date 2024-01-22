@@ -623,6 +623,7 @@ static void grid_weights(shtns_cfg shtns, double latdir)
 		} else if (fabs(s)+fabs(x2)+fabs(st2) > 1e-14)	shtns_runerr("Bad quadrature accuracy.");
 	}
 
+	shtns->weight_norm_1 = 1.0/iylm_fft_norm;		// store the inverse of the norm included in gauss weights
 	for (it=0; it<NLAT_2; it++)
 		shtns->wg[it] = wg[it]*iylm_fft_norm;		// faster double-precision computations.
 	for (it=NLAT_2; it < NLAT_2 +overflow; it++) shtns->wg[it] = 0.0;		// padding for multi-way algorithm.
@@ -1603,9 +1604,7 @@ int shtns_gauss_wts(shtns_cfg shtns, double *wts)
 {
 	int i = 0;
 	if (shtns->wg) {
-		double rescale = 2*NPHI;		// weights are stored with a rescaling that depends on SHT_NORM.
-		if ((SHT_NORM != sht_fourpi)&&(SHT_NORM != sht_schmidt))  rescale *= 0.25/M_PI;
-
+		const double rescale = shtns->weight_norm_1;		// weights are stored with a rescaling that depends on SHT_NORM.
 		do {
 			wts[i] = shtns->wg[i] * rescale;
 		} while(++i < shtns->nlat_2);
