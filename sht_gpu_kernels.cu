@@ -659,7 +659,7 @@ ish2sphtor_kernel(const real* __restrict__ mx, const real* __restrict__ xlm, con
 	l += m;
 	real ml,mu, ll_1;
 	if ((l <= llim) && (l>0)) {
-		ll_1 = 1.0 / (l*(l+1));
+		ll_1 = 1 / (real)(l*(l+1));
 		mu = mx[q_ofs + l0 + (j|1)];    //M[2*(j>>1)+3];
 		ml = mx[q_ofs + l0 + (j|1) -3];	//M[2*(j>>1)+0];
 	}
@@ -724,12 +724,11 @@ void sh2ishioka_gpu(shtns_cfg shtns, std::complex<real>* d_Qlm, std::complex<rea
 	}
 	dim3 blocks((nelem_max+blksze-1)/blksze, mmax+1, nblk_z);
 	dim3 threads(blksze, 1, blksze_z);
+	const real* xlm = (real*) shtns->d_xlm;
 	if (shtns->kernel_flags & CUSHT_NO_ISHIOKA) {	// no ishioka
-		const real* xlm = (real*) shtns->d_glm;
 		sh2reduced_kernel_alt <<< blocks, threads, 0, shtns->comp_stream >>>
 			(nfields, xlm, (real*) d_Qlm, (real*) d_Qlm_ish, llim, shtns->lmax, shtns->mres, S, shtns->spec_dist*2, shtns->nlm_stride);
 	} else {
-		const real* xlm = (real*) shtns->d_xlm;
 		sh2ishioka_kernel_alt <<< blocks, threads, 0, shtns->comp_stream >>>
 			(nfields, xlm, (real*) d_Qlm, (real*) d_Qlm_ish, llim, shtns->lmax, shtns->mres, S, shtns->spec_dist*2, shtns->nlm_stride);
 	}
@@ -805,12 +804,11 @@ void ishioka2sh_gpu(shtns_cfg shtns, std::complex<real>* d_Qlm_ish, std::complex
 
 	dim3 blocks((nelem_max+blksze-1)/blksze, shtns->mmax+1, nblk_z);
 	dim3 threads(blksze, 1, blksze_z);
+	const real* xlm = (real*) shtns->d_x2lm;
 	if (shtns->kernel_flags & CUSHT_NO_ISHIOKA) {
-		const real* xlm = (real*) shtns->d_glm_analys;
 		reduced2sh_kernel_alt <<< blocks, threads, 0, shtns->comp_stream >>>
 			(nfields, xlm, (real*) d_Qlm_ish, (real*) d_Qlm, llim, shtns->lmax, mmax, shtns->mres, S, shtns->nlm_stride, shtns->spec_dist*2);
 	} else {
-		const real* xlm = (real*) shtns->d_x2lm;
 		ishioka2sh_kernel_alt <<< blocks, threads, 0, shtns->comp_stream >>>
 			(nfields, xlm, (real*) d_Qlm_ish, (real*) d_Qlm, llim, shtns->lmax, mmax, shtns->mres, S, shtns->nlm_stride, shtns->spec_dist*2);
 	}
@@ -828,7 +826,7 @@ void sphtor2scal_gpu(shtns_cfg shtns, std::complex<real>* d_Slm, std::complex<re
 	dim3 threads(blksze, 1, 1);
 	if (shtns->kernel_flags & CUSHT_NO_ISHIOKA) {
 		sphtor2ish_kernel<real, false> <<< blocks, threads, blksze*3*sizeof(real), shtns->comp_stream >>>
-			((real*) shtns->d_mx_stdt, (real*) shtns->d_glm, (real*) d_Slm, (real*) d_Tlm, (real*) d_Vlm, (real*) d_Wlm, llim, shtns->lmax, shtns->mres, shtns->spec_dist*2, shtns->nlm_stride);
+			((real*) shtns->d_mx_stdt, (real*) shtns->d_xlm, (real*) d_Slm, (real*) d_Tlm, (real*) d_Vlm, (real*) d_Wlm, llim, shtns->lmax, shtns->mres, shtns->spec_dist*2, shtns->nlm_stride);
 	} else
 	sphtor2ish_kernel <<< blocks, threads, blksze*3*sizeof(real), shtns->comp_stream >>>
 		((real*) shtns->d_mx_stdt, (real*) shtns->d_xlm, (real*) d_Slm, (real*) d_Tlm, (real*) d_Vlm, (real*) d_Wlm, llim, shtns->lmax, shtns->mres, shtns->spec_dist*2, shtns->nlm_stride);
@@ -845,7 +843,7 @@ void scal2sphtor_gpu(shtns_cfg shtns, std::complex<real>* d_Vlm, std::complex<re
 	dim3 threads(blksze, 1, 1);
 	if (shtns->kernel_flags & CUSHT_NO_ISHIOKA) {
 		ish2sphtor_kernel<real, false> <<< blocks, threads, (blksze+2)*2*sizeof(real), shtns->comp_stream >>>
-			((real*) shtns->d_mx_van, (real*) shtns->d_glm_analys, (real*) d_Vlm, (real*) d_Wlm, (real*)d_Slm, (real*)d_Tlm, llim, shtns->lmax, shtns->mres, shtns->nlm_stride, shtns->spec_dist*2);
+			((real*) shtns->d_mx_van, (real*) shtns->d_x2lm, (real*) d_Vlm, (real*) d_Wlm, (real*)d_Slm, (real*)d_Tlm, llim, shtns->lmax, shtns->mres, shtns->nlm_stride, shtns->spec_dist*2);
 	} else
 	ish2sphtor_kernel <<< blocks, threads, (blksze+2)*2*sizeof(real), shtns->comp_stream >>>
 		((real*) shtns->d_mx_van, (real*) shtns->d_x2lm, (real*) d_Vlm, (real*) d_Wlm, (real*)d_Slm, (real*)d_Tlm, llim, shtns->lmax, shtns->mres, shtns->nlm_stride, shtns->spec_dist*2);

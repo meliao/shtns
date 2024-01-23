@@ -289,6 +289,17 @@ static int optimize_nwarp(int* nwarp, int n_target, int nw, float loss_max, cons
 	return nb;
 }
 
+/* When should we fuse pre/post-processing of harmonic coefficients with (i)legendre kernels ?
+ * A separate pre/post-processing kernel reads and write all fields, that is NF_A * 2 fields access on memory.
+ * Doing the pre/post-processing in the transform kernel (sh2ish_fuse) means additional read 
+ * of coefficients NLAT_2/BLOCKSIZE times, which means
+ * 		NLAT_2/BLOCKSIZE*X fields (where X is 0.75 for ishioka and 0.5 otherwise)
+ * It is therefore better in terms of bandwidth when
+ * 		NLAT_2/BLOCKSIZE*X <= 2*NF_A
+ * 	or	NLAT_2 <= 8*NF_A*BLOCKSIZE/3  for Ishioka's reccurence
+ * and  NLAT_2 <= 4*NF_A*BLOCKSIZE    for Standard recurrence
+ */
+
 int init_cuda_program(shtns_cfg shtns, const char* gpu_arch_target)
 {
 	const int nwarp_target = (shtns->nlat_2 + WARPSZE-1)/WARPSZE;		// number of 'warps' needed for nlat_2 points
@@ -590,40 +601,43 @@ int cushtns_init_gpu(shtns_cfg shtns)
 	shtns->sizeof_real_g = sizeof_real_g;
 	shtns->kernel_flags = (sizeof_real_g == 4) ? CUSHT_NO_ISHIOKA : 0;		// ishioka disabled for fp32 recurrence (accuracy issues)
 
-	const long nlm0 = nlm_calc(LMAX+4, MMAX, MRES);
+	const long nlm0 = nlm_calc(LMAX+4, MMAX, MRES);	// for ishioka
+	const long nlm1 = nlm_calc(LMAX+2, MMAX, MRES);	// for non-ishioka
 	// Allocate the coefficients vectors alm, ...
-	size_t sze = (nlm0 + 4*nlat_2)*sizeof_real_g/sizeof_real + 3*nlm0/2 +   +  (CACHE_LINE_GPU/sizeof_real-1)*2;
-	if (shtns->x2lm != shtns->xlm)  sze += 3*nlm0/2 +  (CACHE_LINE_GPU/sizeof_real-1);		// reserve space for x2lm
+	size_t sze = 4*nlat_2*sizeof_real_g/sizeof_real;	// for cos(theta), sin(theta), weights, ...
+	if (shtns->kernel_flags & CUSHT_NO_ISHIOKA) {
+		sze += nlm1*sizeof_real_g/sizeof_real + (CACHE_LINE_GPU/sizeof_real-1);		// alm2
+		sze += nlm1 + (CACHE_LINE_GPU/sizeof_real-1);		// glm
+		if (shtns->glm != shtns->glm_analys)  sze += nlm1 + (CACHE_LINE_GPU/sizeof_real-1);		// reserve space for glm_analys if needed
+	} else { 
+		sze += nlm0 * sizeof_real_g/sizeof_real + 3*nlm0/2 + (CACHE_LINE_GPU/sizeof_real-1)*2;
+		sze += (3*nlm0/2 +1)/2 + (CACHE_LINE_GPU/sizeof_real-1);		// float buffers, in double units
+		if (shtns->x2lm != shtns->xlm)  sze += 3*nlm0/2 +  (CACHE_LINE_GPU/sizeof_real-1);		// reserve space for x2lm
+	}
 	if (shtns->mx_stdt) sze += ( 2*nlm + (CACHE_LINE_GPU/sizeof_real-1) ) * ((shtns->mx_van == shtns->mx_stdt) ? 1 : 2);
-	sze += (3*nlm0/2 +1)/2 + (CACHE_LINE_GPU/sizeof_real-1);		// float buffers, in double units
-	const long nlm1 = nlm_calc(LMAX+2, MMAX, MRES);
-	sze += nlm1*sizeof_real_g/sizeof_real + (CACHE_LINE_GPU/sizeof_real-1);
-	sze += nlm1 + (CACHE_LINE_GPU/sizeof_real-1);
-	if (shtns->glm != shtns->glm_analys)  sze += nlm1 + (CACHE_LINE_GPU/sizeof_real-1);		// reserve space for glm_analys if needed
 	err = cudaMalloc(&buf, (sze + MAX_THREADS_PER_BLOCK-1)*sizeof_real);	// allow some overflow.
 	if (err != cudaSuccess) err_count ++;
 	if (err_count == 0) {
-		d_clm = (double*) buf;		align_ptr(&buf, nlm0*sizeof_real_g,  CACHE_LINE_GPU);
-		d_xlm = (double*) buf;		align_ptr(&buf, 3*nlm0/2 * sizeof_real, CACHE_LINE_GPU);
-		err_count += gpu_upload_convert(d_clm, shtns->clm, nlm0, sizeof_real_g);
-		err_count += gpu_upload_convert(d_xlm, shtns->xlm, 3*nlm0/2, sizeof_real);
-		if (shtns->x2lm != shtns->xlm) {		// different arrays for Schmidt normalization
-			d_x2lm = (double*) buf;		align_ptr(&buf, 3*nlm0/2 * sizeof_real, CACHE_LINE_GPU);
-			err_count += gpu_upload_convert(d_x2lm, shtns->x2lm, 3*nlm0/2, sizeof_real);
-		} else d_x2lm = d_xlm;
-		
-		// for reduced recurrence, usful for single precision, for which ishioka's recurrence loses too much accuracy.
-		double* d_glm = (double*) buf;		align_ptr(&buf, nlm1 * sizeof_real, CACHE_LINE_GPU);
-		double* d_alm2 = (double*) buf;		align_ptr(&buf, nlm1 * sizeof_real_g, CACHE_LINE_GPU);
-		err_count += gpu_upload_convert(d_glm, shtns->glm, nlm1, sizeof_real);
-		err_count += gpu_upload_convert(d_alm2, shtns->alm2, nlm1, sizeof_real_g);
-		shtns->d_glm = d_glm;
-		shtns->d_alm2 = d_alm2;
-		if (shtns->glm != shtns->glm_analys) {
-			double* d_glm_a = (double*) buf;		align_ptr(&buf, nlm1 * sizeof_real, CACHE_LINE_GPU);
-			err_count += gpu_upload_convert(d_glm_a, shtns->glm_analys, nlm1, sizeof_real);
-			shtns->d_glm_analys = d_glm_a;
-		} else shtns->d_glm_analys = shtns->d_glm;
+		if (shtns->kernel_flags & CUSHT_NO_ISHIOKA) {
+			// for reduced recurrence, usful for single precision, for which ishioka's recurrence loses too much accuracy.
+			d_xlm = (double*) buf;		align_ptr(&buf, nlm1 * sizeof_real, CACHE_LINE_GPU);
+			d_clm = (double*) buf;		align_ptr(&buf, nlm1 * sizeof_real_g, CACHE_LINE_GPU);
+			err_count += gpu_upload_convert(d_xlm, shtns->glm, nlm1, sizeof_real);
+			err_count += gpu_upload_convert(d_clm, shtns->alm2, nlm1, sizeof_real_g);
+			if (shtns->glm != shtns->glm_analys) {
+				d_x2lm = (double*) buf;		align_ptr(&buf, nlm1 * sizeof_real, CACHE_LINE_GPU);
+				err_count += gpu_upload_convert(d_x2lm, shtns->glm_analys, nlm1, sizeof_real);
+			} else d_x2lm = d_xlm;
+		} else {
+			d_clm = (double*) buf;		align_ptr(&buf, nlm0*sizeof_real_g,  CACHE_LINE_GPU);
+			d_xlm = (double*) buf;		align_ptr(&buf, 3*nlm0/2 * sizeof_real, CACHE_LINE_GPU);
+			err_count += gpu_upload_convert(d_clm, shtns->clm, nlm0, sizeof_real_g);
+			err_count += gpu_upload_convert(d_xlm, shtns->xlm, 3*nlm0/2, sizeof_real);
+			if (shtns->x2lm != shtns->xlm) {		// different arrays for Schmidt normalization
+				d_x2lm = (double*) buf;		align_ptr(&buf, 3*nlm0/2 * sizeof_real, CACHE_LINE_GPU);
+				err_count += gpu_upload_convert(d_x2lm, shtns->x2lm, 3*nlm0/2, sizeof_real);
+			} else d_x2lm = d_xlm;
+		}
 
 		if (shtns->mx_stdt) {
 			d_mx_van = d_mx_stdt = (double*) buf;	align_ptr(&buf, 2*nlm*sizeof_real, CACHE_LINE_GPU);	// Allocate the device matrix for d(sin(t))/dt
@@ -768,7 +782,6 @@ static void legendre(shtns_cfg shtns, const int S, const void *ql, void *q, cons
 
 	int llim_ = llim;
 	void* params[11] = {&shtns->d_clm, &shtns->d_ct, &ql, &q, &llim_, &nlat_2, &shtns->nphi, &shtns->nlat_padded, &nlm_stride, &shtns->nlat, &shtns->d_xlm};
-	if (shtns->kernel_flags & CUSHT_NO_ISHIOKA) {	params[0] = &shtns->d_alm2;		params[10] = &shtns->d_glm;  }		// disable ishioka
 	cuLaunchKernel(shtns->gpu_kernels[S], 
 			shtns->gridDim_x[par_idx], shtns->gridDim_y[0], mmax+1,		// grid dim
 			shtns->nwarp[par_idx]*WARPSZE, 1, 1,					// block dim
@@ -794,7 +807,6 @@ static void ilegendre(shtns_cfg shtns, const int S, const void *q, void* ql, con
 	int llim_ = llim;
 	float w_norm_1_f = shtns->weight_norm_1;	// convert to float
 	void* params[11] = {&shtns->d_clm, &shtns->d_ct, &q, &ql, &llim_, &nlat_2, &shtns->nphi, &shtns->nlat_padded, &shtns->nlat, &shtns->nlm_stride, &shtns->weight_norm_1};
-	if (shtns->kernel_flags & CUSHT_NO_ISHIOKA)  params[0] = &shtns->d_alm2;	// no ishioka!
 	if (shtns->sizeof_real == 4) params[10] = &w_norm_1_f;		// weight_norm_1 as a float
 	cuLaunchKernel(shtns->gpu_kernels[2+S], 		// analysis kernels
 			shtns->gridDim_x[1], shtns->gridDim_y[1], mmax+1,		// grid dim
