@@ -600,6 +600,10 @@ int cushtns_init_gpu(shtns_cfg shtns)
 	}
 	shtns->sizeof_real_g = sizeof_real_g;
 	shtns->kernel_flags = (sizeof_real_g == 4) ? CUSHT_NO_ISHIOKA : 0;		// ishioka disabled for fp32 recurrence (accuracy issues)
+	{	// allow to override the default recurrence with environment variable
+		const char* rec = getenv("SHTNS_GPU_REC");		// I for Ishioka, everything else for standard
+		if (rec) 	shtns->kernel_flags = (rec[0] == 'I') ? 0 : CUSHT_NO_ISHIOKA;
+	}
 
 	const long nlm0 = nlm_calc(LMAX+4, MMAX, MRES);	// for ishioka
 	const long nlm1 = nlm_calc(LMAX+2, MMAX, MRES);	// for non-ishioka
