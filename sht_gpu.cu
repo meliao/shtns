@@ -611,33 +611,23 @@ int cushtns_init_gpu(shtns_cfg shtns)
 		if (shtns->glm != shtns->glm_analys)  sze += nlm1 + (CACHE_LINE_GPU/sizeof_real-1);		// reserve space for glm_analys if needed
 	} else { 
 		sze += nlm0 * sizeof_real_g/sizeof_real + 3*nlm0/2 + (CACHE_LINE_GPU/sizeof_real-1)*2;
-		sze += (3*nlm0/2 +1)/2 + (CACHE_LINE_GPU/sizeof_real-1);		// float buffers, in double units
 		if (shtns->x2lm != shtns->xlm)  sze += 3*nlm0/2 +  (CACHE_LINE_GPU/sizeof_real-1);		// reserve space for x2lm
 	}
 	if (shtns->mx_stdt) sze += ( 2*nlm + (CACHE_LINE_GPU/sizeof_real-1) ) * ((shtns->mx_van == shtns->mx_stdt) ? 1 : 2);
 	err = cudaMalloc(&buf, (sze + MAX_THREADS_PER_BLOCK-1)*sizeof_real);	// allow some overflow.
 	if (err != cudaSuccess) err_count ++;
 	if (err_count == 0) {
-		if (shtns->kernel_flags & CUSHT_NO_ISHIOKA) {
-			// for reduced recurrence, usful for single precision, for which ishioka's recurrence loses too much accuracy.
-			d_xlm = (double*) buf;		align_ptr(&buf, nlm1 * sizeof_real, CACHE_LINE_GPU);
-			d_clm = (double*) buf;		align_ptr(&buf, nlm1 * sizeof_real_g, CACHE_LINE_GPU);
-			err_count += gpu_upload_convert(d_xlm, shtns->glm, nlm1, sizeof_real);
-			err_count += gpu_upload_convert(d_clm, shtns->alm2, nlm1, sizeof_real_g);
-			if (shtns->glm != shtns->glm_analys) {
-				d_x2lm = (double*) buf;		align_ptr(&buf, nlm1 * sizeof_real, CACHE_LINE_GPU);
-				err_count += gpu_upload_convert(d_x2lm, shtns->glm_analys, nlm1, sizeof_real);
-			} else d_x2lm = d_xlm;
-		} else {
-			d_clm = (double*) buf;		align_ptr(&buf, nlm0*sizeof_real_g,  CACHE_LINE_GPU);
-			d_xlm = (double*) buf;		align_ptr(&buf, 3*nlm0/2 * sizeof_real, CACHE_LINE_GPU);
-			err_count += gpu_upload_convert(d_clm, shtns->clm, nlm0, sizeof_real_g);
-			err_count += gpu_upload_convert(d_xlm, shtns->xlm, 3*nlm0/2, sizeof_real);
-			if (shtns->x2lm != shtns->xlm) {		// different arrays for Schmidt normalization
-				d_x2lm = (double*) buf;		align_ptr(&buf, 3*nlm0/2 * sizeof_real, CACHE_LINE_GPU);
-				err_count += gpu_upload_convert(d_x2lm, shtns->x2lm, 3*nlm0/2, sizeof_real);
-			} else d_x2lm = d_xlm;
-		}
+		const bool ish = (shtns->kernel_flags & CUSHT_NO_ISHIOKA) ? false : true;	// false for educed recurrence, usful for single precision, for which ishioka's recurrence loses too much accuracy.
+		const long n_clm = (ish) ? nlm0 : nlm1;
+		const long n_xlm = (ish) ? 3*nlm0/2 : nlm1;
+		d_clm = (double*) buf;		align_ptr(&buf, n_clm * sizeof_real_g, CACHE_LINE_GPU);
+		d_xlm = (double*) buf;		align_ptr(&buf, n_xlm * sizeof_real,   CACHE_LINE_GPU);
+		err_count += gpu_upload_convert(d_clm, (ish) ? shtns->clm : shtns->alm2, n_clm, sizeof_real_g);
+		err_count += gpu_upload_convert(d_xlm, (ish) ? shtns->xlm : shtns->glm,  n_xlm, sizeof_real);
+		if ((ish && shtns->x2lm != shtns->xlm) || ((!ish) && shtns->glm_analys != shtns->glm)) {		// different arrays for Schmidt normalization
+			d_x2lm = (double*) buf;		align_ptr(&buf, n_xlm * sizeof_real, CACHE_LINE_GPU);
+			err_count += gpu_upload_convert(d_x2lm, (ish) ? shtns->x2lm : shtns->glm_analys, n_xlm, sizeof_real);
+		} else d_x2lm = d_xlm;
 
 		if (shtns->mx_stdt) {
 			d_mx_van = d_mx_stdt = (double*) buf;	align_ptr(&buf, 2*nlm*sizeof_real, CACHE_LINE_GPU);	// Allocate the device matrix for d(sin(t))/dt
