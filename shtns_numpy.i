@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2010-2013 Centre National de la Recherche Scientifique.
+ * Copyright (c) 2010-2023 Centre National de la Recherche Scientifique.
  * written by Nathanael Schaeffer (CNRS, ISTerre, Grenoble, France).
  * 
  * nathanael.schaeffer@ujf-grenoble.fr
@@ -22,7 +22,17 @@
  * - you may have to adjust the path below to include the header file "arrayobject.h" from the NumPy package.
  */
 
-%module (docstring="Python/NumPy interface to the SHTns spherical harmonic transform library") shtns
+%define MODULEIMPORT
+"
+try:
+    import _shtns_cuda as _shtns
+except:
+    import _shtns
+print(_shtns.build_info())
+"
+%enddef
+
+%module (docstring="Python/NumPy interface to the SHTns spherical harmonic transform library", moduleimport=MODULEIMPORT) shtns
 
 %init{
 	import_array();		// required by NumPy
