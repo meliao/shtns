@@ -1157,7 +1157,8 @@ shtns_cfg shtns_create(int lmax, int mmax, int mres, enum shtns_norm norm)
 		}
 		if (lm != NLM) shtns_runerr("unexpected error");
 	}
-	if (legendre_ok == 0) {	// this quickly precomputes some values for the legendre recursion.
+	if (legendre_ok == 0) {	// this precomputes some values for the legendre recursion.
+		if (verbose>1) printf("        > Condon-Shortley phase = %d, normalization = %d\n", with_cs_phase, SHT_NORM);
 		legendre_precomp(shtns, SHT_NORM, with_cs_phase, mpos_renorm);
 	}
 	if (l_2_ok == 0) {

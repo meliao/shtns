@@ -361,10 +361,6 @@ void legendre_precomp(shtns_cfg shtns, enum shtns_norm norm, int with_cs_phase, 
 #if HAVE_LONG_DOUBLE_WIDER
 	test_long_double();
 #endif
-	if (verbose>1) {
-		printf("        > Condon-Shortley phase = %d, normalization = %d\n", with_cs_phase, norm);
-		if (long_double_caps == 3) printf("        > long double has extended precision and large exponent\n");
-	}
 
 	if (with_cs_phase != 0) with_cs_phase = 1;		// force to 1 if !=0
 
@@ -601,7 +597,7 @@ void gauss_nodes(double *x, double* st, double *w, const int n)
 			z1 = z;
 			z -= p1*(1.-z*z)/pp;		// Newton's method
 		} while (( fabs(z-z1) > ((double)(z1+z))*0.5*eps ) && (--k > 0));
-		if (k==0 && verbose>1) printf("i=%ld, k=%d, z=%g, z1=%g, abs(z-z1)=%g, err=%g\n",i,k, (double) z, (double) z1, fabs(z-z1), 2*fabs(z-z1)/((double)(z1+z)) );
+		//if (k==0 && verbose>1) printf("i=%ld, k=%d, z=%g, z1=%g, abs(z-z1)=%g, err=%g\n",i,k, (double) z, (double) z1, fabs(z-z1), 2*fabs(z-z1)/((double)(z1+z)) );
 		real s2 = 1.-z*z;
 		x[i] = z;		// Build up the abscissas.
 		x[n-1-i] = -z;
@@ -609,7 +605,7 @@ void gauss_nodes(double *x, double* st, double *w, const int n)
 		w[n-1-i] = w[i];
 		st[i] = SQRT(s2);
 		st[n-1-i] = st[i];
-		if (eps < 1e-16 && verbose>0) printf("i=%ld, sin(theta)=%g, sqrt(1-z2)=%g, err=%g\n", i, st[i], sqrt(1.-x[i]*x[i]), (st[i] - sqrt(1.-x[i]*x[i]))/st[i] );
+		//if (eps < 1e-16 && verbose>0) printf("i=%ld, sin(theta)=%g, sqrt(1-z2)=%g, err=%g\n", i, st[i], sqrt(1.-x[i]*x[i]), (st[i] - sqrt(1.-x[i]*x[i]))/st[i] );
 	}
 	if (n&1) {
 		x[n/2]  = 0.0;		// exactly zero.
