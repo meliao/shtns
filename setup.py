@@ -58,6 +58,15 @@ cargs = ['-std=c99', '-DSHTNS_VER="' + getver() +'"']
 libs = ['fftw3', 'm']
 config_cmd = ['./configure','--enable-python','--prefix='+sys.prefix]
 
+## guess search path to find fftw library:
+if 'SHTNS_LIB_DIR' in os.environ:
+    libdir.append(os.environ['SHTNS_LIB_DIR'])    # allows to specify library search path using SHTNS_LIB_DIR environment variable
+if sys.platform.startswith('darwin'):    # MacOS specific (thanks to S. Belkner)
+    from platform import machine
+    libdir.append( "/opt/homebrew/lib" if machine() == 'arm64' else "/usr/local/lib" )      # directory depends on arm64 vs x86-64 !
+if len(libdir)>0:
+    config_cmd.append('LDFLAGS="-L{}"'.format(' -L'.join(libdir)))
+
 use_openmp = os.environ.get('SHTNS_OPENMP', '1') != '0'   # allows to disable openmp with environment variable SHTNS_OPENMP=0
 if use_openmp:
     use_openmp = check_openmp_support()
