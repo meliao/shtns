@@ -56,6 +56,11 @@ if test "$SED" = :; then
 	AC_MSG_ERROR([sed program required.])
 fi
 
+# on MacOSX include the homebrew library search path:
+AS_IF([uname | grep Darwin >/dev/null],[
+    AS_IF([uname -m | grep arm64 >/dev/null], [LDFLAGS="$LDFLAGS -L/opt/homebrew/lib"], [LDFLAGS="$LDFLAGS -L/usr/local/lib"])
+])
+
 # define macro AX_CHECK_COMPILE_FLAG, and add it to CFLAGS
 AC_DEFUN([AX_CHECK_COMPILE_FLAG],[
   AC_MSG_CHECKING([whether $CC accepts $1])
@@ -161,7 +166,7 @@ AX_CHECK_COMPILE_FLAG([-std=gnu11],, [
 AC_CHECK_HEADERS([stdlib.h stdio.h string.h math.h complex.h stdatomic.h])
 
 # Checks for libraries.
-AC_CHECK_LIB([m],[cos],,AC_MSG_ERROR([math library not found.]))
+AC_CHECK_LIB([m],[cos],,[AC_MSG_ERROR([math library not found.])])
 
 # Checks related to Python:
 AS_IF([test "x$enable_python" != "xno"], [
@@ -193,9 +198,9 @@ AS_IF([test "x$enable_hip" != "xno"], [
 	CFLAGS="$CFLAGS -I${ROCM_PATH}/include -D__HIP_PLATFORM_AMD__"
 	LDFLAGS="$LDFLAGS -L${ROCM_PATH}/lib"
 	echo $LDFLAGS
-	AC_CHECK_LIB([amdhip64],[hipMalloc],,AC_MSG_ERROR([hip library not found. Try adding LDFLAGS="-L$ROCM_PATH/lib"]))
-	dnl AC_CHECK_LIB([hipfft],[hipfftCreate],,AC_MSG_NOTICE([hipftt library not found.]))
-	dnl AC_CHECK_LIB([rocfft],[rocfft_execute],,AC_MSG_NOTICE([rocfft library not found.]))
+	AC_CHECK_LIB([amdhip64],[hipMalloc],,[AC_MSG_ERROR([hip library not found. Environment variable ROCM_PATH is not correctly set: \$ROCM_PATH/lib should contain the rocm libraries.])])
+	dnl AC_CHECK_LIB([hipfft],[hipfftCreate],,[AC_MSG_NOTICE([hipftt library not found.])])
+	dnl AC_CHECK_LIB([rocfft],[rocfft_execute],,[AC_MSG_NOTICE([rocfft library not found.])])
 
 	gpu_cflags="-DSHTNS_GPU=2"  # GPU transforms, 1 for CUDA, 2 for HIP
 	gpu_compile="hipcc -std=c++11 -O3 --rocm-path=$ROCM_PATH -D__HIP_PLATFORM_AMD__ $gpu_cflags"
@@ -219,10 +224,10 @@ AS_IF([test "x$enable_cuda" != "xno"], [
 	# assume 64 bit mode, add default directory to find CUDA
 	LDFLAGS="$LDFLAGS -L$CUDA_PATH/lib64 -L$CUDA_PATH/lib64/stubs"
 	echo $LDFLAGS
-	AC_CHECK_LIB([cudart],[cudaMalloc],,AC_MSG_ERROR([cudart library not found. Try adding LDFLAGS="-L/usr/local/cuda/lib64"]))
-	dnl AC_CHECK_LIB([cufft],[cufftPlanMany],,AC_MSG_NOTICE([cufft library not found.]))
-	AC_CHECK_LIB([nvrtc],[nvrtcGetPTX],,AC_MSG_ERROR([nvrtc library not found. Try adding LDFLAGS="-L/usr/local/cuda/lib64"]))
-	AC_CHECK_LIB([cuda],[cuLaunchKernel],,AC_MSG_ERROR([cuda library not found. Try adding LDFLAGS="-L/usr/local/cuda/lib64"]))
+	AC_CHECK_LIB([cudart],[cudaMalloc],,[AC_MSG_ERROR([cudart library not found. Environment variable CUDA_PATH is not correctly set: \$CUDA_PATH/lib64 should contain the cuda libraries.])])
+	dnl AC_CHECK_LIB([cufft],[cufftPlanMany],,[AC_MSG_NOTICE([cufft library not found.])])
+	AC_CHECK_LIB([nvrtc],[nvrtcGetPTX],,[AC_MSG_ERROR([nvrtc library not found.])])
+	AC_CHECK_LIB([cuda],[cuLaunchKernel],,[AC_MSG_ERROR([cuda library not found.])])
 
 	nvcc_gencode_flags=""
 	# find cuda arch:
@@ -300,10 +305,11 @@ AS_IF([test "x$enable_mkl" == "xyes"], [
 
 # Check for FFTW, if MKL was not required and not found.
 AS_IF([test "x$enable_mkl" != "xyes"], [
-	# fftw3
-	AC_CHECK_LIB([fftw3],[fftw_plan_many_dft],,AC_MSG_ERROR([FFTW3 library required. Or try using the intel MKL library with --enable-mkl]))
+	# fftw3, allows to specify library path with FFTW_ROOT environment variable
+	AS_IF([test "x$FFTW_ROOT" != "x"], [LDFLAGS="$LDFLAGS -L$FFTW_ROOT/lib"])
+	AC_CHECK_LIB([fftw3],[fftw_plan_many_dft],,[AC_MSG_ERROR(["FFTW3 library required. Try using the intel MKL library with --enable-mkl, or add 'LDFLAGS=-L/path/to/fftw3/lib' to ./configure command line."])])
 	AS_IF([test "x$enable_openmp" = "xyes"], [
-		AC_CHECK_LIB([fftw3_omp], [fftw_init_threads],,AC_MSG_ERROR([FFTW3 does not support OpenMP. Did you compile it with --enable-openmp ?.]))
+		AC_CHECK_LIB([fftw3_omp], [fftw_init_threads],,[AC_MSG_ERROR(["FFTW3 does not support OpenMP. Did you compile it with --enable-openmp ?."])])
 	])
 ])
 
