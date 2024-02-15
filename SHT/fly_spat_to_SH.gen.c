@@ -157,7 +157,7 @@ V		per[k] = 0.0;		por[k] = 0.0;
 	}
 
 	if (im == 0) {		// im=0
-		alm = shtns->blm;
+		alm = shtns->alm2;
 V		k=0;	do {	// compute symmetric and antisymmetric parts. (do not weight here, it is cheaper to weight y0)
 V			#ifndef SHTNS4MAGIC
 V			double n = creal(Vt[k]);		double s = creal(Vt[NLAT-1-k]);
@@ -223,8 +223,8 @@ V				perk[j] = vread(per, k+j);		pork[j] = vread(por, k+j);
 			al+=2;	l=1;
 			while(l<llim) {
 				for (int j=0; j<NWAY; ++j) {
-V					dy0[j] = vall(al[1])*(cost[j]*dy1[j] + y1[j]*sint[j]) + vall(al[0])*dy0[j];
-					y0[j]  = vall(al[1])*(cost[j]*y1[j]) + vall(al[0])*y0[j];
+V					dy0[j] = vall(al[0])*(cost[j]*dy1[j] + y1[j]*sint[j]) + dy0[j];
+					y0[j]  = vall(al[0])*(cost[j]*y1[j]) + y0[j];
 				}
 				for (int j=0; j<NWAY; ++j) {
 Q					qq[l-1]   += y1[j]  * rork[j];
@@ -232,15 +232,15 @@ V					vw[2*l-2] += dy1[j] * terk[j];
 V					vw[2*l-1] -= dy1[j] * perk[j];
 				}
 				for (int j=0; j<NWAY; ++j) {
-V					dy1[j] = vall(al[3])*(cost[j]*dy0[j] + y0[j]*sint[j]) + vall(al[2])*dy1[j];
-					y1[j]  = vall(al[3])*(cost[j]*y0[j]) + vall(al[2])*y1[j];
+V					dy1[j] = vall(al[1])*(cost[j]*dy0[j] + y0[j]*sint[j]) + dy1[j];
+					y1[j]  = vall(al[1])*(cost[j]*y0[j]) + y1[j];
 				}
 				for (int j=0; j<NWAY; ++j) {
 Q					qq[l]     += y0[j]  * rerk[j];
 V					vw[2*l]   += dy0[j] * tork[j];
 V					vw[2*l+1] -= dy0[j] * pork[j];
 				}
-				al+=4;	l+=2;
+				al+=2;	l+=2;
 			}
 			if (l==llim) {
 				for (int j=0; j<NWAY; ++j) {
@@ -251,14 +251,19 @@ V					vw[2*l-1] -= dy1[j] * perk[j];
 			}
 			k+=NWAY;
 		} while (k < nk);
+		al = shtns->glm_analys;
+Q		Qlm[0] *= al[0];
 		for (l=1; l<=llim; ++l) {
 			#if _GCC_VEC_
-Q				((v2d*)Qlm)[l] = v2d_reduce(qq[l-1], vall(0));
-V				((v2d*)Slm)[l] = v2d_reduce(vw[2*l-2], vall(0)) * vdup(l_2[l]);
-V				((v2d*)Tlm)[l] = v2d_reduce(vw[2*l-1], vall(0)) * vdup(l_2[l]);
+				s2d a = vdup(al[l]);
+Q				((v2d*)Qlm)[l] = v2d_reduce(qq[l-1], vall(0)) * a;
+V				a *= vdup(l_2[l]);
+V				((v2d*)Slm)[l] = v2d_reduce(vw[2*l-2], vall(0)) * a;
+V				((v2d*)Tlm)[l] = v2d_reduce(vw[2*l-1], vall(0)) * a;
 			#else
-Q				Qlm[l] = qq[l-1];
-V				Slm[l] = vw[2*l-2]*l_2[l];		Tlm[l] = vw[2*l-1]*l_2[l];
+				double a = al[l];
+Q				Qlm[l] = qq[l-1] * a;
+V				a *= l_2[l];	Slm[l] = vw[2*l-2]*a;		Tlm[l] = vw[2*l-1]*a;
 			#endif
 		}
 		#ifdef SHT_VAR_LTR
