@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2010-2021 Centre National de la Recherche Scientifique.
+ * Copyright (c) 2010-2024 Centre National de la Recherche Scientifique.
  * written by Nathanael Schaeffer (CNRS, ISTerre, Grenoble, France).
  * 
  * nathanael.schaeffer@univ-grenoble-alpes.fr
@@ -61,13 +61,8 @@ T	void GEN3(BASE,NWAY,SUFFIX)(shtns_cfg shtns, cplx *Tlm, v2d *BtF, v2d *BpF, co
 	#endif
 
   #ifndef SHT_AXISYM
-   #ifndef SHTNS_ISHIOKA
-Q	#define qr(l) vall(creal(Ql[l]))
-Q	#define qi(l) vall(cimag(Ql[l]))
-   #else
 Q	#define qr(l) vall( ((double*) QQl)[2*(l)]   )
 Q	#define qi(l) vall( ((double*) QQl)[2*(l)+1] )
-   #endif
 V	#define vr(l) vall( ((double*) VWl)[4*(l)]   )
 V	#define vi(l) vall( ((double*) VWl)[4*(l)+1] )
 V	#define wr(l) vall( ((double*) VWl)[4*(l)+2] )
@@ -77,10 +72,8 @@ V	#define wi(l) vall( ((double*) VWl)[4*(l)+3] )
 	double *alm, *al;
 	double *ct, *st;
 QX	double Ql0[llim+2];
-V	v2d VWl[llim*2+4];
-  #ifdef SHTNS_ISHIOKA
+V	v2d VWl[llim*2+4] SSE;		// SSE aligns for avx reads if appropriate
 Q	v2d QQl[llim+2];
-  #endif
 
 	ct = shtns->ct;		st = shtns->st;
 	nk = it1;	//NLAT_2;
@@ -215,7 +208,8 @@ V		BpF += im*(shtns->nlat_padded >>1);
 		m = im*MRES;
 		l = (im*(2*(LMAX+1)-(m+MRES)))>>1;		//l = LiM(shtns, 0,im);
 		#ifndef SHTNS_ISHIOKA
-		alm = shtns->alm + 2*(l+m);		// shtns->alm + im*(2*(LMAX+1) -m+MRES);
+		//alm = shtns->alm + 2*(l+m);		// shtns->alm + im*(2*(LMAX+1) -m+MRES);
+		alm = shtns->alm2 + im*(LMAX+3) - (m*(im-1))/2;
 		#else
 		alm = shtns->clm + (l+m);		// shtns->clm + im*(2*(LMAX+1) -m+MRES)/2;
 		#endif
@@ -228,7 +222,16 @@ T		SHtor_to_2scal(shtns->mx_stdt + 2*l, llim, m, &Tlm[l], (cplx*) VWl);
   #endif
 
 	#ifndef SHTNS_ISHIOKA
-Q		cplx* Ql = &Qlm[l];	// virtual pointer for l=0 and im
+		double* fl = shtns->glm +  im*(LMAX+3) - (m*(im-1))/2 - m;
+V		for (int l=m; l<=llim+1; l++) {
+V		#if _GCC_VEC_ && defined( __AVX__ )
+V			((v4d*)VWl)[l] *= vall4(fl[l]);
+V		#else
+V			VWl[2*l] *= vdup(fl[l]);	VWl[2*l+1] *= vdup(fl[l]);
+V		#endif
+V		}
+Q		v2d* Ql = (v2d*) &Qlm[l];	// virtual pointer for l=0 and im
+Q		for (int l=m; l<=llim; l++)	QQl[l] = Ql[l] * vdup(fl[l]);
 	#else
 		// pre-processing for recurrence relation of Ishioka
 		const double* restrict xlm = shtns->xlm + 3*im*(2*(LMAX+4) -m+MRES)/4;
@@ -308,7 +311,7 @@ V			if (robert_form == 0) l=m-1;
 Q				ror[j] = vall(0.0);		roi[j] = vall(0.0);
 Q				rer[j] = vall(0.0);		rei[j] = vall(0.0);
 				#ifndef SHTNS_ISHIOKA
-				y0[j] *= vall(al[0]);
+				//y0[j] *= vall(al[0]);		// al[0] == 1
 				#else
 				cost[j] *= cost[j];		// cos(theta)^2
 				#endif
@@ -330,9 +333,9 @@ V				toi[j] = vall(0.0);		per[j] = vall(0.0);
 			const rnd scale = vall(1.0/SHT_SCALE_FACTOR);
 			while (l<llim) {
 				#ifndef SHTNS_ISHIOKA
-				for (int j=0; j<NWAY; ++j)	y0[j] = (vall(al[1])*cost[j])*y1[j] + vall(al[0])*y0[j];
-				for (int j=0; j<NWAY; ++j)	y1[j] = (vall(al[3])*cost[j])*y0[j] + vall(al[2])*y1[j];
-				al+=4;
+				for (int j=0; j<NWAY; ++j)	y0[j] = (vall(al[0])*cost[j])*y1[j] + y0[j];
+				for (int j=0; j<NWAY; ++j)	y1[j] = (vall(al[1])*cost[j])*y0[j] + y1[j];
+				al+=2;
 				#else
 				rnd a[NWAY];
 				for (int j=0; j<NWAY; ++j)	a[j] = vall(al[1])*cost[j] + vall(al[0]);
@@ -359,15 +362,15 @@ Q				for (int j=0; j<NWAY; ++j) {	rer[j] += y0[j]  * qr(l);		rei[j] += y0[j] * q
 V				for (int j=0; j<NWAY; ++j) {	ter[j] += y0[j]  * vr(l);		tei[j] += y0[j] * vi(l);	}
 V				for (int j=0; j<NWAY; ++j) {	per[j] += y0[j]  * wr(l);		pei[j] += y0[j] * wi(l);	}
 				for (int j=0; j<NWAY; ++j) {
-					y0[j] = vall(al[1])*(cost[j]*y1[j]) + vall(al[0])*y0[j];
+					y0[j] = (vall(al[0])*cost[j])*y1[j] + y0[j];
 				}
 Q				for (int j=0; j<NWAY; ++j) {	ror[j] += y1[j]  * qr(l+1);		roi[j] += y1[j] * qi(l+1);	}
 V				for (int j=0; j<NWAY; ++j) {	tor[j] += y1[j]  * vr(l+1);		toi[j] += y1[j] * vi(l+1);	}
 V				for (int j=0; j<NWAY; ++j) {	por[j] += y1[j]  * wr(l+1);		poi[j] += y1[j] * wi(l+1);	}
 				for (int j=0; j<NWAY; ++j) {
-					y1[j] = vall(al[3])*(cost[j]*y0[j]) + vall(al[2])*y1[j];
+					y1[j] = (vall(al[1])*cost[j])*y0[j] + y1[j];
 				}
-				l+=2;	al+=4;
+				l+=2;	al+=2;
 			}
 V				for (int j=0; j<NWAY; ++j) {	ter[j] += y0[j]  * vr(l);		tei[j] += y0[j] * vi(l);	}
 V				for (int j=0; j<NWAY; ++j) {	per[j] += y0[j]  * wr(l);		pei[j] += y0[j] * wi(l);	}

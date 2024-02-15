@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2010-2021 Centre National de la Recherche Scientifique.
+ * Copyright (c) 2010-2024 Centre National de la Recherche Scientifique.
  * written by Nathanael Schaeffer (CNRS, ISTerre, Grenoble, France).
  * 
  * nathanael.schaeffer@univ-grenoble-alpes.fr
@@ -206,7 +206,8 @@ V				((v2d*)Slm)[l] = vdup(0.0);		((v2d*)Tlm)[l] = vdup(0.0);
 		k0 = (k0>>1)*2;		// we need an even value.
 		#endif
 		#ifndef SHTNS_ISHIOKA
-		alm = shtns->blm + im*(2*(LMAX+1) -m+MRES);
+		//alm = shtns->blm + im*(2*(LMAX+1) -m+MRES);
+		alm = shtns->alm2 + im*(LMAX+3) - (m*(im-1))/2;
 		#else
 		alm = shtns->clm + im*(2*(LMAX+1) - m+MRES)/2;
 		#endif
@@ -274,7 +275,7 @@ V				l=m-1;
 					if (j==NWAY-1) cost[j] = vxchg_even_odd(cost[j]);
 					#endif
 					#ifndef SHTNS_ISHIOKA
-					y0[j] *= vall(al[0]);
+					//y0[j] *= vall(al[0]);		// al[0] == 1
 					y1[j]  = (vall(al[1])*y0[j]) * cost[j];
 					#else
 					cost[j] *= cost[j];		// cos(theta)^2
@@ -288,12 +289,12 @@ V				l=m-1;
 				while (l<lnz) {		// ylm's are too small and are treated as zero
 					#ifndef SHTNS_ISHIOKA
 					for (int j=NWAY-1; j>=0; --j) {
-						y0[j] = vall(al[1])*(cost[j]*y1[j]) + vall(al[0])*y0[j];
+						y0[j] = (vall(al[0])*cost[j])*y1[j] + y0[j];
 					}
 					for (int j=NWAY-1; j>=0; --j) {
-						y1[j] = vall(al[3])*(cost[j]*y0[j]) + vall(al[2])*y1[j];
+						y1[j] = (vall(al[1])*cost[j])*y0[j] + y1[j];
 					}
-					l+=2;	al+=4;
+					l+=2;	al+=2;
 					#else
 					for (int j=NWAY-1; j>=0; --j) {
 						rnd tmp = y1[j];
@@ -330,7 +331,7 @@ V				if ((l > llim+1) && (ny0<0)) break;	// nothing more to do in this block.
 		#endif
 
 		#ifndef SHTNS_ISHIOKA
-			al = alm + 2 + 2*(l-m);
+			al = alm + 2 + (l-m);
 			struct {
 				rnd ct;
 				rnd y[2];
@@ -370,9 +371,9 @@ V			}
 					do {
 						rnd ct = x[j].ct;
 						y0 = x[j].y[0];		rnd y1 = x[j].y[1];
-						y0 = vall(al[1])*(ct*y1) + vall(al[0])*y0;
+						y0 = vall(al[0])*(ct*y1) + y0;
 						x[j].y[0] = y0;
-						x[j].y[1] = vall(al[3])*(ct*y0) + vall(al[2])*y1;
+						x[j].y[1] = vall(al[1])*(ct*y0) + y1;
 					} while (++j < imax);
 					//double yt = ((double*) &x[ii*NWAY+NWAY-1].y[0])[VSIZE2-1];		// access last element, as first one can be zero for grids including poles.
 					double yt = vlo(vxchg_even_odd(y0));	// vxchg_even_odd avoids first element which can be zero for grids including poles.
@@ -404,9 +405,9 @@ Q						qq2 += y1 * x[j].ror;		qq3 += y1 * x[j].roi;	// real even, imag even
 V						vv2 += y1 * x[j].tor;		vv3 += y1 * x[j].toi;	// real odd, imag odd
 V						ww2 += y1 * x[j].por;		ww3 += y1 * x[j].poi;	// real odd, imag odd
 					}
-					y0 = vall(al[1])*(x[j].ct*y1) + vall(al[0])*y0;
+					y0 = vall(al[0])*(x[j].ct*y1) + y0;
 					x[j].y[0] = y0;
-					x[j].y[1] = vall(al[3])*(x[j].ct*y0) + vall(al[2])*y1;
+					x[j].y[1] = vall(al[1])*(x[j].ct*y0) + y1;
 					++j;
 				}
 				#if _GCC_VEC_ && __AVX__
@@ -423,7 +424,7 @@ V				v[3] += v2d_reduce(ww2, ww3);
 				#endif
 Q				q+=2;
 V				v+=4;
-				l+=2;	al+=4;
+				l+=2;	al+=2;
 			}
 V			{
 V				rnd vv0 = vall(0.0);
@@ -611,7 +612,16 @@ V		v2d *Sl = (v2d*) &Slm[l];
 V		v2d *Tl = (v2d*) &Tlm[l];
 
 	#ifndef SHTNS_ISHIOKA
-Q		for (l=0; l<=llim-m; ++l)	Ql[l] = qq[l];
+		double* fl = shtns->glm_analys +  im*(LMAX+3) - (m*(im-1))/2;
+		for (long l=0; l<=llim-m; ++l) {
+			s2d g = vdup(fl[l]);
+Q			Ql[l] = qq[l] * g;
+V			vw[2*l] = vw[2*l] * g;
+V			vw[2*l+1] = vw[2*l+1] * g;
+		}
+V		{	long l = llim-m+1;		s2d g = vdup(fl[l]);
+V			vw[2*l] = vw[2*l] * g;		vw[2*l+1] = vw[2*l+1] * g;
+V		}
 	#else
 		// post-processing for recurrence relation of Ishioka
 		const double* restrict xlm = shtns->x2lm + 3*im*(2*(LMAX+4) -m+MRES)/4;
@@ -622,7 +632,7 @@ V		ishioka_to_SH2(xlm, vw, llim-m+1, vw);
 V		SH_2scal_to_vect(shtns->mx_van + 2*LM(shtns,m,m), l_2, llim, m, vw, Sl, Tl);
 
 		#ifdef SHT_VAR_LTR
-			for (l=llim+1-m; l<=LMAX-m; ++l) {
+			for (long l=llim+1-m; l<=LMAX-m; ++l) {
 Q				Ql[l] = vdup(0.0);
 V				Sl[l] = vdup(0.0);		Tl[l] = vdup(0.0);
 			}

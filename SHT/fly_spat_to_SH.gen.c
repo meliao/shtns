@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2010-2021 Centre National de la Recherche Scientifique.
+ * Copyright (c) 2010-2024 Centre National de la Recherche Scientifique.
  * written by Nathanael Schaeffer (CNRS, ISTerre, Grenoble, France).
  * 
  * nathanael.schaeffer@univ-grenoble-alpes.fr
@@ -285,7 +285,8 @@ V			pei[k] = 0.0;		poi[k] = 0.0;
 
 		m = im*MRES;
 		l = shtns->tm[im] / VSIZE2;
-		alm = shtns->blm + im*(2*(LMAX+1) -m+MRES);
+		//alm = shtns->blm + im*(2*(LMAX+1) -m+MRES);
+		alm = shtns->alm2 + im*(LMAX+3) - (m*(im-1))/2;
 Q		k = ((l*VSIZE2)>>1)*2;		// k must be even here.
 Q		do {	// compute symmetric and antisymmetric parts.
 3			double sink = st[k];
@@ -390,18 +391,18 @@ V			l=m-1;
 			for (int j=0; j<NWAY; ++j) {
 				y0[j] *= vall(alm0_rescale);
 				cost[j] = vread(ct, k+j);
-				y1[j]  = (vall(al[1])*y0[j]) *cost[j];
+				y1[j]  = (vall(al[1])*cost[j]) * y0[j];
 			}
 			l=m;	al+=2;
 		  if (ny<0) {
 			while (l<llim) {		// ylm treated as zero and ignored if ny < 0
 				for (int j=0; j<NWAY; ++j) {
-					y0[j] = vall(al[1])*(cost[j]*y1[j]) + vall(al[0])*y0[j];
+					y0[j] = (vall(al[0])*cost[j])*y1[j] + y0[j];
 				}
 				for (int j=0; j<NWAY; ++j) {
-					y1[j] = vall(al[3])*(cost[j]*y0[j]) + vall(al[2])*y1[j];
+					y1[j] = (vall(al[1])*cost[j])*y0[j] + y1[j];
 				}
-				l+=2;	al+=4;
+				l+=2;	al+=2;
 				if (fabs(vlo(y0[NWAY-1])) > SHT_ACCURACY*SHT_SCALE_FACTOR + 1.0) {		// rescale when value is significant
 					for (int j=0; j<NWAY; ++j) {
 						y0[j] *= vall(1.0/SHT_SCALE_FACTOR);		y1[j] *= vall(1.0/SHT_SCALE_FACTOR);
@@ -424,7 +425,7 @@ Q				for (int j=0; j<NWAY; ++j)	{	q[0] += y0[j] * rerk[j];	q[1] += y0[j] * reik[
 V				for (int j=0; j<NWAY; ++j)	{	v[0] += y0[j] * terk[j];	v[1] += y0[j] * teik[j];	}
 V				for (int j=0; j<NWAY; ++j)	{	v[2] += y0[j] * perk[j];	v[3] += y0[j] * peik[j];	}
 				for (int j=0; j<NWAY; ++j) {
-					y0[j] = vall(al[1])*(cost[j]*y1[j]) + vall(al[0])*y0[j];
+					y0[j] = (vall(al[0])*cost[j])*y1[j] + y0[j];
 				}
 Q				for (int j=0; j<NWAY; ++j)	{	q[2] += y1[j] * rork[j];	q[3] += y1[j] * roik[j];	}
 V				for (int j=0; j<NWAY; ++j)	{	v[4] += y1[j] * tork[j];	v[5] += y1[j] * toik[j];	}
@@ -432,9 +433,9 @@ V				for (int j=0; j<NWAY; ++j)	{	v[6] += y1[j] * pork[j];	v[7] += y1[j] * poik[
 Q				q+=4;
 V				v+=8;
 				for (int j=0; j<NWAY; ++j) {
-					y1[j] = vall(al[3])*(cost[j]*y0[j]) + vall(al[2])*y1[j];
+					y1[j] = (vall(al[1])*cost[j])*y0[j] + y1[j];
 				}
-				l+=2;	al+=4;
+				l+=2;	al+=2;
 			}
 V				for (int j=0; j<NWAY; ++j)	{	v[0] += y0[j] * terk[j];	v[1] += y0[j] * teik[j];	}
 V				for (int j=0; j<NWAY; ++j)	{	v[2] += y0[j] * perk[j];	v[3] += y0[j] * peik[j];	}
@@ -447,20 +448,32 @@ V				for (int j=0; j<NWAY; ++j)	{	v[6] += y1[j] * pork[j];	v[7] += y1[j] * poik[
 			k+=NWAY;
 		} while (k < nk);
 
-Q		#if _GCC_VEC_
-Q			for (l=0; l<=llim-m; ++l) {
-Q				((v2d*)Qlm)[l] = v2d_reduce(qq[2*l], qq[2*l+1]);
-Q			}
-Q		#else
-Q			for (l=0; l<=llim-m; ++l) {
-Q				Qlm[l] = qq[2*l] + I*qq[2*l+1];
-Q			}
-Q		#endif
+		double* fl = shtns->glm_analys +  im*(LMAX+3) - (m*(im-1))/2;
+		#if _GCC_VEC_
+			for (long l=0; l<=llim-m; ++l) {
+Q				((v2d*)Qlm)[l]    = v2d_reduce(qq[2*l],   qq[2*l+1]) * vdup(fl[l]);
+V				((v2d*)vw)[2*l]   = v2d_reduce(vw[4*l],   vw[4*l+1]) * vdup(fl[l]);
+V				((v2d*)vw)[2*l+1] = v2d_reduce(vw[4*l+2], vw[4*l+3]) * vdup(fl[l]);
+			}
+V			{	long l=llim-m+1;
+V				((v2d*)vw)[2*l]   = v2d_reduce(vw[4*l],   vw[4*l+1]) * vdup(fl[l]);
+V				((v2d*)vw)[2*l+1] = v2d_reduce(vw[4*l+2], vw[4*l+3]) * vdup(fl[l]);
+V			}
+		#else
+			for (long l=0; l<=llim-m; ++l) {
+Q				Qlm[l] = (qq[2*l] + I*qq[2*l+1]) * fl[l];
+V				((cplx*)vw)[2*l] *= fl[l];		((cplx*)vw)[2*l+1] *= fl[l];
+			}
+V			{	long l=llim-m+1;
+V				((cplx*)vw)[2*l] *= fl[l];		((cplx*)vw)[2*l+1] *= fl[l];
+V			}
+		#endif
 
-V		SH_2scal_to_vect_reduce(shtns->mx_van + 2*LM(shtns,m,m), l_2, llim, ms, vw, (v2d*)Slm, (v2d*)Tlm);
+V		//SH_2scal_to_vect_reduce(shtns->mx_van + 2*LM(shtns,m,m), l_2, llim, ms, vw, (v2d*)Slm, (v2d*)Tlm);
+V		SH_2scal_to_vect(shtns->mx_van + 2*LM(shtns,m,m), l_2, llim, ms, (v2d*)vw, (v2d*)Slm, (v2d*)Tlm);
 
 		#ifdef SHT_VAR_LTR
-			for (l=llim+1-m; l<=LMAX-m; ++l) {
+			for (long l=llim+1-m; l<=LMAX-m; ++l) {
 Q				((v2d*)Qlm)[l] = vdup(0.0);
 V				((v2d*)Slm)[l] = vdup(0.0);		((v2d*)Tlm)[l] = vdup(0.0);
 			}
