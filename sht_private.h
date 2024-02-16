@@ -158,7 +158,6 @@ struct shtns_info {		// MUST start with "int nlm;"
 
 	/* Legendre function generation arrays */
 	double *alm;	// coefficient list for Legendre function recurrence (size 2*NLM)
-	double *blm;	// coefficient list for modified Legendre function recurrence for analysis (size 2*NLM)
 	double *l_2;	// array of size (LMAX+1) containing 1./l(l+1) for increasing integer l.
 	/* matrices for vector transform (to convert to scalar transforms) */
 	double *mx_stdt;	// sparse matrix for  sin(theta).d/dtheta,  couples l-1 and l+1
@@ -251,7 +250,7 @@ struct shtns_rot_ {		// describe a rotation matrix
 #define MRES shtns->mres
 #define SHT_NL_ORDER shtns->nlorder
 
-// define index in alm/blm matrices
+// define index in alm matrix
 #define ALM_IDX(shtns, im) ( (im)*(2*(shtns->lmax+1) - ((im)-1)*shtns->mres) )
 
 // SHT_NORM without CS_PHASE
@@ -300,34 +299,6 @@ struct DtDp {		// theta and phi derivatives stored together.
 /// Tlm = - (I*m*Vlm - MX*Wlm) / (l*(l+1))
 /// m = signed m (for complex SH transform).
 /// double* mx = shtns->mx_van + 2*LM(shtns,m,m);	//(im*(2*(LMAX+1)-(m+MRES))) + 2*m;
-static void SH_2scal_to_vect_reduce(const double *mx, const double* l_2, int llim, int m, rnd* vw, v2d* Sl, v2d* Tl)
-{
-	double em = m;
-	m = abs(m);
-	v2d vl = v2d_reduce(vw[0], vw[1]);
-	v2d wl = v2d_reduce(vw[2], vw[3]);
-	v2d sl1 = vdup( 0.0 );
-	v2d tl1 = vdup( 0.0 );
-	for (int l=0; l<=llim-m; l++) {
-		s2d mxl = vdup( mx[2*l] );		// mxl for next iteration
-		s2d mxu = vdup( mx[2*l+1] );
-		v2d sl = sl1 + IxKxZ(em, wl);		// sl1 + I*em*wl
-		v2d tl = tl1 + IxKxZ(em, vl);		// tl1 + I*em*vl
-		sl1 = -mxl*vl;			// vs for next iter
-		tl1 =  mxl*wl;			// wt for next iter
-		vl = v2d_reduce(vw[4*l+4], vw[4*l+5]);		// kept for next iteration
-		wl = v2d_reduce(vw[4*l+6], vw[4*l+7]);
-		sl -= mxu*vl;
-		tl += mxu*wl;
-		Sl[l] = -sl * vdup(l_2[l+m]);
-		Tl[l] = -tl * vdup(l_2[l+m]);
-	}
-}
-
-/// Convert from vector 2 scalar SH to vector SH
-/// Slm = - (I*m*Wlm + MX*Vlm) / (l*(l+1))		=> why does this work ??? (aliasing of 1/sin(theta) ???)
-/// Tlm = - (I*m*Vlm - MX*Wlm) / (l*(l+1))
-/// m = signed m (for complex SH transform).
 static void SH_2scal_to_vect(const double *mx, const double* l_2, int llim, int m, v2d* vw, v2d* Sl, v2d* Tl)
 {
 #if !defined( _GCC_VEC_) || !defined( __AVX__ )

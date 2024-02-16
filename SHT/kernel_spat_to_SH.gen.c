@@ -206,7 +206,6 @@ V				((v2d*)Slm)[l] = vdup(0.0);		((v2d*)Tlm)[l] = vdup(0.0);
 		k0 = (k0>>1)*2;		// we need an even value.
 		#endif
 		#ifndef SHTNS_ISHIOKA
-		//alm = shtns->blm + im*(2*(LMAX+1) -m+MRES);
 		alm = shtns->alm2 + im*(LMAX+3) - (m*(im-1))/2;
 		#else
 		alm = shtns->clm + im*(2*(LMAX+1) - m+MRES)/2;

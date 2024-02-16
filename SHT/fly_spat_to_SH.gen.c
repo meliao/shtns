@@ -285,7 +285,6 @@ V			pei[k] = 0.0;		poi[k] = 0.0;
 
 		m = im*MRES;
 		l = shtns->tm[im] / VSIZE2;
-		//alm = shtns->blm + im*(2*(LMAX+1) -m+MRES);
 		alm = shtns->alm2 + im*(LMAX+3) - (m*(im-1))/2;
 Q		k = ((l*VSIZE2)>>1)*2;		// k must be even here.
 Q		do {	// compute symmetric and antisymmetric parts.
@@ -469,7 +468,6 @@ V				((cplx*)vw)[2*l] *= fl[l];		((cplx*)vw)[2*l+1] *= fl[l];
 V			}
 		#endif
 
-V		//SH_2scal_to_vect_reduce(shtns->mx_van + 2*LM(shtns,m,m), l_2, llim, ms, vw, (v2d*)Slm, (v2d*)Tlm);
 V		SH_2scal_to_vect(shtns->mx_van + 2*LM(shtns,m,m), l_2, llim, ms, (v2d*)vw, (v2d*)Slm, (v2d*)Tlm);
 
 		#ifdef SHT_VAR_LTR

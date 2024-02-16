@@ -354,7 +354,7 @@ static void legendre_sphPlm_deriv_array_equ(shtns_cfg shtns, const int lmax, con
 ///  1.0 (no renormalization) is the "complex" convention, while 0.5 leads to the "real" convention (with FFTW).
 void legendre_precomp(shtns_cfg shtns, enum shtns_norm norm, int with_cs_phase, double mpos_renorm)
 {
-	double *alm, *blm;
+	double *alm;
 	real t1, t2;
 	const long int lmax = LMAX+1;		// we go to one order beyond LMAX to resolve vector transforms through scalar ones.
 
@@ -365,12 +365,8 @@ void legendre_precomp(shtns_cfg shtns, enum shtns_norm norm, int with_cs_phase, 
 	if (with_cs_phase != 0) with_cs_phase = 1;		// force to 1 if !=0
 
 	alm = (double *) malloc( (2*NLM + 2)*sizeof(double) );		//  fits exactly into an array of 2*NLM doubles, + 2 values to allow overflow read.
-	blm = alm;
-	if (norm == sht_schmidt) {
-		blm = (double *) malloc( (2*NLM + 2)*sizeof(double) );
-	}
-	if ((alm==0) || (blm==0)) shtns_runerr("not enough memory.");
-	shtns->alm = alm;		shtns->blm = blm;
+	if (alm==0) shtns_runerr("not enough memory.");
+	shtns->alm = alm;
 
 /// - Compute and store the prefactor (independant of x) of the starting value for the recurrence :
 /// \f[  Y_m^m(x) = Y_0^0 \ \sqrt{ \prod_{k=1}^{m} \frac{2k+1}{2k} } \ \ (-1)^m \ (1-x^2)^{m/2}  \f]
@@ -425,7 +421,7 @@ void legendre_precomp(shtns_cfg shtns, enum shtns_norm norm, int with_cs_phase, 
 		shtns->alm2 = alm2;
 		shtns->glm_analys = glm + ((norm==sht_schmidt) ? 2*nlm1 : 0);
 
-/// - Precompute the factors alm and blm of the recurrence relation :
+/// - Precompute the factors alm of the recurrence relation :
 	#pragma omp parallel for private(t1, t2) schedule(dynamic)
 	for (int im=0; im<=MMAX; ++im) {
 		const long m = im*MRES;
@@ -452,20 +448,6 @@ void legendre_precomp(shtns_cfg shtns, enum shtns_norm norm, int with_cs_phase, 
 				alm[lm+1] = SQRT(((2*l+1)*(2*l-1))/t1);			/// \f[  a_l^m = \sqrt{\frac{(2l+1)(2l-1)}{(l+m)(l-m)}}  \f]
 				alm[lm] = - SQRT(((2*l+1)*t2)/((2*l-3)*t1));	/// \f[  b_l^m = -\sqrt{\frac{2l+1}{2l-3}\,\frac{(l-1+m)(l-1-m)}{(l+m)(l-m)}}  \f]
 				t2 = t1;	lm+=2;
-			}
-		}
-/// - Compute analysis recurrence coefficients if necessary
-		if (norm == sht_schmidt) {
-			lm = im*(2*lmax - (im-1)*MRES);
-			real t1 = 2*m+1;
-			blm[lm]   = alm[lm] * t1;
-			blm[lm+1] = alm[lm+1] * (2*m+3)/t1;
-			lm+=2;
-			for (long l=m+2; l<=lmax; ++l) {
-				real t3 = 2*l+1;
-				blm[lm]   = alm[lm]   * t3/(2*l-3);
-				blm[lm+1] = alm[lm+1] * t3/(2*l-1);
-				lm+=2;
 			}
 		}
 

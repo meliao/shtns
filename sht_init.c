@@ -1128,7 +1128,7 @@ shtns_cfg shtns_create(int lmax, int mmax, int mres, enum shtns_norm norm)
 				shtns->li = s2->li;		shtns->mi = s2->mi;
 				larrays_ok = 1;
 				if (s2->norm == norm) {		// we can reuse the legendre tables.
-					shtns->alm = s2->alm;		shtns->blm = s2->blm;
+					shtns->alm = s2->alm;
 					shtns->alm2 = s2->alm2;		shtns->glm = s2->glm;		shtns->glm_analys = s2->glm_analys;
 					#ifdef SHTNS_ISHIOKA
 					shtns->xlm = s2->xlm;		shtns->x2lm = s2->x2lm;
@@ -1253,8 +1253,6 @@ void shtns_destroy(shtns_cfg shtns)
 	if (shtns->d_clm) cushtns_release_gpu(shtns);
 	#endif
 	free_unused(shtns, &shtns->l_2);
-	if (shtns->blm != shtns->alm)
-		free_unused(shtns, &shtns->blm);
 	free_unused(shtns, &shtns->alm);
 	free_unused(shtns, &shtns->li);
 	free_unused(shtns, &shtns->ct_rot);
