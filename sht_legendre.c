@@ -551,11 +551,23 @@ static double legendre_Pl(const int l, double x)
 	return ((double) p1);
 }
 
+// first 40 roots of the Bessel J0 function, generated with mpmath: besseljzero(0,1..40)
+const double bessel_j0_root[] = {
+ 2.4048255576957727686, 5.5200781102863106496, 8.653727912911012217,  11.791534439014281614, 14.930917708487785948,
+ 18.071063967910922543, 21.211636629879258959, 24.352471530749302737, 27.493479132040254796, 30.634606468431975118,
+ 33.775820213573568684, 36.91709835366404398,  40.058425764628239295, 43.199791713176730358, 46.341188371661814019,
+ 49.482609897397817174, 52.624051841114996029, 55.765510755019979312, 58.906983926080942133, 62.048469190227169883,
+ 65.189964800206860441, 68.331469329856798271, 71.472981603593732825, 74.614500643701837884, 77.756025630388055038,
+ 80.897555871137627864, 84.039090776938190158, 87.180629843641153651, 90.322172637210480056, 93.463718781944774171,
+ 96.605267950996264403, 99.746819858680595416, 102.88837425419480098, 106.02993091645161883, 109.1714896498053804,
+ 112.31305028049490602, 115.45461265366694192, 118.59617663087253447, 121.73774208795096285, 124.87930891323294702};
+
 
 /// \internal Generates the abscissa and weights for a Gauss-Legendre quadrature.
 /// Newton method from initial Guess to find the zeros of the Legendre Polynome
 /// \param x = abscissa, \param st = sin(theta)=sqrt(1-x*x), \param w = weights, \param n points.
 /// \note Reference:  Numerical Recipes, Cornell press.
+/// \note Reference for initial guesses: Hale & Townsend 2013, doi:10.1137/120889873
 void gauss_nodes(double *x, double* st, double *w, const int n)
 {
 	double eps = 2.3e-16;		// desired precision, minimum = 2.2204e-16 (double)
@@ -566,7 +578,14 @@ void gauss_nodes(double *x, double* st, double *w, const int n)
 	for (long i=0;i<m;++i) {
 		real z, z1, pp, p2, p1;
 		int k=10;		// maximum Newton iteration count to prevent infinite loop.
-		z = (1.0 - (n-1.)/(8.*n*n*n)) * cos((M_PI*(4*i+3))/(4*n+2));	// initial guess
+		if (i >= 40  ||  3*i > 2*m) {	// "interior" region, equation 3.3 from Hale & Townsend 2013
+			z = cos((M_PI*(4*i+3))/(4*n+2));
+			double n_1 = 0.25/n;
+			z -= z*n_1*n_1*n_1*( 8*(n-1)  + n_1 * (26. - (56./3)/(1.-z*z)) );	// initial guess
+		} else {	// "boundary region", equation 3.6 of Hale & Townsend 2013, doi:10.1137/120889873
+			z = bessel_j0_root[i] / (n+0.5);
+			z = cos( z + (z/tan(z)-1)/(8*z*(n+0.5)*(n+0.5)) );
+		}
 		do {
 			p1 = z;	// P_1
 			p2 = 1.0;	// P_0
