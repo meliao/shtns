@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2010-2021 Centre National de la Recherche Scientifique.
+ * Copyright (c) 2010-2024 Centre National de la Recherche Scientifique.
  * written by Nathanael Schaeffer (CNRS, ISTerre, Grenoble, France).
  * 
  * nathanael.schaeffer@univ-grenoble-alpes.fr
@@ -39,37 +39,35 @@
   #define LEG_RANGE_CHECK
 #endif
 
-#ifndef HAVE_LONG_DOUBLE_WIDER
-  #define long_double_caps 0
+// use quadmath for initilization (gauss_nodes, recurrence coefficients,...)
+//#define SHTNS_QUADMATH
+// use double-double arithmetic for high-precision pre-computations:
+#define SHTNS_HIPREC
+
+#ifdef SHTNS_QUADMATH
+//  #warning "quad precision"
+  #include <quadmath.h>
+  typedef __float128 real;
+  #define SQRT sqrtq
+  #define COS cosq
+  #define SIN sinq
+  #define FABS fabsq
+  #define M_PIr M_PIq
+  #undef SHTNS_HIPREC
+#else
   typedef double real;
   #define SQRT sqrt
   #define COS cos
   #define SIN sin
   #define FABS fabs
-#else
-  int long_double_caps = 0;
-  typedef long double real;
-  #define SQRT sqrtl
-  #define COS cosl
-  #define SIN sinl
-  #define FABS fabsl
-
-// returns 1 for large exponent only => useless.
-// returns 2 for extended precision only => ok to improve gauss points.
-// returns 3 for extended precision and large exponent => ok to improve legendre recurrence.
-static int test_long_double()
-{
-	volatile real tt;	// volatile avoids optimizations.
-	int p = 0;
-
-	tt = 1.0e-1000L;	tt *= tt;
-	if (tt > 0) 	p |= 1;		// bit 0 set for large exponent
-	tt = 1.0;	tt += 1.e-18;
-	if (tt > 1.0) 	p |= 2;		// bit 1 set for extended precision
-	long_double_caps = p;
-	return p;
-}
+  #define M_PIr M_PI
+  #ifdef SHTNS_HIPREC
+//    #warning "double-double"
+    #include "hiprec/high_precision.h"
+  #endif
 #endif
+
+
 
 
 /// \internal computes sin(t)^n from cos(t). ie returns (1-x^2)^(n/2), with x = cos(t)
@@ -570,13 +568,34 @@ const double bessel_j0_root[] = {
 /// \note Reference for initial guesses: Hale & Townsend 2013, doi:10.1137/120889873
 void gauss_nodes(double *x, double* st, double *w, const int n)
 {
-	double eps = 2.3e-16;		// desired precision, minimum = 2.2204e-16 (double)
-	if ((sizeof(real) > 8) && (long_double_caps > 1))	eps = 1.1e-19;		// desired precision, minimum = 1.0842e-19 (long double i387)
+	real* al;
+	real* al_e;
+	#if defined( SHTNS_HIPREC ) || defined ( SHTNS_QUADMATH )
+		const double eps = 1e-25;	//2.3e-16;		// desired precision, minimum = 2.2204e-16 (double)
+	#else
+		const double eps = 2.3e-16;		// desired precision, minimum = 2.2204e-16 (double)
+	#endif
+
+	al = (real*) malloc(sizeof(real)*4*n);
+	al_e = al + 2*n;
+
+	// first, we precompute the coefficients as they will be re-used quite a bit:
+	#pragma omp parallel for
+	for (int l=2; l<=n; l++) {
+		#ifndef SHTNS_HIPREC
+			real l_1 = ((real)1) / l;
+			al[2*l-2] = (2*l-1) * l_1;
+			al[2*l-1] = -(l-1) * l_1;
+		#else
+			al[2*l-2] = div_err(2*l-1,  l,  al_e+2*l-2);
+			al[2*l-1] = div_err(-(l-1), l,  al_e+2*l-1);
+		#endif
+	}
 
 	const long m = n/2;
-	#pragma omp parallel for
+	#pragma omp parallel for schedule(dynamic)
 	for (long i=0;i<m;++i) {
-		real z, z1, pp, p2, p1;
+		real z, pp, dz;
 		int k=10;		// maximum Newton iteration count to prevent infinite loop.
 		if (i >= 40  ||  3*i > 2*m) {	// "interior" region, equation 3.3 from Hale & Townsend 2013
 			z = cos((M_PI*(4*i+3))/(4*n+2));
@@ -586,39 +605,89 @@ void gauss_nodes(double *x, double* st, double *w, const int n)
 			z = bessel_j0_root[i] / (n+0.5);
 			z = cos( z + (z/tan(z)-1)/(8*z*(n+0.5)*(n+0.5)) );
 		}
+		real pp_, z_ = 0;		// corrections (increased precision)
 		do {
-			p1 = z;	// P_1
-			p2 = 1.0;	// P_0
+			real p1 = z;	// P_1
+			real p2 = 1.0;	// P_0
+			real p1_ = z_;
+			real p2_ = 0;
 			for(long l=2;l<=n;++l) {		 // recurrence : l P_l = (2l-1) z P_{l-1} - (l-1) P_{l-2}	(works ok up to l=100000)
 				real p3 = p2;
 				p2 = p1;
-				p1 = ((2*l-1)*z*p2 - (l-1)*p3)/l;		// The Legendre polynomial...
+				//p1 = ((2*l-1)*z*p2 - (l-1)*p3)/l;		// The Legendre polynomial...
+				#ifndef SHTNS_HIPREC
+					// quad precision float128 = 18x slower than double
+					p1 = al[2*l-2]*z*p2 + al[2*l-1]*p3;		// The Legendre polynomial...
+				#else
+					// "rigorous" dd version with dd_mul and dd_add = 6.7x slower than double, 2.7x faster than float128
+					// "fast&sloppy" dd version with dd_mul_no_norm and dd_add_sloppy = 3.6x slower than double, 5x faster than float128
+					real p3_ = p2_;
+					p2_ = p1_;
+					dd_mul_no_norm(&p1,&p1_, z,z_,   al[2*l-2],al_e[2*l-2]);
+					dd_mul_no_norm(&p3,&p3_, p3,p3_, al[2*l-1],al_e[2*l-1]);
+					dd_mul_no_norm(&p1,&p1_, p1,p1_, p2,p2_);
+					dd_add_sloppy(&p1,&p1_, p1,p1_, p3,p3_);
+				#endif
 			}
-			pp = n*(p2-z*p1);			// ... and its (almost) derivative.
-			z1 = z;
-			z -= p1*(1.-z*z)/pp;		// Newton's method
-		} while (( fabs(z-z1) > ((double)(z1+z))*0.5*eps ) && (--k > 0));
-		//if (k==0 && verbose>1) printf("i=%ld, k=%d, z=%g, z1=%g, abs(z-z1)=%g, err=%g\n",i,k, (double) z, (double) z1, fabs(z-z1), 2*fabs(z-z1)/((double)(z1+z)) );
-		real s2 = 1.-z*z;
+			#ifndef SHTNS_HIPREC
+				pp = n*(p2-z*p1);			// ... and its (almost) derivative.
+				dz = p1*(1.-z*z)/pp;		// increment from Newton's method
+				z -= dz;
+			#else
+				dd_mul_no_norm(&pp,&pp_, z,z_, p1,p1_);		//pp=z*p1
+				dd_add(&pp,&pp_, p2,p2_, -pp,-pp_);		//pp=p2-z*p1
+				dd_mul_d(&pp,&pp_, pp,pp_, n);		// pp = n*(p2-z*p1)
+
+				dd_mul_no_norm(&p2,&p2_, z,z_, z,z_);		// p2=z*z
+				dd_add_d_ordered(&p2,&p2_, 1.0,-p2_, -p2);	// p2=1-z*z
+				dd_mul(&p2,&p2_, p2,p2_, p1,p1_);	// p2=p1*(1-z*z)
+				dd_div_no_norm(&p2,&p2_, p2,p2_, pp,pp_);	// p2=p1*(1-z*z)/pp
+				dz = p2+p2_;	// double-word not needed.
+				dd_add_d_ordered(&z, &z_, z,z_, -dz);
+			#endif
+			--k;
+		} while (( fabs(dz) > ((double)z)*eps ) && (k > 0));
+		if (k==0 && verbose>1) printf("convergence warning: i=%ld, iter=%d, z=%g, dz=%g, err=%g\n",i,10-k, (double) z, dz, fabs(dz)/((double)(z)) );
+		#ifdef SHTNS_HIPREC
+			real s2, s2_;
+			dd_mul_no_norm(&s2,&s2_, z,z_, z,z_);
+			dd_add_d_ordered(&s2,&s2_, 1.0,-s2_, -s2);	// 1-z*z
+			dd_mul(&pp,&pp_, pp,pp_, pp,pp_);	// pp*pp
+			dd_div(&pp,&pp_, s2,s2_, pp,pp_);	// s2/(pp*pp)
+			dd_sqrt(&s2,&s2_, s2,s2_);
+		#else
+			real s2 = 1.-z*z;
+			pp = s2/(pp*pp);		// quadrature weight
+			s2 = SQRT(s2);
+		#endif
 		x[i] = z;		// Build up the abscissas.
 		x[n-1-i] = -z;
-		w[i] = 2.0*s2/(pp*pp);		// Build up the weights.
-		w[n-1-i] = w[i];
-		st[i] = SQRT(s2);
-		st[n-1-i] = st[i];
+		w[i] = 2*pp;		// Build up the weights.
+		w[n-1-i] = 2*pp;
+		st[i] = s2;
+		st[n-1-i] = s2;
 		//if (eps < 1e-16 && verbose>0) printf("i=%ld, sin(theta)=%g, sqrt(1-z2)=%g, err=%g\n", i, st[i], sqrt(1.-x[i]*x[i]), (st[i] - sqrt(1.-x[i]*x[i]))/st[i] );
 	}
 	if (n&1) {
 		x[n/2]  = 0.0;		// exactly zero.
 		st[n/2] = 1.0;
-			real p2 = 1.0;	// P_0
-			for(long l=2;l<=n;l+=2) {		 // recurrence : l P_l = (2l-1) z P_{l-1} - (l-1) P_{l-2}	(works ok up to l=100000)
-				p2 *= (1.0-l)/l;		// The Legendre polynomial...
-			}
-			real pp = 1./(n*p2);			// ... and its inverse derivative.
-		w[n/2] = 2.0*pp*pp;
+		real p2 = 1.0;	// P_0
+		// recurrence : l P_l = (2l-1) z P_{l-1} - (l-1) P_{l-2}	(works ok up to l=100000)
+		#ifndef SHTNS_HIPREC
+			for(long l=2;l<=n;l+=2)  p2 *= (1.0-l)/l;		// The Legendre polynomial...
+			p2 *= n;
+			p2 = 2.0/(p2*p2);
+		#else
+			real p2_ = 0;
+			for(long l=2;l<=n;l+=2)  dd_mul(&p2, &p2_, p2,p2_, al[2*l-1],al_e[2*l-1]);
+			dd_mul_d(&p2, &p2_, p2,p2_, n);
+			dd_mul(&p2, &p2_, p2,p2_, p2,p2_);
+			dd_div(&p2, &p2_, 2,0, p2,p2_);
+		#endif
+		w[n/2] = p2;
 	}
 
+	free(al);
 // as we started with initial guesses, we should check if the gauss points are actually unique and ordered.
 	for (long i=m-1; i>0; i--) {
 		if (((double) x[i]) >= ((double) x[i-1])) shtns_runerr("bad gauss points");

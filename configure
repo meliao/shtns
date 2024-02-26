@@ -711,7 +711,6 @@ enable_cuda
 enable_hip
 enable_magic_layout
 enable_python
-enable_long_double
 enable_f77
 enable_simd
 enable_ishioka
@@ -1360,8 +1359,6 @@ Optional Features:
                           specifying architecture
   --enable-magic-layout   Compile specific version for the MagIC code
   --enable-python         Build Python interface
-  --enable-long-double    Use long double during initialization for (maybe)
-                          slightly better precision
   --disable-f77           Do not include F77 wrapper to call SHTns library
                           from Fortran
   --disable-simd          Do not use vector extensions (SSE2, AVX, AVX2,
@@ -2535,12 +2532,6 @@ then :
 else case e in #(
   e) enable_python=no ;;
 esac
-fi
-
-# Check whether --enable-long-double was given.
-if test ${enable_long_double+y}
-then :
-  enableval=$enable_long_double;
 fi
 
 # Check whether --enable-f77 was given.
@@ -4353,11 +4344,13 @@ fi
  ;;
 esac
 fi
+# add g++ compile options if supported. Do NOT set -ffast-math !!
+# these may be acceptable: -fno-math-errno -freciprocal-math -fno-trapping-math -ffinite-math-only -fcx-limited-range
 
-  { printf "%s\n" "$as_me:${as_lineno-$LINENO}: checking whether $CC accepts -ffast-math" >&5
-printf %s "checking whether $CC accepts -ffast-math... " >&6; }
+  { printf "%s\n" "$as_me:${as_lineno-$LINENO}: checking whether $CC accepts -fno-math-errno" >&5
+printf %s "checking whether $CC accepts -fno-math-errno... " >&6; }
   ax_check_save_flags=$CFLAGS
-  CFLAGS="$CFLAGS -ffast-math"
+  CFLAGS="$CFLAGS -fno-math-errno"
   cat confdefs.h - <<_ACEOF >conftest.$ac_ext
 /* end confdefs.h.  */
 
@@ -4374,7 +4367,7 @@ then :
   CFLAGS=$ax_check_save_flags
      { printf "%s\n" "$as_me:${as_lineno-$LINENO}: result: yes" >&5
 printf "%s\n" "yes" >&6; }
-     CFLAGS="$CFLAGS -ffast-math"
+     CFLAGS="$CFLAGS -fno-math-errno"
 else case e in #(
   e) CFLAGS=$ax_check_save_flags
      { printf "%s\n" "$as_me:${as_lineno-$LINENO}: result: no" >&5
@@ -4383,6 +4376,195 @@ printf "%s\n" "no" >&6; }
 esac
 fi
 rm -f core conftest.err conftest.$ac_objext conftest.beam conftest.$ac_ext
+
+
+  { printf "%s\n" "$as_me:${as_lineno-$LINENO}: checking whether $CC accepts -fno-trapping-math" >&5
+printf %s "checking whether $CC accepts -fno-trapping-math... " >&6; }
+  ax_check_save_flags=$CFLAGS
+  CFLAGS="$CFLAGS -fno-trapping-math"
+  cat confdefs.h - <<_ACEOF >conftest.$ac_ext
+/* end confdefs.h.  */
+
+int
+main (void)
+{
+
+  ;
+  return 0;
+}
+_ACEOF
+if ac_fn_c_try_compile "$LINENO"
+then :
+  CFLAGS=$ax_check_save_flags
+     { printf "%s\n" "$as_me:${as_lineno-$LINENO}: result: yes" >&5
+printf "%s\n" "yes" >&6; }
+     CFLAGS="$CFLAGS -fno-trapping-math"
+else case e in #(
+  e) CFLAGS=$ax_check_save_flags
+     { printf "%s\n" "$as_me:${as_lineno-$LINENO}: result: no" >&5
+printf "%s\n" "no" >&6; }
+     : ;;
+esac
+fi
+rm -f core conftest.err conftest.$ac_objext conftest.beam conftest.$ac_ext
+
+
+  { printf "%s\n" "$as_me:${as_lineno-$LINENO}: checking whether $CC accepts -ffinite-math-only" >&5
+printf %s "checking whether $CC accepts -ffinite-math-only... " >&6; }
+  ax_check_save_flags=$CFLAGS
+  CFLAGS="$CFLAGS -ffinite-math-only"
+  cat confdefs.h - <<_ACEOF >conftest.$ac_ext
+/* end confdefs.h.  */
+
+int
+main (void)
+{
+
+  ;
+  return 0;
+}
+_ACEOF
+if ac_fn_c_try_compile "$LINENO"
+then :
+  CFLAGS=$ax_check_save_flags
+     { printf "%s\n" "$as_me:${as_lineno-$LINENO}: result: yes" >&5
+printf "%s\n" "yes" >&6; }
+     CFLAGS="$CFLAGS -ffinite-math-only"
+else case e in #(
+  e) CFLAGS=$ax_check_save_flags
+     { printf "%s\n" "$as_me:${as_lineno-$LINENO}: result: no" >&5
+printf "%s\n" "no" >&6; }
+     : ;;
+esac
+fi
+rm -f core conftest.err conftest.$ac_objext conftest.beam conftest.$ac_ext
+
+
+  { printf "%s\n" "$as_me:${as_lineno-$LINENO}: checking whether $CC accepts -fcx-limited-range" >&5
+printf %s "checking whether $CC accepts -fcx-limited-range... " >&6; }
+  ax_check_save_flags=$CFLAGS
+  CFLAGS="$CFLAGS -fcx-limited-range"
+  cat confdefs.h - <<_ACEOF >conftest.$ac_ext
+/* end confdefs.h.  */
+
+int
+main (void)
+{
+
+  ;
+  return 0;
+}
+_ACEOF
+if ac_fn_c_try_compile "$LINENO"
+then :
+  CFLAGS=$ax_check_save_flags
+     { printf "%s\n" "$as_me:${as_lineno-$LINENO}: result: yes" >&5
+printf "%s\n" "yes" >&6; }
+     CFLAGS="$CFLAGS -fcx-limited-range"
+else case e in #(
+  e) CFLAGS=$ax_check_save_flags
+     { printf "%s\n" "$as_me:${as_lineno-$LINENO}: result: no" >&5
+printf "%s\n" "no" >&6; }
+     : ;;
+esac
+fi
+rm -f core conftest.err conftest.$ac_objext conftest.beam conftest.$ac_ext
+
+
+# add icc compile options if supported.
+
+  { printf "%s\n" "$as_me:${as_lineno-$LINENO}: checking whether $CC accepts -fp-model=precise" >&5
+printf %s "checking whether $CC accepts -fp-model=precise... " >&6; }
+  ax_check_save_flags=$CFLAGS
+  CFLAGS="$CFLAGS -fp-model=precise"
+  cat confdefs.h - <<_ACEOF >conftest.$ac_ext
+/* end confdefs.h.  */
+
+int
+main (void)
+{
+
+  ;
+  return 0;
+}
+_ACEOF
+if ac_fn_c_try_compile "$LINENO"
+then :
+  CFLAGS=$ax_check_save_flags
+     { printf "%s\n" "$as_me:${as_lineno-$LINENO}: result: yes" >&5
+printf "%s\n" "yes" >&6; }
+     CFLAGS="$CFLAGS -fp-model=precise"
+else case e in #(
+  e) CFLAGS=$ax_check_save_flags
+     { printf "%s\n" "$as_me:${as_lineno-$LINENO}: result: no" >&5
+printf "%s\n" "no" >&6; }
+     : ;;
+esac
+fi
+rm -f core conftest.err conftest.$ac_objext conftest.beam conftest.$ac_ext
+
+
+  { printf "%s\n" "$as_me:${as_lineno-$LINENO}: checking whether $CC accepts -complex-limited-range" >&5
+printf %s "checking whether $CC accepts -complex-limited-range... " >&6; }
+  ax_check_save_flags=$CFLAGS
+  CFLAGS="$CFLAGS -complex-limited-range"
+  cat confdefs.h - <<_ACEOF >conftest.$ac_ext
+/* end confdefs.h.  */
+
+int
+main (void)
+{
+
+  ;
+  return 0;
+}
+_ACEOF
+if ac_fn_c_try_compile "$LINENO"
+then :
+  CFLAGS=$ax_check_save_flags
+     { printf "%s\n" "$as_me:${as_lineno-$LINENO}: result: yes" >&5
+printf "%s\n" "yes" >&6; }
+     CFLAGS="$CFLAGS -complex-limited-range"
+else case e in #(
+  e) CFLAGS=$ax_check_save_flags
+     { printf "%s\n" "$as_me:${as_lineno-$LINENO}: result: no" >&5
+printf "%s\n" "no" >&6; }
+     : ;;
+esac
+fi
+rm -f core conftest.err conftest.$ac_objext conftest.beam conftest.$ac_ext
+
+
+  { printf "%s\n" "$as_me:${as_lineno-$LINENO}: checking whether $CC accepts -prec-div -prec-sqrt" >&5
+printf %s "checking whether $CC accepts -prec-div -prec-sqrt... " >&6; }
+  ax_check_save_flags=$CFLAGS
+  CFLAGS="$CFLAGS -prec-div -prec-sqrt"
+  cat confdefs.h - <<_ACEOF >conftest.$ac_ext
+/* end confdefs.h.  */
+
+int
+main (void)
+{
+
+  ;
+  return 0;
+}
+_ACEOF
+if ac_fn_c_try_compile "$LINENO"
+then :
+  CFLAGS=$ax_check_save_flags
+     { printf "%s\n" "$as_me:${as_lineno-$LINENO}: result: yes" >&5
+printf "%s\n" "yes" >&6; }
+     CFLAGS="$CFLAGS -prec-div -prec-sqrt"
+else case e in #(
+  e) CFLAGS=$ax_check_save_flags
+     { printf "%s\n" "$as_me:${as_lineno-$LINENO}: result: no" >&5
+printf "%s\n" "no" >&6; }
+     : ;;
+esac
+fi
+rm -f core conftest.err conftest.$ac_objext conftest.beam conftest.$ac_ext
+
 
 
   { printf "%s\n" "$as_me:${as_lineno-$LINENO}: checking whether $CC accepts -std=gnu11" >&5
@@ -5468,68 +5650,6 @@ fi
 
 
 fi
-
-fi
-
-# Checks related to long double
-if test "x$enable_long_double" == "xyes"
-then :
-
-
-  { printf "%s\n" "$as_me:${as_lineno-$LINENO}: checking for long double with more range or precision than double" >&5
-printf %s "checking for long double with more range or precision than double... " >&6; }
-if test ${ac_cv_type_long_double_wider+y}
-then :
-  printf %s "(cached) " >&6
-else case e in #(
-  e) cat confdefs.h - <<_ACEOF >conftest.$ac_ext
-/* end confdefs.h.  */
-#include <float.h>
-	    long double const a[] =
-	      {
-		 0.0L, DBL_MIN, DBL_MAX, DBL_EPSILON,
-		 LDBL_MIN, LDBL_MAX, LDBL_EPSILON
-	      };
-	    long double
-	    f (long double x)
-	    {
-	       return ((x + (unsigned long int) 10) * (-1 / x) + a[0]
-			+ (x ? f (x) : 'c'));
-	    }
-
-int
-main (void)
-{
-static int test_array [1 - 2 * !((0 < ((DBL_MAX_EXP < LDBL_MAX_EXP)
-		   + (DBL_MANT_DIG < LDBL_MANT_DIG)
-		   - (LDBL_MAX_EXP < DBL_MAX_EXP)
-		   - (LDBL_MANT_DIG < DBL_MANT_DIG)))
-	    && (int) LDBL_EPSILON == 0
-	  )];
-test_array [0] = 0;
-return test_array [0];
-
-  ;
-  return 0;
-}
-_ACEOF
-if ac_fn_c_try_compile "$LINENO"
-then :
-  ac_cv_type_long_double_wider=yes
-else case e in #(
-  e) ac_cv_type_long_double_wider=no ;;
-esac
-fi
-rm -f core conftest.err conftest.$ac_objext conftest.beam conftest.$ac_ext ;;
-esac
-fi
-{ printf "%s\n" "$as_me:${as_lineno-$LINENO}: result: $ac_cv_type_long_double_wider" >&5
-printf "%s\n" "$ac_cv_type_long_double_wider" >&6; }
-  if test $ac_cv_type_long_double_wider = yes; then
-
-printf "%s\n" "#define HAVE_LONG_DOUBLE_WIDER 1" >>confdefs.h
-
-  fi
 
 fi
 

@@ -28,8 +28,6 @@ AC_ARG_ENABLE([magic-layout],
 	AS_HELP_STRING([--enable-magic-layout], [Compile specific version for the MagIC code]), [], [enable_magic_layout=no])
 AC_ARG_ENABLE([python],
 	AS_HELP_STRING([--enable-python], [Build Python interface]), [], [enable_python=no])
-AC_ARG_ENABLE([long-double],
-	AS_HELP_STRING([--enable-long-double], [Use long double during initialization for (maybe) slightly better precision]))
 AC_ARG_ENABLE([f77],
 	AS_HELP_STRING([--disable-f77], [Do not include F77 wrapper to call SHTns library from Fortran]))
 AC_ARG_ENABLE([simd],
@@ -155,7 +153,18 @@ AS_IF([test "x$enable_knl" != "xyes"], [
 	AS_IF([test "x$enable_mkl" = "xdefault"], [enable_mkl=yes])
 	AS_IF([test "x$enable_openmp" = "xdefault"], [enable_openmp=yes])
 ])
-AX_CHECK_COMPILE_FLAG([-ffast-math])
+# add g++ compile options if supported. Do NOT set -ffast-math !!
+# these may be acceptable: -fno-math-errno -freciprocal-math -fno-trapping-math -ffinite-math-only -fcx-limited-range
+AX_CHECK_COMPILE_FLAG([-fno-math-errno])
+AX_CHECK_COMPILE_FLAG([-fno-trapping-math])
+AX_CHECK_COMPILE_FLAG([-ffinite-math-only])
+AX_CHECK_COMPILE_FLAG([-fcx-limited-range])
+
+# add icc compile options if supported.
+AX_CHECK_COMPILE_FLAG([-fp-model=precise])
+AX_CHECK_COMPILE_FLAG([-complex-limited-range])
+AX_CHECK_COMPILE_FLAG([-prec-div -prec-sqrt])
+
 AX_CHECK_COMPILE_FLAG([-std=gnu11],, [
     AX_CHECK_COMPILE_FLAG([-std=gnu99],, [
 	AX_CHECK_COMPILE_FLAG([-std=c99])
@@ -312,10 +321,6 @@ AS_IF([test "x$enable_mkl" != "xyes"], [
 		AC_CHECK_LIB([fftw3_omp], [fftw_init_threads],,[AC_MSG_ERROR(["FFTW3 does not support OpenMP. Did you compile it with --enable-openmp ?."])])
 	])
 ])
-
-# Checks related to long double
-AS_IF([test "x$enable_long_double" == "xyes"], [
-	AC_TYPE_LONG_DOUBLE_WIDER])
 
 # Disable Fortran interface ?
 AS_IF([test "x$enable_f77" != "xno"], [
