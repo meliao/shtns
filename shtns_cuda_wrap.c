@@ -3001,16 +3001,16 @@ static swig_module_info swig_module = {swig_types, 7, 0, 0, 0, 0};
 #define SWIG_TypeQuery SWIG_Python_TypeQuery
 
 /*-----------------------------------------------
-              @(target):= _shtns.so
+              @(target):= _shtns_cuda.so
   ------------------------------------------------*/
 #if PY_VERSION_HEX >= 0x03000000
-#  define SWIG_init    PyInit__shtns
+#  define SWIG_init    PyInit__shtns_cuda
 
 #else
-#  define SWIG_init    init_shtns
+#  define SWIG_init    init_shtns_cuda
 
 #endif
-#define SWIG_name    "_shtns"
+#define SWIG_name    "_shtns_cuda"
 
 #define SWIG_as_voidptr(a) (void *)((const void *)(a)) 
 #define SWIG_as_voidptrptr(a) ((void)SWIG_as_voidptr(*a),(void**)(a)) 
