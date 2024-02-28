@@ -1,11 +1,21 @@
 SHTNS CHANGE LOG:
 -----------------
 
+* v3.6.5  (28 Feb 2024)
+	- Improve accuracy of scalar transforms with large mean (l=0).
+	- GPU fp32: to avoid accuracy issues arising with Ishioka's recurrence in single precision,
+	  use fp64 internally to compute the recurrence if GPU has good fp64 performance, otherwise
+	  switch to a more classic recurrence.
+	- Python module can make use of GPU, with fallback to CPU.
+	- Faster initialization time.
+	- Runtime verbosity control through `SHTNS_VERBOSE` environment variable.
+    - Better discovery of fftw on MacOSX.
+
 * v3.6.1  (13 Jul 2023)
-	- better python module installation, using `pip install shtns` (thanks to all testers!)
-	- float (single precision) vector transforms supported on GPU.
-	- fix `shallow_water.py` example to work with recent numpy (thanks to P. Personnettaz)
-	- better nested openmp parallelism support (thanks to M. Schreiber)
+	- Better python module installation, using `pip install shtns` (thanks to all testers!)
+	- Float (single precision) vector transforms supported on GPU.
+	- Fix `shallow_water.py` example to work with recent numpy (thanks to P. Personnettaz)
+	- Better nested openmp parallelism support (thanks to M. Schreiber)
 
 * v3.6  (30 May 2023)
 	- Rewrite of GPU transforms, with important performance improvements.
