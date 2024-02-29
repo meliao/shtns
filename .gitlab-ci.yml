@@ -23,6 +23,7 @@ build:
     - sed -i "s/haswell/skylake-avx512/" Makefile && make time_SHT && mv time_SHT time_SHT_avx512
     - sed -i "s/skylake-avx512/native/" Makefile && make  # build regular library for artifacts
     - python3 setup.py install --user   # build python module with cuda
+    - ls build/lib*/_shtns_cuda*   # check that cuda mudule has been built!
     - CUDA_PATH= python3 setup.py install --user   # build python module WITHOUT cuda
     - python3 -c "import shtns; shtns.print_version(); sh=shtns.sht(13); sh.set_grid()"
     - ./configure --enable-openmp
