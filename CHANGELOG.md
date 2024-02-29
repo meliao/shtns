@@ -1,6 +1,9 @@
 SHTNS CHANGE LOG:
 -----------------
 
+* v3.6.6  (29 Feb 2024)
+    - fix building of python module with cuda support
+
 * v3.6.5  (28 Feb 2024)
 	- Improve accuracy of scalar transforms with large mean (l=0).
 	- GPU fp32: to avoid accuracy issues arising with Ishioka's recurrence in single precision,
