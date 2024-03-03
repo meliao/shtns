@@ -549,16 +549,29 @@ static double legendre_Pl(const int l, double x)
 	return ((double) p1);
 }
 
-// first 40 roots of the Bessel J0 function, generated with mpmath: besseljzero(0,1..40)
-const double bessel_j0_root[] = {
- 2.4048255576957727686, 5.5200781102863106496, 8.653727912911012217,  11.791534439014281614, 14.930917708487785948,
- 18.071063967910922543, 21.211636629879258959, 24.352471530749302737, 27.493479132040254796, 30.634606468431975118,
- 33.775820213573568684, 36.91709835366404398,  40.058425764628239295, 43.199791713176730358, 46.341188371661814019,
- 49.482609897397817174, 52.624051841114996029, 55.765510755019979312, 58.906983926080942133, 62.048469190227169883,
- 65.189964800206860441, 68.331469329856798271, 71.472981603593732825, 74.614500643701837884, 77.756025630388055038,
- 80.897555871137627864, 84.039090776938190158, 87.180629843641153651, 90.322172637210480056, 93.463718781944774171,
- 96.605267950996264403, 99.746819858680595416, 102.88837425419480098, 106.02993091645161883, 109.1714896498053804,
- 112.31305028049490602, 115.45461265366694192, 118.59617663087253447, 121.73774208795096285, 124.87930891323294702};
+/// \internal Good approximation of the k-th zero of the Bessel J0 function.
+/// Function adapted from ducc https://gitlab.mpcdf.mpg.de/mtr/ducc/-/blob/ducc0/src/ducc0/math/gl_integrator.cc
+/// Equation (4.1) from Bogaert 2014, doi:10.1137/140954969
+/// Equation 10.21.19 from https://dlmf.nist.gov/10.21#E19 for \nu=0
+double bessel_j0_root(int k)
+{
+	static const double j0_root[] = {	// first 11 zeros of the Bessel J0 function, generated with mpmath: besseljzero(0,1..11)
+		2.4048255576957727686, 5.5200781102863106496, 8.653727912911012217,  11.791534439014281614,
+		14.930917708487785948, 18.071063967910922543, 21.211636629879258959, 24.352471530749302737,
+		27.493479132040254796, 30.634606468431975118, 33.775820213573568684 };
+	static const double coeffs[] = {	// coefficients for the polynomial approximation, accurate to machine precision (1 ulp) for k>11:
+		2092163573./82575360, -6277237./3440640, 3779./15360, -31./384, 1./8};
+
+	if (k<=11) return j0_root[k-1];		// read from table for k<=11
+
+	// use polynomial approximation for k>11, accurate to machine precision (1 ulp).
+	double z = 0.25*M_PI*(4*k-1);
+	double r = 1/z;
+	double r2 = r*r;
+	double p = coeffs[0];
+	for (int i=1; i<5; i++) 	p = coeffs[i] + r2*p;
+	return z + r*p;
+}
 
 
 /// \internal Generates the abscissa and weights for a Gauss-Legendre quadrature.
@@ -597,12 +610,12 @@ void gauss_nodes(double *x, double* st, double *w, const int n)
 	for (long i=0;i<m;++i) {
 		real z, pp, dz;
 		int k=10;		// maximum Newton iteration count to prevent infinite loop.
-		if (i >= 40  ||  3*i > 2*m) {	// "interior" region, equation 3.3 from Hale & Townsend 2013
+		if (3*i > 2*m) {	// "interior" region, equation 3.3 from Hale & Townsend 2013
 			z = cos((M_PI*(4*i+3))/(4*n+2));
 			double n_1 = 0.25/n;
 			z -= z*n_1*n_1*n_1*( 8*(n-1)  + n_1 * (26. - (56./3)/(1.-z*z)) );	// initial guess
 		} else {	// "boundary region", equation 3.6 of Hale & Townsend 2013, doi:10.1137/120889873
-			z = bessel_j0_root[i] / (n+0.5);
+			z = bessel_j0_root(i+1) / (n+0.5);
 			z = cos( z + (z/tan(z)-1)/(8*z*(n+0.5)*(n+0.5)) );
 		}
 		real pp_, z_ = 0;		// corrections (increased precision)
