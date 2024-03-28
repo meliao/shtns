@@ -229,6 +229,38 @@ class sht(object):
         r"""im_from_idx(sht self, long lm) -> int"""
         return _shtns.sht_im_from_idx(self, lm)
 
+    def cu_spat_to_SH(self, Vr, Qlm):
+        r"""EXPERIMENTAL: parameters are raw pointers to GPU memory, for instance a.data.ptr if a is a cupy array."""
+        return _shtns.sht_cu_spat_to_SH(self, Vr, Qlm)
+
+    def cu_SH_to_spat(self, Qlm, Vr):
+        r"""EXPERIMENTAL: parameters are raw pointers to GPU memory, for instance a.data.ptr if a is a cupy array."""
+        return _shtns.sht_cu_SH_to_spat(self, Qlm, Vr)
+
+    def cu_SHsph_to_spat(self, Slm, Vt, Vp):
+        r"""EXPERIMENTAL: parameters are raw pointers to GPU memory, for instance a.data.ptr if a is a cupy array."""
+        return _shtns.sht_cu_SHsph_to_spat(self, Slm, Vt, Vp)
+
+    def cu_SHtor_to_spat(self, Tlm, Vt, Vp):
+        r"""EXPERIMENTAL: parameters are raw pointers to GPU memory, for instance a.data.ptr if a is a cupy array."""
+        return _shtns.sht_cu_SHtor_to_spat(self, Tlm, Vt, Vp)
+
+    def cu_SHsphtor_to_spat(self, Slm, Tlm, Vt, Vp):
+        r"""EXPERIMENTAL: parameters are raw pointers to GPU memory, for instance a.data.ptr if a is a cupy array."""
+        return _shtns.sht_cu_SHsphtor_to_spat(self, Slm, Tlm, Vt, Vp)
+
+    def cu_spat_to_SHsphtor(self, Vt, Vp, Slm, Tlm):
+        r"""EXPERIMENTAL: parameters are raw pointers to GPU memory, for instance a.data.ptr if a is a cupy array."""
+        return _shtns.sht_cu_spat_to_SHsphtor(self, Vt, Vp, Slm, Tlm)
+
+    def cu_spat_to_SHqst(self, Vr, Vt, Vp, Qlm, Slm, Tlm):
+        r"""EXPERIMENTAL: parameters are raw pointers to GPU memory, for instance a.data.ptr if a is a cupy array."""
+        return _shtns.sht_cu_spat_to_SHqst(self, Vr, Vt, Vp, Qlm, Slm, Tlm)
+
+    def cu_SHqst_to_spat(self, Qlm, Slm, Tlm, Vr, Vt, Vp):
+        r"""EXPERIMENTAL: parameters are raw pointers to GPU memory, for instance a.data.ptr if a is a cupy array."""
+        return _shtns.sht_cu_SHqst_to_spat(self, Qlm, Slm, Tlm, Vr, Vt, Vp)
+
     def spat_to_SH(self, Vr, Qlm):
         r"""spat_to_SH(sht self, PyObject * Vr, PyObject * Qlm)"""
         return _shtns.sht_spat_to_SH(self, Vr, Qlm)

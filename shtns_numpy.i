@@ -48,6 +48,17 @@ print(_shtns.build_info())
 #include <numpy/arrayobject.h>
 #include "sht_private.h"
 
+#ifdef SHTNS_GPU
+void cu_spat_to_SH(shtns_cfg shtns, double *Vr, cplx *Qlm, int ltr);
+void cu_SH_to_spat(shtns_cfg shtns, cplx *Qlm, double *Vr, int ltr);
+void cu_SHsph_to_spat(shtns_cfg, cplx *Slm, double *Vt, double *Vp, int ltr);
+void cu_SHtor_to_spat(shtns_cfg, cplx *Tlm, double *Vt, double *Vp, int ltr);
+void cu_SHsphtor_to_spat(shtns_cfg, cplx *Slm, cplx *Tlm, double *Vt, double *Vp, int ltr);
+void cu_spat_to_SHsphtor(shtns_cfg, double *Vt, double *Vp, cplx *Slm, cplx *Tlm, int ltr);
+void cu_SHqst_to_spat(shtns_cfg, cplx *Qlm, cplx *Slm, cplx *Tlm, double* Vr, double *Vt, double *Vp, int ltr);
+void cu_spat_to_SHqst(shtns_cfg, double *Vr, double *Vt, double *Vp, cplx *Qlm, cplx *Slm, cplx *Tlm, int ltr);
+#endif
+
 
 // variables used for exception handling.
 static int shtns_error = 0;
@@ -329,6 +340,66 @@ struct shtns_rot_ {		// describe a rotation matrix
 	int im_from_idx(long lm) {
 		return im_from_lm(lm, $self->lmax, $self->mmax);
 	}
+
+	%feature("autodoc", "EXPERIMENTAL: parameters are raw pointers to GPU memory, for instance a.data.ptr if a is a cupy array.") cu_spat_to_SH;
+	%feature("autodoc", "EXPERIMENTAL: parameters are raw pointers to GPU memory, for instance a.data.ptr if a is a cupy array.") cu_SH_to_spat;
+	%feature("autodoc", "EXPERIMENTAL: parameters are raw pointers to GPU memory, for instance a.data.ptr if a is a cupy array.") cu_SHsph_to_spat;
+	%feature("autodoc", "EXPERIMENTAL: parameters are raw pointers to GPU memory, for instance a.data.ptr if a is a cupy array.") cu_SHtor_to_spat;
+	%feature("autodoc", "EXPERIMENTAL: parameters are raw pointers to GPU memory, for instance a.data.ptr if a is a cupy array.") cu_SHsphtor_to_spat;
+	%feature("autodoc", "EXPERIMENTAL: parameters are raw pointers to GPU memory, for instance a.data.ptr if a is a cupy array.") cu_spat_to_SHsphtor;
+	%feature("autodoc", "EXPERIMENTAL: parameters are raw pointers to GPU memory, for instance a.data.ptr if a is a cupy array.") cu_SHqst_to_spat;
+	%feature("autodoc", "EXPERIMENTAL: parameters are raw pointers to GPU memory, for instance a.data.ptr if a is a cupy array.") cu_spat_to_SHqst;
+	#ifdef SHTNS_GPU
+	void cu_spat_to_SH(size_t Vr, size_t Qlm) {
+		cu_spat_to_SH($self, (void*)Vr, (void*)Qlm, $self->lmax);
+	}
+	void cu_SH_to_spat(size_t Qlm, size_t Vr) {
+		cu_SH_to_spat($self, (void*)Qlm, (void*)Vr, $self->lmax);
+	}
+	void cu_SHsph_to_spat(size_t Slm, size_t Vt, size_t Vp) {
+		cu_SHsph_to_spat($self, (void*)Slm, (void*)Vt, (void*)Vp, $self->lmax);
+	}
+	void cu_SHtor_to_spat(size_t Tlm, size_t Vt, size_t Vp) {
+		cu_SHtor_to_spat($self, (void*)Tlm, (void*)Vt, (void*)Vp, $self->lmax);
+	}
+	void cu_SHsphtor_to_spat(size_t Slm, size_t Tlm, size_t Vt, size_t Vp) {
+		cu_SHsphtor_to_spat($self, (void*)Slm, (void*)Tlm, (void*)Vt, (void*)Vp, $self->lmax);
+	}
+	void cu_spat_to_SHsphtor(size_t Vt, size_t Vp, size_t Slm, size_t Tlm) {
+		cu_spat_to_SHsphtor($self, (void*)Vt, (void*)Vp, (void*)Slm, (void*)Tlm, $self->lmax);
+	}
+	void cu_spat_to_SHqst(size_t Vr, size_t Vt, size_t Vp, size_t Qlm, size_t Slm, size_t Tlm) {
+		cu_spat_to_SHqst($self, (void*)Vr, (void*)Vt, (void*)Vp, (void*)Qlm, (void*)Slm, (void*)Tlm, $self->lmax);
+	}
+	void cu_SHqst_to_spat(size_t Qlm, size_t Slm, size_t Tlm, size_t Vr, size_t Vt, size_t Vp) {
+		cu_SHqst_to_spat($self, (void*)Qlm, (void*)Slm, (void*)Tlm, (void*)Vr, (void*)Vt, (void*)Vp, $self->lmax);
+	}
+	#else
+	void cu_spat_to_SH(size_t Vr, size_t Qlm) {
+		throw_exception(SWIG_RuntimeError,0,"shtns module not compiled for gpu");
+	}
+	void cu_SH_to_spat(size_t Qlm, size_t Vr) {
+		throw_exception(SWIG_RuntimeError,0,"shtns module not compiled for gpu");
+	}
+	void cu_SHsph_to_spat(size_t Slm, size_t Vt, size_t Vp) {
+		throw_exception(SWIG_RuntimeError,0,"shtns module not compiled for gpu");
+	}
+	void cu_SHtor_to_spat(size_t Tlm, size_t Vt, size_t Vp) {
+		throw_exception(SWIG_RuntimeError,0,"shtns module not compiled for gpu");
+	}
+	void cu_SHsphtor_to_spat(size_t Slm, size_t Tlm, size_t Vt, size_t Vp) {
+		throw_exception(SWIG_RuntimeError,0,"shtns module not compiled for gpu");
+	}
+	void cu_spat_to_SHsphtor(size_t Vt, size_t Vp, size_t Slm, size_t Tlm) {
+		throw_exception(SWIG_RuntimeError,0,"shtns module not compiled for gpu");
+	}
+	void cu_spat_to_SHqst(size_t Vr, size_t Vt, size_t Vp, size_t Qlm, size_t Slm, size_t Tlm) {
+		throw_exception(SWIG_RuntimeError,0,"shtns module not compiled for gpu");
+	}
+	void cu_SHqst_to_spat(size_t Qlm, size_t Slm, size_t Tlm, size_t Vr, size_t Vt, size_t Vp) {
+		throw_exception(SWIG_RuntimeError,0,"shtns module not compiled for gpu");
+	}
+	#endif
 
 	/* scalar transforms */
 	void spat_to_SH(PyObject *Vr, PyObject *Qlm) {
