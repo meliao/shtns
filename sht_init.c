@@ -1444,7 +1444,7 @@ int shtns_set_grid_auto(shtns_cfg shtns, enum shtns_type flags, double eps, int 
 	}
 
 	if (*nlat <= shtns->lmax) shtns_runerr("Nlat must be larger than Lmax");
-	if ((flags != sht_gauss)&&(*nlat <= 2*shtns->lmax)) shtns_runerr("Nlat must be larger than 2*Lmax");
+	if ((flags != sht_gauss)&&(*nlat <= 2*shtns->lmax)) printf("!WARNING! Nlat must be larger than 2*Lmax for analysis to work (sampling theorem)!");
 	if (IS_TOO_LARGE(*nlat, shtns->nlat)) shtns_runerr("Nlat too large");
 	if (IS_TOO_LARGE(*nphi, shtns->nphi)) shtns_runerr("Nphi too large");
 
