@@ -1,6 +1,6 @@
 /* sht_config.h.in.  Generated from configure.ac by autoheader.  */
 
-/* Define to 1 if you have the `clock_gettime' function. */
+/* Define to 1 if you have the 'clock_gettime' function. */
 #undef HAVE_CLOCK_GETTIME
 
 /* Define to 1 if you have the <complex.h> header file. */
@@ -9,10 +9,10 @@
 /* Define to 1 if you have the <c_asm.h> header file. */
 #undef HAVE_C_ASM_H
 
-/* Define to 1 if you have the `fftw_cost' function. */
+/* Define to 1 if you have the 'fftw_cost' function. */
 #undef HAVE_FFTW_COST
 
-/* Define to 1 if you have the `gethrtime' function. */
+/* Define to 1 if you have the 'gethrtime' function. */
 #undef HAVE_GETHRTIME
 
 /* Define to 1 if hrtime_t is defined in <sys/time.h> */
@@ -24,32 +24,32 @@
 /* Define to 1 if you have the <inttypes.h> header file. */
 #undef HAVE_INTTYPES_H
 
-/* Define to 1 if you have the `amdhip64' library (-lamdhip64). */
+/* Define to 1 if you have the 'amdhip64' library (-lamdhip64). */
 #undef HAVE_LIBAMDHIP64
 
-/* Define to 1 if you have the `cuda' library (-lcuda). */
+/* Define to 1 if you have the 'cuda' library (-lcuda). */
 #undef HAVE_LIBCUDA
 
-/* Define to 1 if you have the `cudart' library (-lcudart). */
+/* Define to 1 if you have the 'cudart' library (-lcudart). */
 #undef HAVE_LIBCUDART
 
-/* Define to 1 if you have the `fftw3' library (-lfftw3). */
+/* Define to 1 if you have the 'fftw3' library (-lfftw3). */
 #undef HAVE_LIBFFTW3
 
-/* Define to 1 if you have the `fftw3_omp' library (-lfftw3_omp). */
+/* Define to 1 if you have the 'fftw3_omp' library (-lfftw3_omp). */
 #undef HAVE_LIBFFTW3_OMP
 
-/* Define to 1 if you have the `m' library (-lm). */
+/* Define to 1 if you have the 'm' library (-lm). */
 #undef HAVE_LIBM
 
-/* Define to 1 if you have the `nvrtc' library (-lnvrtc). */
+/* Define to 1 if you have the 'nvrtc' library (-lnvrtc). */
 #undef HAVE_LIBNVRTC
 
-/* Define to 1 if the type `long double' works and has more range or precision
-   than `double'. */
+/* Define to 1 if the type 'long double' works and has more range or precision
+   than 'double'. */
 #undef HAVE_LONG_DOUBLE_WIDER
 
-/* Define to 1 if you have the `mach_absolute_time' function. */
+/* Define to 1 if you have the 'mach_absolute_time' function. */
 #undef HAVE_MACH_ABSOLUTE_TIME
 
 /* Define to 1 if you have the <mach/mach_time.h> header file. */
@@ -58,11 +58,8 @@
 /* Define to 1 if you have the <math.h> header file. */
 #undef HAVE_MATH_H
 
-/* Define to 1 if you have the `read_real_time' function. */
+/* Define to 1 if you have the 'read_real_time' function. */
 #undef HAVE_READ_REAL_TIME
-
-/* Define to 1 if you have the <stdatomic.h> header file. */
-#undef HAVE_STDATOMIC_H
 
 /* Define to 1 if you have the <stdint.h> header file. */
 #undef HAVE_STDINT_H
@@ -88,7 +85,7 @@
 /* Define to 1 if you have the <sys/types.h> header file. */
 #undef HAVE_SYS_TYPES_H
 
-/* Define to 1 if you have the `time_base_to_time' function. */
+/* Define to 1 if you have the 'time_base_to_time' function. */
 #undef HAVE_TIME_BASE_TO_TIME
 
 /* Define to 1 if you have the <unistd.h> header file. */
@@ -129,7 +126,7 @@
    print fftw plans. */
 #undef SHT_VERBOSE
 
-/* Define to 1 if all of the C90 standard headers exist (not just the ones
+/* Define to 1 if all of the C89 standard headers exist (not just the ones
    required in a freestanding environment). This macro is provided for
    backward compatibility; new code need not use it. */
 #undef STDC_HEADERS
@@ -141,11 +138,11 @@
    code (if SSE2, AVX or MIC is supported) ! */
 #undef _GCC_VEC_
 
-/* Define to `__inline__' or `__inline' if that's what the C compiler
+/* Define to '__inline__' or '__inline' if that's what the C compiler
    calls it, or to nothing if 'inline' is not supported under any name.  */
 #ifndef __cplusplus
 #undef inline
 #endif
 
-/* Define to `unsigned int' if <sys/types.h> does not define. */
+/* Define as 'unsigned int' if <stddef.h> doesn't define. */
 #undef size_t

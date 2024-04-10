@@ -179,12 +179,7 @@ void spat_to_SHqst_2ml(shtns_cfg shtns, int im, cplx *Vr, cplx *Vt, cplx *Vp, cp
 
 /*  Fortran 77 api  */
 
-#ifdef HAVE_STDATOMIC_H
-#include <stdatomic.h>
-extern _Atomic shtns_cfg sht_data;
-#else
 extern shtns_cfg sht_data;
-#endif
 
 // Fortran API : Call from fortran without the trailing '_'
 ///@{

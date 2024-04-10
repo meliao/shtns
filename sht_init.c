@@ -35,10 +35,6 @@
 #include "fftw3/cycle.h"
 
 // chained list of sht_setup : start with NULL
-#ifdef HAVE_STDATOMIC_H
-#include <stdatomic.h>
-_Atomic
-#endif
 shtns_cfg sht_data = NULL;
 
 #ifdef _OPENMP
@@ -1190,12 +1186,8 @@ shtns_cfg shtns_create(int lmax, int mmax, int mres, enum shtns_norm norm)
 	if ((lmax == mmax) && (mres == 1))	SH_rotK90_init(shtns);
 
 // save a pointer to this setup and return.
-#ifdef HAVE_STDATOMIC_H
-	shtns->next = atomic_exchange(&sht_data, shtns);
-#else
 	shtns->next = sht_data;		// reference of previous setup (may be NULL).
 	sht_data = shtns;			// keep track of new setup.
-#endif
 	return(shtns);
 }
 
@@ -1227,12 +1219,8 @@ shtns_cfg shtns_create_with_grid(shtns_cfg base, int mmax, int nofft)
 	}
 
 // save a pointer to this setup and return.
-#ifdef HAVE_STDATOMIC_H
-	shtns->next = atomic_exchange(&sht_data, shtns);
-#else
 	shtns->next = sht_data;		// reference of previous setup (may be NULL).
 	sht_data = shtns;			// keep track of new setup.
-#endif
 	return(shtns);
 }
 
@@ -1249,6 +1237,11 @@ void shtns_unset_grid(shtns_cfg shtns)
 /// release all resources allocated by a given shtns_cfg. NOT thead-safe.
 void shtns_destroy(shtns_cfg shtns)
 {
+	shtns_cfg s2 = sht_data;
+	while (s2 != shtns) {
+		if (s2 == 0) 	return;	// shtns not found in list! already freed?
+		s2 = s2->next;
+	}
 	#ifdef SHTNS_GPU
 	if (shtns->d_clm) cushtns_release_gpu(shtns);
 	#endif
@@ -1272,27 +1265,20 @@ void shtns_destroy(shtns_cfg shtns)
 
 	shtns_unset_grid(shtns);
 
-	if (sht_data == shtns) {
-		sht_data = shtns->next;		// forget shtns
-	} else {
-		shtns_cfg s2 = sht_data;
-		while (s2 != NULL) {
-			if (s2->next == shtns) {
-				s2->next = shtns->next;		// forget shtns
-				break;
-			}
-			s2 = s2->next;
+	shtns_cfg* p = &sht_data;
+	while (*p != NULL) {
+		if (*p == shtns) {
+			*p = shtns->next;		// forget shtns
+			break;
 		}
+		p = &((*p)->next);
 	}
 	VFREE(shtns);
 }
 
 /// clear all allocated memory (hopefully) and go back to 0 state. NOT thread-safe.
-void shtns_reset()
-{
-	while (sht_data != NULL) {
-		shtns_destroy(sht_data);
-	}
+void shtns_reset() {
+	while (sht_data != NULL) 	shtns_destroy(sht_data);
 }
 
 #ifndef SHTNS_GPU
