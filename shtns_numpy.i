@@ -506,7 +506,7 @@ struct shtns_rot_ {		// describe a rotation matrix
 				zr = np.empty(self.spat_shape, dtype=complex)		# v_r
 				zt = np.empty(self.spat_shape, dtype=complex)		# v_theta
 				zp = np.empty(self.spat_shape, dtype=complex)		# v_phi
-				self.SHqst_to_spat(q[0],q[1],q[2],zr,zt,zp)
+				self.SHqst_to_spat_cplx(q[0],q[1],q[2],zr,zt,zp)
 				return vr,vt,vp
 
 		def analys_cplx(self,*arg):
