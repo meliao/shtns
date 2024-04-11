@@ -715,6 +715,7 @@ static void fejer1_nodes(double *x, double *st, double *w, const int n)
 	free(wf);
 }
 
+/// Clenshaw-Curtis quadrature requires n > 2*lmax
 static void clenshaw_curtis_nodes(double *x, double* st, double *w, const int n)
 {
 	fftw_plan ifft;
@@ -729,15 +730,12 @@ static void clenshaw_curtis_nodes(double *x, double* st, double *w, const int n)
 		st[i] = cimag(cs);	// sin((M_PI*i)/(n-1));
 	}
 
-	// the weights
-	double w0 = 1.0/((n-1)*(n-1)-1 + ((n-1)&1));
+	// the weights: Clenshaw-Curtis quadrature (including end points).
 	ifft = fftw_plan_dft_c2r_1d(n-1, v1, wf, FFTW_ESTIMATE);
-	for (int k=0; k<n/2; k++) {
-		v1[k] = 2.0/(1.0 - 4.0*k*k);
-		//v1[k] -= w0;
+	for (long k=0; k <= n/2; k++) {
+		v1[k] = 2.0/(1 - 4*k*k);
 	}
-	v1[n/2] = (n-1-3.0)/(2*((n-1)/2)-1) - 1.0;
-	//v1[n/2] += w0 * ((2 - ((n-1)&1))*(n-1)-1);
+	//v1[(n-1)/2] = (n-1-3.0)/(2*((n-1)/2)-1) - 1.0;		// this line switches to Fejer2 quadrature (excluding poles)
 
 	fftw_execute_dft_c2r(ifft,v1,wf);
 
