@@ -682,9 +682,8 @@ cplx exp_2IpiK_N_accurate(long k, long n)
 /// requires n > 2*lmax
 static void fejer1_nodes(double *x, double *st, double *w, const int n)
 {
-	fftw_plan ifft;
-	double* wf = (double*) malloc( (2*n+2) * sizeof(double) );
-	cplx* v1 = (cplx*) (wf + n);
+	double* wf = (double*) VMALLOC( (2*n+4) * sizeof(double) );
+	cplx* v1 = (cplx*) (wf + n + (n&1));
 
 	// the nodes
 	for (int i=0; i<(n+1)/2; i++) {
@@ -697,7 +696,7 @@ static void fejer1_nodes(double *x, double *st, double *w, const int n)
 	}
 
 	// the weights
-	ifft = fftw_plan_dft_c2r_1d(n, v1, wf, FFTW_ESTIMATE);
+	fftw_plan ifft = fftw_plan_dft_c2r_1d(n, v1, wf, FFTW_ESTIMATE);
 	for (int k=0; k<n/2+1; k++) {
 		cplx cs = exp_2IpiK_N_accurate(k, 2*n);
 		double t = (M_PI*k)/n;	// 2*M_PI*k/(2*n)
@@ -718,129 +717,33 @@ static void fejer1_nodes(double *x, double *st, double *w, const int n)
 /// Clenshaw-Curtis quadrature requires n > 2*lmax
 static void clenshaw_curtis_nodes(double *x, double* st, double *w, const int n)
 {
-	fftw_plan ifft;
-	double* wf = (double*) malloc( (2*n+10) * sizeof(double) );
-	cplx* v1 = (cplx*) (wf + n+4);
+	const int N = n-1;		// "logical" size of the FFT involved
+
+	double* wf = (double*) VMALLOC( (2*n+10) * sizeof(double) );
+	cplx* v1 = (cplx*) (wf + n+4 + (n&1));
 
 	// the nodes
 	for (int i=0; i<n; i++) {
-		cplx cs = exp_2IpiK_N_accurate(i, 2*(n-1));
-		if (fabs(creal(cs) - cos((M_PI*i)/(n-1))) > 1e-15) printf("BAD POINTS\n");
-		x[i]  = creal(cs);	// cos((M_PI*i)/(n-1));
-		st[i] = cimag(cs);	// sin((M_PI*i)/(n-1));
+		cplx cs = exp_2IpiK_N_accurate(i, 2*N);
+		if (fabs(creal(cs) - cos((M_PI*i)/N)) > 1e-15) printf("BAD POINTS\n");
+		x[i]  = creal(cs);	// cos((M_PI*i)/N);
+		st[i] = cimag(cs);	// sin((M_PI*i)/N);
 	}
 
 	// the weights: Clenshaw-Curtis quadrature (including end points).
-	ifft = fftw_plan_dft_c2r_1d(n-1, v1, wf, FFTW_ESTIMATE);
+	fftw_plan ifft = fftw_plan_dft_c2r_1d(N, v1, wf, FFTW_ESTIMATE);
 	for (long k=0; k <= n/2; k++) {
 		v1[k] = 2.0/(1 - 4*k*k);
 	}
-	//v1[(n-1)/2] = (n-1-3.0)/(2*((n-1)/2)-1) - 1.0;		// this line switches to Fejer2 quadrature (excluding poles)
+	//v1[N/2] = (N-3.0)/(2*(N/2)-1) - 1.0;		// this line switches to Fejer2 quadrature (excluding poles)
 
 	fftw_execute_dft_c2r(ifft,v1,wf);
 
 	wf[0] *= 0.5;
-	for (int k=0; k<n-1; k++)  w[k] = wf[k]/(n-1);
+	for (int k=0; k<n-1; k++)  w[k] = wf[k]/N;
 	w[n-1] = w[0];
 
 	fftw_destroy_plan(ifft);
 	free(wf);
 }
 
-/*
-
-/// \internal Generates the abscissa and weights for a Féjer quadrature (#2).
-/// Compute weights via FFT
-/// \param x = abscissa, \param w = weights, \param n points.
-/// \note Reference: Waldvogel (2006) "Fast Construction of the Fejér and Clenshaw-Curtis Quadrature Rules"
-/// requires n > 2*lmax
-static void fejer2_nodes(real *x, real *w, const int n)
-{
-	const double norm = 1.0/(n+1);
-
-	// the nodes
-	for (int i=0; i<n; i++) {
-		cplx cs = exp_2IpiK_N_accurate(i+1, 2*(n+1));
-		x[i] = cos((M_PI*(i+1))*norm);
-		if (n<=128) printf("%g ",acos(x[i])*180./M_PI);
-	}
-	printf("< nodes. weights > ");
-
-	// the weights, explicit formula
-	for (int k=0; k<n/2; k++) {
-		double th = M_PI*(k+1)*norm;
-		double s = 0.0;
-		for (int j=1; j<=(n+1)/2; j++) 	s += sin((2*j-1)*th)/(2*j-1);
-		s *= 4.*norm*sin(th);
-		w[k] = s;
-		w[n-1-k] = s;
-	}
-
-	if (n<=128) for (int k=0; k<n; k++) printf("%g ",w[k]);
-}
-
-/// \internal Generates the abscissa and weights for a Féjer quadrature (#2).
-/// Compute weights via FFT
-/// \param x = abscissa, \param w = weights, \param n points.
-/// \note Reference: Waldvogel (2006) "Fast Construction of the Fejér and Clenshaw-Curtis Quadrature Rules"
-/// requires n > 2*lmax+2
-static void fejer2_nodes_poles(real *x, real *w, const int n)
-{
-	const double norm = 1.0/(n-1);
-
-	// the nodes (including poles)
-	for (int i=0; i<n; i++) {
-		x[i] = cos((M_PI*i)*norm);
-		if (n<=128) printf("%g ",acos(x[i])*180./M_PI);
-	}
-	printf("< nodes. weights > ");
-
-	// the weights, explicit formula
-	for (int k=1; k<n/2; k++) {
-		double th = M_PI*k*norm;
-		double s = 0.0;
-		for (int j=1; j<=(n-1)/2; j++) 	s += sin((2*j-1)*th)/(2*j-1);
-		s *= 4.*norm*sin(th);
-		w[k] = s;
-		w[n-1-k] = s;
-	}
-	w[0] = 0.0;		w[n-1] = 0.0;
-
-	if (n<=128) for (int k=0; k<n; k++) printf("%g ",w[k]);
-}
-
-/// \internal Generates the abscissa and weights for a Clenshaw-Curtis quadrature (including poles).
-/// Compute weights via FFT
-/// \param x = abscissa, \param w = weights, \param n points.
-/// \note Reference: Waldvogel (2006) "Fast Construction of the Fejér and Clenshaw-Curtis Quadrature Rules"
-/// requires n > 2*lmax
-static void clenshaw_curtis_nodes_explicit(real *x, real *w, const int n)
-{
-	const double norm = 1.0/(n-1);
-
-	// the nodes
-	for (int i=0; i<n; i++) {
-		x[i] = cos((M_PI*i)*norm);
-		if (n<=128) printf("%g ",acos(x[i])*180./M_PI);
-	}
-	printf("< nodes. weights > ");
-
-	// the weights, explicit formula
-	double* a = (double*) malloc((n+1)/2 * sizeof(double));
-	for (int j=1; j<=(n-1)/2; j++)	a[j] = 1./(0.25-j*j);			// precompute these coefficients
-
-	for (int k=0; k<n/2; k++) {
-		double th = 2.*(M_PI*k)*norm;
-		double s = 2.0;
-		for (int j=1; j<=(n-1)/2; j++) 	s += a[j] * cos(j*th);
-		s *= norm;
-		w[k] = s;
-		w[n-1-k] = s;
-	}
-	w[0] *= 0.5;		w[n-1] *= 0.5;
-
-	if (n<=128) for (int k=0; k<n; k++) printf("%g ",w[k]);
-	free(a);
-}
-
-*/
