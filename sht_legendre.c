@@ -714,36 +714,48 @@ static void fejer1_nodes(double *x, double *st, double *w, const int n)
 	free(wf);
 }
 
-/// Clenshaw-Curtis quadrature requires n > 2*lmax
-static void clenshaw_curtis_nodes(double *x, double* st, double *w, const int n)
+/// exclude_poles must be 0 or 1 !
+/// exclude_poles=0 : grid includes poles (theta=0 and pi) and uses Clenshaw-Curtis quadrature.
+/// exclude_poles=1 : grid excludes poles and uses second Fejer quadrature.
+static void fejer_cc_nodes(double *x, double* st, double *w, const int n, const int exclude_poles)
 {
-	const int N = n-1;		// "logical" size of the FFT involved
-
-	double* wf = (double*) VMALLOC( (2*n+10) * sizeof(double) );
-	cplx* v1 = (cplx*) (wf + n+4 + (n&1));
+	const int N = n-1 + 2*exclude_poles;		// n-1 or n+1 : "logical" size of the FFT involved
 
 	// the nodes
 	for (int i=0; i<n; i++) {
-		cplx cs = exp_2IpiK_N_accurate(i, 2*N);
-		if (fabs(creal(cs) - cos((M_PI*i)/N)) > 1e-15) printf("BAD POINTS\n");
-		x[i]  = creal(cs);	// cos((M_PI*i)/N);
-		st[i] = cimag(cs);	// sin((M_PI*i)/N);
+		cplx cs = exp_2IpiK_N_accurate(i+exclude_poles, 2*N);
+		if (fabs(creal(cs) - cos((M_PI*(i+exclude_poles))/N)) > 1e-15) printf("BAD POINTS\n");
+		x[i]  = creal(cs);
+		st[i] = cimag(cs);
 	}
 
-	// the weights: Clenshaw-Curtis quadrature (including end points).
+	double* wf = (double*) VMALLOC( (2*N+10) * sizeof(double) );
+	cplx* v1 = (cplx*) (wf + N + (N&1));
 	fftw_plan ifft = fftw_plan_dft_c2r_1d(N, v1, wf, FFTW_ESTIMATE);
-	for (long k=0; k <= n/2; k++) {
+
+	// the weights
+	for (long k=0; k <= (N+1)/2; k++) {
 		v1[k] = 2.0/(1 - 4*k*k);
 	}
-	//v1[N/2] = (N-3.0)/(2*(N/2)-1) - 1.0;		// this line switches to Fejer2 quadrature (excluding poles)
+	if (exclude_poles) v1[N/2] = (N-3.0)/(2*(N/2)-1) - 1.0;		// this line switches to Fejer2 quadrature (excluding poles)
 
 	fftw_execute_dft_c2r(ifft,v1,wf);
-
+	
 	wf[0] *= 0.5;
-	for (int k=0; k<n-1; k++)  w[k] = wf[k]/N;
-	w[n-1] = w[0];
+	for (int k=0; k<n-1+exclude_poles; k++)  w[k] = wf[k+exclude_poles]/N;
+	if (exclude_poles==0)  w[n-1] = w[0];
 
 	fftw_destroy_plan(ifft);
 	free(wf);
+}
+
+/// Clenshaw-Curtis quadrature requires n > 2*lmax, and includes the poles
+static void clenshaw_curtis_nodes(double *x, double* st, double *w, const int n) {
+	fejer_cc_nodes(x, st, w, n, 0);
+}
+
+/// Féjer #2 quadrature requires n > 2*lmax, and excludes the poles.
+static void fejer2_nodes(double *x, double* st, double *w, const int n) {
+	fejer_cc_nodes(x, st, w, n, 1);
 }
 
