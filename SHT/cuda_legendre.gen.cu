@@ -875,7 +875,7 @@ template<int S> __global__
 #ifdef __gfx90a__
 __launch_bounds__(64,1)
 #endif
-void ileg_m_kernel(const real_g* __restrict__ al, const real_g* __restrict__ ct, const real* __restrict__ q, real *ql, const int llim, 
+void ileg_m_kernel(const real_g* __restrict__ al, const real_g* __restrict__ wg, const real_g* __restrict__ ct, const real* __restrict__ q, real *ql, const int llim, 
 	const int nlat_2, const int nphi, const int m_inc, const int q_dist, const int ql_dist, const real w_norm
 #if BLKSZE_SH2ISH > 0
 	//, const real* __restrict__ xlm
@@ -923,7 +923,7 @@ void ileg_m_kernel(const real_g* __restrict__ al, const real_g* __restrict__ ct,
 			#pragma unroll
 			for (int f=0; f<NFIELDS; f++) my_reo[f] = 0;	// first, we use my_reo to store the mean of each field, as NW >= NFIELDS
 			for (int k=j; k<nlat_2; k+=BLOCKSIZE) {
-				real w = ct[nlat_2 +k];
+				real w = wg[k];
 			  #ifndef LAYOUT_REAL_FFT
 				#pragma unroll
 				for (int f=0; f<NFIELDS; f++)	my_reo[f] += w * (q[k + f*q_dist]  +  q[nlat_2*2-1 - k + f*q_dist]);
@@ -975,7 +975,7 @@ void ileg_m_kernel(const real_g* __restrict__ al, const real_g* __restrict__ ct,
 		}
 		if (BLOCKSIZE > WARPSZE) {	__syncthreads(); } else { _syncwarp_fence; }
 
-		y0 = (it < nlat_2) ? ct[it + nlat_2] : 0;		// weights are stored just after ct.
+		y0 = (it < nlat_2) ? wg[it] : 0;	// quadrature weights
 		if (S==1)  y1 = (it < nlat_2) ? ct[it + 3*nlat_2] : 0;		// 1/sin(theta)
 	#ifdef ILEG_ISHIOKA
 		cost *= cost;	// ct2
@@ -1197,7 +1197,7 @@ void ileg_m_kernel(const real_g* __restrict__ al, const real_g* __restrict__ ct,
 			} while(l >>= 1);
 		}
 
-		if (it < nlat_2)     y0 *= ct[it + nlat_2];		// include quadrature weights.
+		if (it < nlat_2)     y0 *= wg[it];		// include quadrature weights.
 	  #ifdef ILEG_ISHIOKA
 		y1 = (ak[1]*cost + ak[0]) * y0;
 	  #else
