@@ -68,6 +68,13 @@ void cu_spat_to_SHqst_float(shtns_cfg, float *Vr, float *Vt, float *Vp, cplx_f *
 /// Same as \ref SHqst_to_spat, but working on data residing on the GPU.
 void cu_SHqst_to_spat(shtns_cfg, cplx *Qlm, cplx *Slm, cplx *Tlm, double *Vr, double *Vt, double *Vp, int ltr);
 void cu_SHqst_to_spat_float(shtns_cfg, cplx_f *Qlm, cplx_f *Slm, cplx_f *Tlm, float *Vr, float *Vt, float *Vp, int ltr);
+
+void cu_adjoint_SH_to_spat(shtns_cfg shtns, double *Vr, cplx *Qlm, int ltr);
+void cu_adjoint_SH_to_spat_float(shtns_cfg shtns, float *Vr, cplx_f *Qlm, int ltr);
+void cu_adjoint_SHsphtor_to_spat(shtns_cfg, double *Vt, double *Vp, cplx *Slm, cplx *Tlm, int ltr);
+void cu_adjoint_SHsphtor_to_spat_float(shtns_cfg, float *Vt, float *Vp, cplx_f *Slm, cplx_f *Tlm, int ltr);
+void cu_adjoint_SHqst_to_spat(shtns_cfg, double *Vr, double *Vt, double *Vp, cplx *Qlm, cplx *Slm, cplx *Tlm, int ltr);
+void cu_adjoint_SHqst_to_spat_float(shtns_cfg, float *Vr, float *Vt, float *Vp, cplx_f *Qlm, cplx_f *Slm, cplx_f *Tlm, int ltr);
 ///@}
 
 ///\name Initialization
