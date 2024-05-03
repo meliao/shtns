@@ -35,7 +35,7 @@ extern "C" {
 
 /// SHTns interface version (loosely follow versions) allowing simple version checks: (major << 16) | (minor << 8) | patchlevel
 /// should be increased at least each time this file changes.
-#define SHTNS_INTERFACE 0x30603
+#define SHTNS_INTERFACE 0x30700
 
 /// pointer to data structure describing an SHT, returned by shtns_init() or shtns_create().
 typedef struct shtns_info* shtns_cfg;
@@ -136,6 +136,9 @@ long nlm_calc(long lmax, long mmax, long mres);
 
 /// compute number of spherical harmonics modes (l,m) to represent a complex-valued spatial field, for given size parameters. Does not require any previous setup.
 long nlm_cplx_calc(long lmax, long mmax, long mres);
+
+/// returns index im = m/mres where m is order of index lm into spherical harmonic array.
+int im_from_lm(long lm, int lmax, int mres);
 
 void shtns_verbose(int);			///< controls output during initialization: 0=no output (default), 1=some output, 2=degug (if compiled in)
 void shtns_print_version(void);		///< print version information to stdout.

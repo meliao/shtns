@@ -109,6 +109,24 @@ long nlm_cplx_calc(long lmax, long mmax, long mres)
 	return (2*mmax+1)*(lmax+1) - (mmax*mres)*(mmax+1);	// this is wrong if lmax < mmax*mres
 }
 
+/// recover the im index (order/mres) from the lm offset into SH array.
+/// a bit costly, as it involves a sqrt + a div when mres>1
+/// tested up to lmax=65535 (16 bits) and all mres up to mres=65535
+int im_from_lm(long lm, int lmax, int mres) {
+	if LIKELY(mres==1) {	// avoids division
+		double b = 2*lmax +3;
+		double delta = b*b - (lm*8+1);   		// +1 to make sure we don't have a finite precision issue when truncating to integer afterwards
+		int m2 = b - sqrt(delta);
+		return m2 >> 1;
+	} else {
+		double b = 2*lmax + 2 + mres;
+		double z = 1.0/(mres+mres);
+		double delta = b*b - (mres*lm*8+1);		// +1 to make sure we don't have a finite precision issue when truncating to integer afterwards
+		int im = (b - sqrt(delta))*z;
+		return im;
+	}
+}
+
 
 /*  LEGENDRE FUNCTIONS  */
 #include "sht_legendre.c"
