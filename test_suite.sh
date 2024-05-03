@@ -29,7 +29,7 @@ test1 "2047 -mres=15 -quickinit -iter=1 -nth=1"
 
 for switch in "" "-oop" "-transpose" "-schmidt" "-4pi"
 do
-  for mode in "-quickinit" "-gauss" "-reg" "-fly" "-gauss -nth=1"
+  for mode in "-quickinit" "-gauss" "-reg" "-regpoles" "-gauss -nth=1"
   do
     for lmax in 1 2 3 4 11 12 13 14 31 32 33 34 121 122 123 124
     do
@@ -38,9 +38,9 @@ do
          test1 "$lmax -mmax=$mmax $mode $switch -iter=1"
       done
     done
-    for nlat in 32 34 36 38 40 42 44 46
+    for nlat in 32 33 34 36 38 40 42 44 46
     do
-         test1 "19 -mmax=10 -nlat=$nlat $mode $switch -iter=10"
+         test1 "15 -mmax=10 -nlat=$nlat $mode $switch -iter=10"
     done
   done
 done
