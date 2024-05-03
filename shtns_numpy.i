@@ -629,6 +629,37 @@ struct shtns_rot_ {		// describe a rotation matrix
 				self.spat_cplx_to_SHqst(v[0],v[1],v[2],q,s,t)
 				return q,s,t
 
+		def adjoint_synth(self,*arg):
+			"""
+			adjoint of synthesis, which is an analysis wihtout quadrature weights.
+			qlm = adjoint_synth(q) : applies the adjoint of the spherical harmonic transform to the scalar q
+			slm,tlm = adjoint_synth(vtheta,vphi) : applies the adjoint spherical harmonic transform to 2D vector components (vtheta, vphi)
+			qlm,slm,tlm = adjoint_synth(vr,vtheta,vphi) : applies the adjoint spherical harmonic transform to 3D vector components (vr,vtheta,vphi)
+			"""
+			if self.nlat == 0: raise RuntimeError("Grid not set. Call .set_grid() mehtod.")
+			n = len(arg)
+			if (n>3) or (n<1): raise RuntimeError("1,2 or 3 arguments required.")
+			v = list(arg)
+			for i in range(0,n):
+				if v[i].shape != self.spat_shape: raise RuntimeError("spatial array has wrong shape.")
+				if v[i].dtype.num != np.dtype('float64').num: raise RuntimeError("spatial array should be dtype=float64.")
+				if v[i].flags.contiguous == False: v[i] = v[i].copy()		# contiguous array required.
+			if n==1:
+				q = np.empty(self.nlm, dtype=complex)
+				self.adjoint_SH_to_spat(v[0],q)
+				return q
+			elif n==2:
+				s = np.empty(self.nlm, dtype=complex)
+				t = np.empty(self.nlm, dtype=complex)
+				self.adjoint_SHsphtor_to_spat(v[0],v[1],s,t)
+				return s,t
+			else:
+				q = np.empty(self.nlm, dtype=complex)
+				s = np.empty(self.nlm, dtype=complex)
+				t = np.empty(self.nlm, dtype=complex)
+				self.adjoint_SHqst_to_spat(v[0],v[1],v[2],q,s,t)
+				return q,s,t
+
 
 		def zidx(self, l,m):
 			"""
