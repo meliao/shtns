@@ -225,6 +225,10 @@ class sht(object):
         r"""idx(sht self, unsigned int l, unsigned int m) -> int"""
         return _shtns.sht_idx(self, l, m)
 
+    def im_from_idx(self, lm):
+        r"""im_from_idx(sht self, long lm) -> int"""
+        return _shtns.sht_im_from_idx(self, lm)
+
     def spat_to_SH(self, Vr, Qlm):
         r"""spat_to_SH(sht self, PyObject * Vr, PyObject * Qlm)"""
         return _shtns.sht_spat_to_SH(self, Vr, Qlm)

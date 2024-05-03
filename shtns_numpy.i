@@ -144,6 +144,8 @@ const char __version__[] = SHTNS_VER;		// defines a __version__ attribute
 %rename(print_version) shtns_print_version;
 %rename(set_verbosity) shtns_verbose;
 
+%ignore im_from_lm;
+
 %feature("autodoc");
 %include "shtns.h"
 %include "exception.i"
@@ -323,6 +325,9 @@ struct shtns_rot_ {		// describe a rotation matrix
 			throw_exception(SWIG_ValueError,2,"m invalid");	return 0;
 		}
 		return LM($self, l, m);
+	}
+	int im_from_idx(long lm) {
+		return im_from_lm(lm, $self->lmax, $self->mmax);
 	}
 
 	/* scalar transforms */

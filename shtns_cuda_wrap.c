@@ -3494,6 +3494,9 @@ SWIGINTERN int shtns_info_idx(struct shtns_info *self,unsigned int l,unsigned in
 		}
 		return ( (((((unsigned short)(m))/self->mres)*(2*self->lmax + 2 - ((m)+self->mres)))>>1) + (l) );
 	}
+SWIGINTERN int shtns_info_im_from_idx(struct shtns_info *self,long lm){
+		return im_from_lm(lm, self->lmax, self->mmax);
+	}
 SWIGINTERN void shtns_info_spat_to_SH(struct shtns_info *self,PyObject *Vr,PyObject *Qlm){
 		if (check_spatial(1,Vr, self->nspat) && check_spectral(2,Qlm, self->nlm))
 			spat_to_SH(self, PyArray_Data(Vr), PyArray_Data(Qlm));
@@ -4567,6 +4570,43 @@ SWIGINTERN PyObject *_wrap_sht_idx(PyObject *self, PyObject *args) {
   {
     shtns_error = 0;	// clear exception
     result = (int)shtns_info_idx(arg1,arg2,arg3);
+    if (shtns_error) {
+      // test for exception
+      SWIG_exception(shtns_error, shtns_err_msg);		return NULL;
+    }
+  }
+  resultobj = SWIG_From_int((int)(result));
+  return resultobj;
+fail:
+  return NULL;
+}
+
+
+SWIGINTERN PyObject *_wrap_sht_im_from_idx(PyObject *self, PyObject *args) {
+  PyObject *resultobj = 0;
+  struct shtns_info *arg1 = (struct shtns_info *) 0 ;
+  long arg2 ;
+  void *argp1 = 0 ;
+  int res1 = 0 ;
+  long val2 ;
+  int ecode2 = 0 ;
+  PyObject *swig_obj[2] ;
+  int result;
+  
+  if (!SWIG_Python_UnpackTuple(args, "sht_im_from_idx", 2, 2, swig_obj)) SWIG_fail;
+  res1 = SWIG_ConvertPtr(swig_obj[0], &argp1,SWIGTYPE_p_shtns_info, 0 |  0 );
+  if (!SWIG_IsOK(res1)) {
+    SWIG_exception_fail(SWIG_ArgError(res1), "in method '" "sht_im_from_idx" "', argument " "1"" of type '" "struct shtns_info *""'"); 
+  }
+  arg1 = (struct shtns_info *)(argp1);
+  ecode2 = SWIG_AsVal_long(swig_obj[1], &val2);
+  if (!SWIG_IsOK(ecode2)) {
+    SWIG_exception_fail(SWIG_ArgError(ecode2), "in method '" "sht_im_from_idx" "', argument " "2"" of type '" "long""'");
+  } 
+  arg2 = (long)(val2);
+  {
+    shtns_error = 0;	// clear exception
+    result = (int)shtns_info_im_from_idx(arg1,arg2);
     if (shtns_error) {
       // test for exception
       SWIG_exception(shtns_error, shtns_err_msg);		return NULL;
@@ -6523,6 +6563,7 @@ static PyMethodDef SwigMethods[] = {
 	 { "sht_st_dt_matrix", _wrap_sht_st_dt_matrix, METH_O, "sht_st_dt_matrix(sht self) -> PyObject *"},
 	 { "sht___spat_shape", _wrap_sht___spat_shape, METH_O, "sht___spat_shape(sht self)"},
 	 { "sht_idx", _wrap_sht_idx, METH_VARARGS, "sht_idx(sht self, unsigned int l, unsigned int m) -> int"},
+	 { "sht_im_from_idx", _wrap_sht_im_from_idx, METH_VARARGS, "sht_im_from_idx(sht self, long lm) -> int"},
 	 { "sht_spat_to_SH", _wrap_sht_spat_to_SH, METH_VARARGS, "sht_spat_to_SH(sht self, PyObject * Vr, PyObject * Qlm)"},
 	 { "sht_SH_to_spat", _wrap_sht_SH_to_spat, METH_VARARGS, "sht_SH_to_spat(sht self, PyObject * Qlm, PyObject * Vr)"},
 	 { "sht_spat_cplx_to_SH", _wrap_sht_spat_cplx_to_SH, METH_VARARGS, "sht_spat_cplx_to_SH(sht self, PyObject * z, PyObject * alm)"},
