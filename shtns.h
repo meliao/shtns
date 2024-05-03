@@ -379,6 +379,19 @@ double shtns_profiling_read_time(shtns_cfg shtns, double* t1, double* t2);	///< 
 double SH_to_spat_time(shtns_cfg shtns, cplx *Qlm, double *Vr);	///< same as SH_to_spat() but with time recording; returns time in seconds
 double spat_to_SH_time(shtns_cfg shtns, double *Vr, cplx *Qlm);	///< same as spat_to_SH() but with time recording; returns time in seconds
 
+/// \name Adjoint synthesis : analysis without weights
+///@{
+void adjoint_SH_to_spat(shtns_cfg, double *Vr, cplx *Qlm);
+void adjoint_SH_to_spat_l(shtns_cfg, double *Vr, cplx *Qlm, int ltr);
+void adjoint_SH_to_spat_ml(shtns_cfg, int im, cplx *Vr, cplx *Qlm, int ltr);
+void adjoint_SHsphtor_to_spat(shtns_cfg, double *Vt, double *Vp, cplx *Slm, cplx *Tlm);
+void adjoint_SHsphtor_to_spat_l(shtns_cfg, double *Vt, double *Vp, cplx *Slm, cplx *Tlm, int ltr);
+void adjoint_SHsphtor_to_spat_ml(shtns_cfg, int im, cplx *Vt, cplx *Vp, cplx *Slm, cplx *Tlm, int ltr);
+void adjoint_SHqst_to_spat(shtns_cfg, double *Vr, double *Vt, double *Vp, cplx *Qlm, cplx *Slm, cplx *Tlm);
+void adjoint_SHqst_to_spat_l(shtns_cfg, double *Vr, double *Vt, double *Vp, cplx *Qlm, cplx *Slm, cplx *Tlm, int ltr);
+void adjoint_SHqst_to_spat_ml(shtns_cfg, int im, cplx *Vr, cplx *Vt, cplx *Vp, cplx *Qlm, cplx *Slm, cplx *Tlm, int ltr);
+///@}
+
 #endif
 
 #ifdef __cplusplus

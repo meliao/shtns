@@ -24,12 +24,12 @@
 #
 //////////////////////////////////////////////////
 
-QX	void GEN3(_an1,NWAY,SUFFIX)(shtns_cfg shtns, double *BrF, cplx *Qlm, const long int llim, const int im);
-VX	void GEN3(_an2,NWAY,SUFFIX)(shtns_cfg shtns, double *BtF, double *BpF, cplx *Slm, cplx *Tlm, const long int llim, const int im);
-3	void GEN3(_an3,NWAY,SUFFIX)(shtns_cfg shtns, double *BrF, double *BtF, double *BpF, cplx *Qlm, cplx *Slm, cplx *Tlm, const long int llim, const int im);
-QX	void GEN3(_an1_hi,NWAY,SUFFIX)(shtns_cfg shtns, double *BrF, cplx *Qlm, const long int llim, const int im);
-VX	void GEN3(_an2_hi,NWAY,SUFFIX)(shtns_cfg shtns, double *BtF, double *BpF, cplx *Slm, cplx *Tlm, const long int llim, const int im);
-3	void GEN3(_an3_hi,NWAY,SUFFIX)(shtns_cfg shtns, double *BrF, double *BtF, double *BpF, cplx *Qlm, cplx *Slm, cplx *Tlm, const long int llim, const int im);
+QX	void GEN3(_an1,NWAY,SUFFIX)(shtns_cfg shtns, const double* wg, double *BrF, cplx *Qlm, const long int llim, const int im);
+VX	void GEN3(_an2,NWAY,SUFFIX)(shtns_cfg shtns, const double* wg, double *BtF, double *BpF, cplx *Slm, cplx *Tlm, const long int llim, const int im);
+3	void GEN3(_an3,NWAY,SUFFIX)(shtns_cfg shtns, const double* wg, double *BrF, double *BtF, double *BpF, cplx *Qlm, cplx *Slm, cplx *Tlm, const long int llim, const int im);
+QX	void GEN3(_an1_hi,NWAY,SUFFIX)(shtns_cfg shtns, const double* wg, double *BrF, cplx *Qlm, const long int llim, const int im);
+VX	void GEN3(_an2_hi,NWAY,SUFFIX)(shtns_cfg shtns, const double* wg, double *BtF, double *BpF, cplx *Slm, cplx *Tlm, const long int llim, const int im);
+3	void GEN3(_an3_hi,NWAY,SUFFIX)(shtns_cfg shtns, const double* wg, double *BrF, double *BtF, double *BpF, cplx *Qlm, cplx *Slm, cplx *Tlm, const long int llim, const int im);
 
 
 	static
@@ -40,6 +40,10 @@ VX	void GEN3(spat_to_SHsphtor_omp_a,NWAY,SUFFIX)(shtns_cfg shtns, double *Vt, do
 Q	double *BrF;		// contains the Fourier transformed data
 V	double *BtF, *BpF;	// contains the Fourier transformed data
 	unsigned imlim=0;
+
+	const double* wg = shtns->wg;
+	if UNLIKELY(llim & SHTNS_NO_WEIGHTS) wg = shtns->wg_one;		// for adjoint synthesis
+	llim &= ~SHTNS_NO_WEIGHTS;	// clear flag to recover true llim
 
 Q	BrF = Vr;
 V	BtF = Vt;	BpF = Vp;
@@ -78,9 +82,9 @@ V			fftw_execute_split_dft(shtns->fftc, Vp+NPHI, Vp, BpF+1, BpF);
 				for (int b=0; b<shtns->howmany; b++) {
 					long spec_ofs = b * shtns->spec_dist;
 					long spat_ofs = b * shtns->nlat;
-QX					GEN3(_an1,NWAY,SUFFIX)(shtns, BrF+spat_ofs, Qlm+spec_ofs, llim, im);
-VX					GEN3(_an2,NWAY,SUFFIX)(shtns, BtF+spat_ofs, BpF+spat_ofs, Slm+spec_ofs, Tlm+spec_ofs, llim, im);
-3					GEN3(_an3,NWAY,SUFFIX)(shtns, BrF+spat_ofs, BtF+spat_ofs, BpF+spat_ofs, Qlm+spec_ofs, Slm+spec_ofs, Tlm+spec_ofs, llim, im);
+QX					GEN3(_an1,NWAY,SUFFIX)(shtns, wg, BrF+spat_ofs, Qlm+spec_ofs, llim, im);
+VX					GEN3(_an2,NWAY,SUFFIX)(shtns, wg, BtF+spat_ofs, BpF+spat_ofs, Slm+spec_ofs, Tlm+spec_ofs, llim, im);
+3					GEN3(_an3,NWAY,SUFFIX)(shtns, wg, BrF+spat_ofs, BtF+spat_ofs, BpF+spat_ofs, Qlm+spec_ofs, Slm+spec_ofs, Tlm+spec_ofs, llim, im);
 				}
 			}
 		} else {
@@ -89,9 +93,9 @@ VX					GEN3(_an2,NWAY,SUFFIX)(shtns, BtF+spat_ofs, BpF+spat_ofs, Slm+spec_ofs, T
 				for (int b=0; b<shtns->howmany; b++) {
 					long spec_ofs = b * shtns->spec_dist;
 					long spat_ofs = b * shtns->nlat;
-QX					GEN3(_an1_hi,NWAY,SUFFIX)(shtns, BrF+spat_ofs, Qlm+spec_ofs, llim, im);
-VX					GEN3(_an2_hi,NWAY,SUFFIX)(shtns, BtF+spat_ofs, BpF+spat_ofs, Slm+spec_ofs, Tlm+spec_ofs, llim, im);
-3					GEN3(_an3_hi,NWAY,SUFFIX)(shtns, BrF+spat_ofs, BtF+spat_ofs, BpF+spat_ofs, Qlm+spec_ofs, Slm+spec_ofs, Tlm+spec_ofs, llim, im);
+QX					GEN3(_an1_hi,NWAY,SUFFIX)(shtns, wg, BrF+spat_ofs, Qlm+spec_ofs, llim, im);
+VX					GEN3(_an2_hi,NWAY,SUFFIX)(shtns, wg, BtF+spat_ofs, BpF+spat_ofs, Slm+spec_ofs, Tlm+spec_ofs, llim, im);
+3					GEN3(_an3_hi,NWAY,SUFFIX)(shtns, wg, BrF+spat_ofs, BtF+spat_ofs, BpF+spat_ofs, Qlm+spec_ofs, Slm+spec_ofs, Tlm+spec_ofs, llim, im);
 				}
 			}
 		}
@@ -126,6 +130,10 @@ VX	void GEN3(spat_to_SHsphtor_omp_b,NWAY,SUFFIX)(shtns_cfg shtns, double *Vt, do
 Q	double *BrF;		// contains the Fourier transformed data
 V	double *BtF, *BpF;	// contains the Fourier transformed data
 	unsigned imlim=0;
+
+	const double* wg = shtns->wg;
+	if UNLIKELY(llim & SHTNS_NO_WEIGHTS) wg = shtns->wg_one;		// for adjoint synthesis
+	llim &= ~SHTNS_NO_WEIGHTS;	// clear flag to recover true llim
 
 Q	BrF = Vr;
 V	BtF = Vt;	BpF = Vp;
@@ -176,25 +184,25 @@ V				fftw_execute_split_dft(shtns->fftc_block, Vp+NPHI*(1+2*k*nblk), Vp+NPHI*2*k
 		if (llim < SHT_L_RESCALE_FLY) {
 			#pragma omp for schedule(dynamic,1) nowait
 			for (int im=0; im <= imlim/2; im++) {
-QX				GEN3(_an1,NWAY,SUFFIX)(shtns, BrF, Qlm, llim, im);
-VX				GEN3(_an2,NWAY,SUFFIX)(shtns, BtF, BpF, Slm, Tlm, llim, im);
-3				GEN3(_an3,NWAY,SUFFIX)(shtns, BrF, BtF, BpF, Qlm, Slm, Tlm, llim, im);
+QX				GEN3(_an1,NWAY,SUFFIX)(shtns, wg, BrF, Qlm, llim, im);
+VX				GEN3(_an2,NWAY,SUFFIX)(shtns, wg, BtF, BpF, Slm, Tlm, llim, im);
+3				GEN3(_an3,NWAY,SUFFIX)(shtns, wg, BrF, BtF, BpF, Qlm, Slm, Tlm, llim, im);
 				if (imlim-im > im) {
-QX					GEN3(_an1,NWAY,SUFFIX)(shtns, BrF, Qlm, llim, imlim-im);
-VX					GEN3(_an2,NWAY,SUFFIX)(shtns, BtF, BpF, Slm, Tlm, llim, imlim-im);
-3					GEN3(_an3,NWAY,SUFFIX)(shtns, BrF, BtF, BpF, Qlm, Slm, Tlm, llim, imlim-im);
+QX					GEN3(_an1,NWAY,SUFFIX)(shtns, wg, BrF, Qlm, llim, imlim-im);
+VX					GEN3(_an2,NWAY,SUFFIX)(shtns, wg, BtF, BpF, Slm, Tlm, llim, imlim-im);
+3					GEN3(_an3,NWAY,SUFFIX)(shtns, wg, BrF, BtF, BpF, Qlm, Slm, Tlm, llim, imlim-im);
 				}
 			}
 		} else {
 			#pragma omp for schedule(dynamic,1) nowait
 			for (int im=0; im<=imlim; im++) {
-QX				GEN3(_an1_hi,NWAY,SUFFIX)(shtns, BrF, Qlm, llim, im);
-VX				GEN3(_an2_hi,NWAY,SUFFIX)(shtns, BtF, BpF, Slm, Tlm, llim, im);
-3				GEN3(_an3_hi,NWAY,SUFFIX)(shtns, BrF, BtF, BpF, Qlm, Slm, Tlm, llim, im);
+QX				GEN3(_an1_hi,NWAY,SUFFIX)(shtns, wg, BrF, Qlm, llim, im);
+VX				GEN3(_an2_hi,NWAY,SUFFIX)(shtns, wg, BtF, BpF, Slm, Tlm, llim, im);
+3				GEN3(_an3_hi,NWAY,SUFFIX)(shtns, wg, BrF, BtF, BpF, Qlm, Slm, Tlm, llim, im);
 				if (imlim-im > im) {
-QX					GEN3(_an1_hi,NWAY,SUFFIX)(shtns, BrF, Qlm, llim, imlim-im);
-VX					GEN3(_an2_hi,NWAY,SUFFIX)(shtns, BtF, BpF, Slm, Tlm, llim, imlim-im);
-3					GEN3(_an3_hi,NWAY,SUFFIX)(shtns, BrF, BtF, BpF, Qlm, Slm, Tlm, llim, imlim-im);
+QX					GEN3(_an1_hi,NWAY,SUFFIX)(shtns, wg, BrF, Qlm, llim, imlim-im);
+VX					GEN3(_an2_hi,NWAY,SUFFIX)(shtns, wg, BtF, BpF, Slm, Tlm, llim, imlim-im);
+3					GEN3(_an3_hi,NWAY,SUFFIX)(shtns, wg, BrF, BtF, BpF, Qlm, Slm, Tlm, llim, imlim-im);
 				}
 			}
 		}

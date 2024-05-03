@@ -582,8 +582,10 @@ static void grid_weights(shtns_cfg shtns, double latdir)
 	const int overflow = 8*VSIZE2-1;
 	const unsigned char grid = shtns->grid;
 
-	shtns->wg = VMALLOC((NLAT_2 +overflow+VSIZE2) * sizeof(double));	// quadrature weights, double precision.
+	shtns->wg = VMALLOC(2*(NLAT_2 +overflow+VSIZE2) * sizeof(double));	// quadrature weights, double precision.
 	shtns->wg += VSIZE2;	// reserve space before the weight array to store a normalization constant; to keep alignement, we reserve VSIZE2 doubles
+	shtns->wg_one = shtns->wg + NLAT_2 +overflow+1;
+	for (int i=0; i<NLAT_2; i++)	shtns->wg_one[i] = 1.0;		// weights for adjoint synthesis -- all ones
 
 	iylm_fft_norm = 1.0;	// FFT/SHT normalization for zlm (4pi normalized)
 	if ((SHT_NORM != sht_fourpi)&&(SHT_NORM != sht_schmidt))  iylm_fft_norm = 4*M_PIl;	// FFT/SHT normalization for zlm (orthonormalized)
@@ -607,7 +609,7 @@ static void grid_weights(shtns_cfg shtns, double latdir)
 		}
 		clenshaw_curtis_nodes(xg,stg,wg,NLAT);
 	} else shtns_runerr("unknown grid.");
-	if (NLAT&1) wg[NLAT/2] *= 0.5;		// odd NLAT : adjust weigth of middle point.
+	if (NLAT&1) wg[NLAT/2] *= 0.5;		// odd NLAT : adjust weight of middle point.
 	for (it=0; it<NLAT; it++) {
 		shtns->ct[it] = latdir * xg[it];
 		shtns->st[it] = stg[it];
@@ -636,9 +638,11 @@ static void grid_weights(shtns_cfg shtns, double latdir)
 	}
 
 	shtns->wg[-1] = 1.0/iylm_fft_norm;		// store the inverse of the norm included in gauss weights
+	shtns->wg_one[-1] = 0.0;				// for wg1, store zero here, to disable mean removal
 	for (it=0; it<NLAT_2; it++)
 		shtns->wg[it] = wg[it]*iylm_fft_norm;		// faster double-precision computations.
 	for (it=NLAT_2; it < NLAT_2 +overflow; it++) shtns->wg[it] = 0.0;		// padding for multi-way algorithm.
+	for (it=NLAT_2; it < NLAT_2 +overflow; it++) shtns->wg_one[it] = 0.0;	// padding for multi-way algorithm.
 
 	if ((verbose>1) && (grid == GRID_GAUSS)) {
 		printf(" NLAT=%d, NLAT_2=%d\n",NLAT,NLAT_2);

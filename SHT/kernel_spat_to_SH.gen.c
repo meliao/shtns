@@ -38,9 +38,9 @@ VX	#define BASE _an2
 3	#define BASE _an3
 	#endif
 
-QX	void GEN3(BASE,NWAY,SUFFIX)(shtns_cfg shtns, double *BrF, cplx *Qlm, const long int llim, const unsigned im)
-VX	void GEN3(BASE,NWAY,SUFFIX)(shtns_cfg shtns, double *BtF, double *BpF, cplx *Slm, cplx *Tlm, const long int llim, const unsigned im)
-3	void GEN3(BASE,NWAY,SUFFIX)(shtns_cfg shtns, double *BrF, double *BtF, double *BpF, cplx *Qlm, cplx *Slm, cplx *Tlm, const long int llim, const unsigned im)
+QX	void GEN3(BASE,NWAY,SUFFIX)(shtns_cfg shtns, const double* wg, double *BrF, cplx *Qlm, const long int llim, const unsigned im)
+VX	void GEN3(BASE,NWAY,SUFFIX)(shtns_cfg shtns, const double* wg, double *BtF, double *BpF, cplx *Slm, cplx *Tlm, const long int llim, const unsigned im)
+3	void GEN3(BASE,NWAY,SUFFIX)(shtns_cfg shtns, const double* wg, double *BrF, double *BtF, double *BpF, cplx *Qlm, cplx *Slm, cplx *Tlm, const long int llim, const unsigned im)
   {
 	// TODO: NW should be larger for SHTNS_ISHIOKA ?, or take a different approach.
 	#define NW (NWAY*2)
@@ -56,7 +56,7 @@ V	#define LSPAN 2
 	#endif
 
 	double *alm, *al;
-	double *wg, *ct, *st;
+	double *ct, *st;
 V	double *l_2;
 	long int nk, k, l,m;
 V	int robert_form;
@@ -78,7 +78,7 @@ V	double peori[NLAT_2*2 + (VSIZE2-1)*2] SSE;
 	#if _GCC_VEC_
 	  nk = ((unsigned) nk+(VSIZE2-1))/VSIZE2;
 	#endif
-	wg = shtns->wg;		ct = shtns->ct;		st = shtns->st;
+	ct = shtns->ct;		st = shtns->st;
 V	robert_form = shtns->robert_form;
 V	l_2 = shtns->l_2;
 

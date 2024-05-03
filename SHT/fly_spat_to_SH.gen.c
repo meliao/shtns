@@ -25,17 +25,17 @@
 //////////////////////////////////////////////////
 
 
-QX	void GEN3(_an1,NWAY,_l)(shtns_cfg shtns, double *BrF, cplx *Qlm, const long int llim, const int imlim);
-VX	void GEN3(_an2,NWAY,_l)(shtns_cfg shtns, double *BtF, double *BpF, cplx *Slm, cplx *Tlm, const long int llim, const int imlim);
-3	void GEN3(_an3,NWAY,_l)(shtns_cfg shtns, double *BrF, double *BtF, double *BpF, cplx *Qlm, cplx *Slm, cplx *Tlm, const long int llim, const int imlim);
-QX	void GEN3(_an1_hi,NWAY,_l)(shtns_cfg shtns, double *BrF, cplx *Qlm, const long int llim, const int imlim);
-VX	void GEN3(_an2_hi,NWAY,_l)(shtns_cfg shtns, double *BtF, double *BpF, cplx *Slm, cplx *Tlm, const long int llim, const int imlim);
-3	void GEN3(_an3_hi,NWAY,_l)(shtns_cfg shtns, double *BrF, double *BtF, double *BpF, cplx *Qlm, cplx *Slm, cplx *Tlm, const long int llim, const int imlim);
+QX	void GEN3(_an1,NWAY,_l)(shtns_cfg shtns, const double* wg, double *BrF, cplx *Qlm, const long int llim, const int imlim);
+VX	void GEN3(_an2,NWAY,_l)(shtns_cfg shtns, const double* wg, double *BtF, double *BpF, cplx *Slm, cplx *Tlm, const long int llim, const int imlim);
+3	void GEN3(_an3,NWAY,_l)(shtns_cfg shtns, const double* wg, double *BrF, double *BtF, double *BpF, cplx *Qlm, cplx *Slm, cplx *Tlm, const long int llim, const int imlim);
+QX	void GEN3(_an1_hi,NWAY,_l)(shtns_cfg shtns, const double* wg, double *BrF, cplx *Qlm, const long int llim, const int imlim);
+VX	void GEN3(_an2_hi,NWAY,_l)(shtns_cfg shtns, const double* wg, double *BtF, double *BpF, cplx *Slm, cplx *Tlm, const long int llim, const int imlim);
+3	void GEN3(_an3_hi,NWAY,_l)(shtns_cfg shtns, const double* wg, double *BrF, double *BtF, double *BpF, cplx *Qlm, cplx *Slm, cplx *Tlm, const long int llim, const int imlim);
 
 
-QX	static void GEN3(spat_to_SH_fly,NWAY,SUFFIX)(shtns_cfg shtns, double *Vr, cplx *Qlm, const long int llim) {
-VX	static void GEN3(spat_to_SHsphtor_fly,NWAY,SUFFIX)(shtns_cfg shtns, double *Vt, double *Vp, cplx *Slm, cplx *Tlm, const long int llim) {
-3	static void GEN3(spat_to_SHqst_fly,NWAY,SUFFIX)(shtns_cfg shtns, double *Vr, double *Vt, double *Vp, cplx *Qlm, cplx *Slm, cplx *Tlm, const long int llim) {
+QX	static void GEN3(spat_to_SH_fly,NWAY,SUFFIX)(shtns_cfg shtns, double *Vr, cplx *Qlm, long int llim) {
+VX	static void GEN3(spat_to_SHsphtor_fly,NWAY,SUFFIX)(shtns_cfg shtns, double *Vt, double *Vp, cplx *Slm, cplx *Tlm, long int llim) {
+3	static void GEN3(spat_to_SHqst_fly,NWAY,SUFFIX)(shtns_cfg shtns, double *Vr, double *Vt, double *Vp, cplx *Qlm, cplx *Slm, cplx *Tlm, long int llim) {
 
 
 Q	double *BrF;		// contains the Fourier transformed data
@@ -44,6 +44,11 @@ V	double *BtF, *BpF;	// contains the Fourier transformed data
 
 Q	BrF = Vr;
 V	BtF = Vt;	BpF = Vp;
+
+	const double* wg = shtns->wg;
+	if UNLIKELY(llim & SHTNS_NO_WEIGHTS) wg = shtns->wg_one;		// for adjoint synthesis
+	llim &= ~SHTNS_NO_WEIGHTS;	// clear flag to recover true llim
+
   #ifndef SHT_AXISYM
 	imlim = MTR;
 	#ifdef SHT_VAR_LTR
@@ -76,9 +81,9 @@ V			fftw_execute_split_dft(shtns->fftc, Vp+NPHI, Vp, BpF+1, BpF);
 			for (int b=0; b<shtns->howmany; b++) {
 				long spec_ofs = b * shtns->spec_dist;
 				long spat_ofs = b * shtns->nlat;
-QX				GEN3(_an1_hi,NWAY,_l)(shtns, BrF+spat_ofs, Qlm+spec_ofs, llim, im);
-VX				GEN3(_an2_hi,NWAY,_l)(shtns, BtF+spat_ofs, BpF+spat_ofs, Slm+spec_ofs, Tlm+spec_ofs, llim, im);
-3				GEN3(_an3_hi,NWAY,_l)(shtns, BrF+spat_ofs, BtF+spat_ofs, BpF+spat_ofs, Qlm+spec_ofs, Slm+spec_ofs, Tlm+spec_ofs, llim, im);
+QX				GEN3(_an1_hi,NWAY,_l)(shtns, wg, BrF+spat_ofs, Qlm+spec_ofs, llim, im);
+VX				GEN3(_an2_hi,NWAY,_l)(shtns, wg, BtF+spat_ofs, BpF+spat_ofs, Slm+spec_ofs, Tlm+spec_ofs, llim, im);
+3				GEN3(_an3_hi,NWAY,_l)(shtns, wg, BrF+spat_ofs, BtF+spat_ofs, BpF+spat_ofs, Qlm+spec_ofs, Slm+spec_ofs, Tlm+spec_ofs, llim, im);
 			}
 		}
 	} else
@@ -88,9 +93,9 @@ VX				GEN3(_an2_hi,NWAY,_l)(shtns, BtF+spat_ofs, BpF+spat_ofs, Slm+spec_ofs, Tlm
 			for (int b=0; b<shtns->howmany; b++) {
 				long spec_ofs = b * shtns->spec_dist;
 				long spat_ofs = b * shtns->nlat;
-QX				GEN3(_an1,NWAY,_l)(shtns, BrF+spat_ofs, Qlm+spec_ofs, llim, im);
-VX				GEN3(_an2,NWAY,_l)(shtns, BtF+spat_ofs, BpF+spat_ofs, Slm+spec_ofs, Tlm+spec_ofs, llim, im);
-3				GEN3(_an3,NWAY,_l)(shtns, BrF+spat_ofs, BtF+spat_ofs, BpF+spat_ofs, Qlm+spec_ofs, Slm+spec_ofs, Tlm+spec_ofs, llim, im);
+QX				GEN3(_an1,NWAY,_l)(shtns, wg, BrF+spat_ofs, Qlm+spec_ofs, llim, im);
+VX				GEN3(_an2,NWAY,_l)(shtns, wg, BtF+spat_ofs, BpF+spat_ofs, Slm+spec_ofs, Tlm+spec_ofs, llim, im);
+3				GEN3(_an3,NWAY,_l)(shtns, wg, BrF+spat_ofs, BtF+spat_ofs, BpF+spat_ofs, Qlm+spec_ofs, Slm+spec_ofs, Tlm+spec_ofs, llim, im);
 			}
 		}
 	}
@@ -121,11 +126,21 @@ VX	static void GEN3(spat_to_SHsphtor_m_fly,NWAY,SUFFIX)(shtns_cfg shtns, int im,
 3	static void GEN3(spat_to_SHqst_m_fly,NWAY,SUFFIX)(shtns_cfg shtns, int im, cplx *Vr, cplx *Vt, cplx *Vp, cplx *Qlm, cplx *Slm, cplx *Tlm, long int llim) {
 
 	double *alm, *al;
-	double *wg, *ct, *st;
+	double *ct, *st;
 V	double *l_2;
 	long int nk, k, l,m;
 	double alm0_rescale;
-V	int robert_form;
+V	const int robert_form = shtns->robert_form;
+
+	double* wg = shtns->wg;
+	if UNLIKELY(llim & SHTNS_NO_WEIGHTS) wg = shtns->wg_one;		// for adjoint synthesis
+	llim &= ~SHTNS_NO_WEIGHTS;	// clear flag to recover true llim
+
+	nk = NLAT_2;	// copy NLAT_2 to a local variable for faster access (inner loop limit)
+	#if _GCC_VEC_
+	  nk = ((unsigned) nk+(VSIZE2-1))/VSIZE2;
+	#endif
+
 Q	rnd qq[2*llim+4];
 V	rnd vw[4*llim+8];
 
@@ -142,12 +157,7 @@ V	double toi[NLAT_2 + NWAY*VSIZE2] SSE;
 V	double pei[NLAT_2 + NWAY*VSIZE2] SSE;
 V	double poi[NLAT_2 + NWAY*VSIZE2] SSE;
 
-	nk = NLAT_2;	// copy NLAT_2 to a local variable for faster access (inner loop limit)
-	#if _GCC_VEC_
-	  nk = ((unsigned) nk+(VSIZE2-1))/VSIZE2;
-	#endif
-	wg = shtns->wg;		ct = shtns->ct;		st = shtns->st;
-V	robert_form = shtns->robert_form;
+	ct = shtns->ct;		st = shtns->st;
 V	l_2 = shtns->l_2;
 
 	for (k=nk*VSIZE2; k<(nk-1+NWAY)*VSIZE2; ++k) {

@@ -175,6 +175,47 @@ void spat_to_SHqst_2ml(shtns_cfg shtns, int im, cplx *Vr, cplx *Vt, cplx *Vp, cp
 }
 
 
+/* adjoint synthesis */
+
+void adjoint_SH_to_spat(shtns_cfg shtns, double *Vr, cplx *Qlm) {
+	((pf2l)shtns->ftable[SHT_STD][SHT_TYP_SAN])(shtns, Vr, Qlm, (int)shtns->lmax | SHTNS_NO_WEIGHTS);
+}
+
+void adjoint_SHsphtor_to_spat(shtns_cfg shtns, double *Vt, double *Vp, cplx *Slm, cplx *Tlm) {
+	((pf4l)shtns->ftable[SHT_STD][SHT_TYP_VAN])(shtns, Vt, Vp, Slm, Tlm, (int)shtns->lmax | SHTNS_NO_WEIGHTS);
+}
+
+void adjoint_SHqst_to_spat(shtns_cfg shtns, double *Vr, double *Vt, double *Vp, cplx *Qlm, cplx *Slm, cplx *Tlm) {
+	((pf6l)shtns->ftable[SHT_STD][SHT_TYP_3AN])(shtns, Vr, Vt, Vp, Qlm, Slm, Tlm, (int)shtns->lmax | SHTNS_NO_WEIGHTS);
+}
+
+
+void adjoint_SH_to_spat_l(shtns_cfg shtns, double *Vr, cplx *Qlm, int ltr) {
+	((pf2l)shtns->ftable[SHT_STD][SHT_TYP_SAN])(shtns, Vr, Qlm, ltr | SHTNS_NO_WEIGHTS);
+}
+
+void adjoint_SHsphtor_to_spat_l(shtns_cfg shtns, double *Vt, double *Vp, cplx *Slm, cplx *Tlm, int ltr) {
+	((pf4l)shtns->ftable[SHT_STD][SHT_TYP_VAN])(shtns, Vt, Vp, Slm, Tlm, ltr | SHTNS_NO_WEIGHTS);
+}
+
+void adjoint_SHqst_to_spat_l(shtns_cfg shtns, double *Vr, double *Vt, double *Vp, cplx *Qlm, cplx *Slm, cplx *Tlm, int ltr) {
+	((pf6l)shtns->ftable[SHT_STD][SHT_TYP_3AN])(shtns, Vr, Vt, Vp, Qlm, Slm, Tlm, ltr | SHTNS_NO_WEIGHTS);
+}
+
+
+void adjoint_SH_to_spat_ml(shtns_cfg shtns, int im, cplx *Vr, cplx *Qlm, int ltr) {
+	((pf2ml)shtns->ftable[SHT_M][SHT_TYP_SAN])(shtns, im, Vr, Qlm, ltr | SHTNS_NO_WEIGHTS);
+}
+
+void adjoint_SHsphtor_to_spat_ml(shtns_cfg shtns, int im, cplx *Vt, cplx *Vp, cplx *Slm, cplx *Tlm, int ltr) {
+	((pf4ml)shtns->ftable[SHT_M][SHT_TYP_VAN])(shtns, im, Vt, Vp, Slm, Tlm, ltr | SHTNS_NO_WEIGHTS);
+}
+
+void adjoint_SHqst_to_spat_ml(shtns_cfg shtns, int im, cplx *Vr, cplx *Vt, cplx *Vp, cplx *Qlm, cplx *Slm, cplx *Tlm, int ltr) {
+	((pf6ml)shtns->ftable[SHT_M][SHT_TYP_3AN])(shtns, im, Vr, Vt, Vp, Qlm, Slm, Tlm, ltr | SHTNS_NO_WEIGHTS);
+}
+
+
 #if defined(SHT_F77_API)
 
 /*  Fortran 77 api  */

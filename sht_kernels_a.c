@@ -135,7 +135,7 @@ void split_sym_asym_m0(double* F0, double* eo, unsigned nlat_2, int k_inc)
 }
 
 static
-double split_sym_asym_m0_accl0(double* F0, double* eo, unsigned nlat_2, int k_inc, double* wg)
+double split_sym_asym_m0_accl0(double* F0, double* eo, unsigned nlat_2, int k_inc, const double* wg)
 {
 	unsigned nk = ((nlat_2 +(VSIZE2-1))/VSIZE2)*VSIZE2;
 	long int k=0;

@@ -137,7 +137,7 @@ struct shtns_info {		// MUST start with "int nlm;"
 	unsigned short *tm;			///< start theta value for SH (polar optimization : near the poles the legendre polynomials go to zero for high m's)
 	int k_stride_a;				///< stride in theta direction
 	int m_stride_a;				///< stride in phi direction in intermediate spectral space (m)
-	double *wg;					///< Gauss weights for Gauss-Legendre quadrature.
+	double *wg;					///< Weights for quadrature rule (Gauss-Legendre or Fejer/Clenshaw-Curtis)
 	double *st_1;				///< 1/sin(theta);
 	double mpos_scale_analys;	///< scale factor for analysis, handles real-norm (0.5 or 1.0);
 
@@ -168,6 +168,8 @@ struct shtns_info {		// MUST start with "int nlm;"
 	double* glm_analys;		// same as glm, but for analysis (may also point to glm).
 
 	void* ftable[SHT_NVAR][SHT_NTYP];		// pointers to transform functions.
+
+	double* wg_one;		// array of all ones that can replace wg for adjoint synthesis.
 
 	/* rotation stuff (pseudo-spectral) */
 	unsigned npts_rot;		// number of physical points needed
@@ -266,6 +268,9 @@ struct shtns_rot_ {		// describe a rotation matrix
 // scale factor for extended range numbers (used in on-the-fly transforms to compute recurrence)
 #define SHT_SCALE_FACTOR 2.9073548971824275622e+135
 //#define SHT_SCALE_FACTOR 2.0370359763344860863e+90
+
+// a large constant that can be combined to lmax (which is restricted to 65535) to mark we don't use weights -- for adjoint synthesis
+#define SHTNS_NO_WEIGHTS 0x40000000
 
 #ifdef __NVCC__
 		// disable vector extensions when compiling cuda code.
