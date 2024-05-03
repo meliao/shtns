@@ -34,20 +34,45 @@ These functions do only require a call to \ref shtns_create, but not to \ref sht
 /// Rotate a SH representation Qlm around the z-axis by angle alpha (in radians),
 /// which is the same as rotating the reference frame by angle -alpha.
 /// Result is stored in Rlm (which can be the same array as Qlm).
+/// Very accurate if angle is not too large; try to keep angle within a few multiples of pi.
 void SH_Zrotate(shtns_cfg shtns, cplx *Qlm, double alpha, cplx *Rlm)
 {
-	int im, l, lmax, mmax, mres;
-
-	lmax = shtns->lmax;		mmax = shtns->mmax;		mres = shtns->mres;
+	const long lmax = shtns->lmax;		const int mmax = shtns->mmax;		const int mres = shtns->mres;
 
 	if (Rlm != Qlm) {		// copy m=0 which does not change.
-		l=0;	do { Rlm[l] = Qlm[l]; } while(++l <= lmax);
+		long l=0;	do { Rlm[l] = Qlm[l]; } while(++l <= lmax);
 	}
+
+	const double alpha_half_turns = alpha * (-2./M_PI);		// negative sign: rotate frame by angle -alpha
 	for (int im=1; im<=mmax; im++) {
-		cplx eima = cos(im*mres*alpha) - I*sin(im*mres*alpha);		// rotate reference frame by angle -alpha
-		for (l=im*mres; l<=lmax; ++l)	Rlm[LiM(shtns, l, im)] = Qlm[LiM(shtns, l, im)] * eima;
+		const long lm0 = LiM(shtns,0,im);
+		const double k = im*mres;
+		// custom range reduction (very accurate as long as n is less than 9e15)
+		double n = round(k*alpha_half_turns);	// number of half turns
+		double k_alpha = fma(k,alpha_half_turns, -n) * (0.5*M_PI);	// should be between -pi/4 and pi/4
+		long quadrant = n;
+		cplx eima = cos(k_alpha) + I*sin(k_alpha);
+		if (quadrant & 2) eima = -eima;
+		if (quadrant & 1) eima = I*eima;
+		for (long l=im*mres; l<=lmax; ++l)	Rlm[lm0+l] = Qlm[lm0+l] * eima;
 	}
 }
+
+/*		// For reference: accurate recurrence, but less accurate than custom angle reduction above
+		alpha *= -mres;		// negative sign: rotate frame by angle -alpha
+		const double c0 = cos(alpha);
+		const double s0 = sin(alpha);
+		double t0 = 0.0;
+		if (mmax > 1) t0 = tan(0.5*alpha);
+		cplx eima = c0 + I*s0;
+		for (int im=1; im<=mmax; im++) {
+			const long lm0 = LiM(shtns,0,im);
+			for (long l=im*mres; l<=lmax; ++l)	Rlm[lm0+l] = Qlm[lm0+l] * eima;
+
+			// https://stackoverflow.com/questions/51735576/fast-and-accurate-iterative-generation-of-sine-and-cosine-for-equally-spaced-ang
+			eima -= s0*(t0*eima - I*eima);
+		}
+*/
 
 ///@}
 
@@ -1673,7 +1698,8 @@ void shtns_rotation_apply_real(shtns_rot r, cplx* Qlm, cplx* Rlm)
 	const int mmax = r->mmax;
 
 	if (r->beta == 0.0) {	// only rotation along Z-axis.
-		if (Rlm != Qlm)		for (int l=0; l<lmax; l++) 	Rlm[l] = Qlm[l];		// copy m=0
+		SH_Zrotate(r->sht, Qlm, r->alpha, Rlm);
+	/*	if (Rlm != Qlm)		for (int l=0; l<lmax; l++) 	Rlm[l] = Qlm[l];		// copy m=0
 		long lm = lmax;
 		const cplx ei_alpha = r->eia;
 		cplx eim_alpha = ei_alpha;
@@ -1683,7 +1709,7 @@ void shtns_rotation_apply_real(shtns_rot r, cplx* Qlm, cplx* Rlm)
 				lm++;
 			}
 			eim_alpha *= ei_alpha;
-		}
+		}*/
 		return;
 	}
 
