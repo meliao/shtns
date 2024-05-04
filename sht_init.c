@@ -354,15 +354,12 @@ static int free_unused(shtns_cfg shtns, void* pp)
 }
 
 /// \internal allocate arrays for SHT related to a given grid.
-static void alloc_SHTarrays(shtns_cfg shtns, int vect, int analys)
+static void alloc_SHTarrays(shtns_cfg shtns)
 {
-	long int im, l0;
-	long int size, marray_size, lstride;
-
-	im = (VSIZE2 > 2) ? VSIZE2 : 2;
-	l0 = ((NLAT+im-1)/im)*im;		// align on vector
-	shtns->ct = (double *) VMALLOC( sizeof(double) * l0*3 );			/// ct[] (including st and st_1)
-	shtns->st = shtns->ct + l0;		shtns->st_1 = shtns->ct + 2*l0;
+	const int blk_sze = (VSIZE2 > 2) ? VSIZE2 : 2;
+	const int sze = ((NLAT+blk_sze-1)/blk_sze)*blk_sze;		// align on vector
+	shtns->ct = (double *) VMALLOC( sizeof(double) * sze*3 );			/// ct[] (including st and st_1)
+	shtns->st = shtns->ct + sze;		shtns->st_1 = shtns->ct + 2*sze;
 
 	if (verbose>1) printf("          Memory used for Ylm and Zlm matrices = %.3f Mb x2\n",3.0*sizeof(double)*NLM*NLAT_2/(1024.*1024.));
 }
@@ -585,7 +582,8 @@ static void grid_weights(shtns_cfg shtns, double latdir)
 	const int overflow = 8*VSIZE2-1;
 	const unsigned char grid = shtns->grid;
 
-	shtns->wg = VMALLOC((NLAT_2 +overflow) * sizeof(double));	// quadrature weights, double precision.
+	shtns->wg = VMALLOC((NLAT_2 +overflow+VSIZE2) * sizeof(double));	// quadrature weights, double precision.
+	shtns->wg += VSIZE2;	// reserve space before the weight array to store a normalization constant; to keep alignement, we reserve VSIZE2 doubles
 
 	iylm_fft_norm = 1.0;	// FFT/SHT normalization for zlm (4pi normalized)
 	if ((SHT_NORM != sht_fourpi)&&(SHT_NORM != sht_schmidt))  iylm_fft_norm = 4*M_PIl;	// FFT/SHT normalization for zlm (orthonormalized)
@@ -637,7 +635,7 @@ static void grid_weights(shtns_cfg shtns, double latdir)
 		} else if (fabs(s)+fabs(x2)+fabs(st2) > 1e-14)	shtns_runerr("Bad quadrature accuracy.");
 	}
 
-	shtns->weight_norm_1 = 1.0/iylm_fft_norm;		// store the inverse of the norm included in gauss weights
+	shtns->wg[-1] = 1.0/iylm_fft_norm;		// store the inverse of the norm included in gauss weights
 	for (it=0; it<NLAT_2; it++)
 		shtns->wg[it] = wg[it]*iylm_fft_norm;		// faster double-precision computations.
 	for (it=NLAT_2; it < NLAT_2 +overflow; it++) shtns->wg[it] = 0.0;		// padding for multi-way algorithm.
@@ -1245,7 +1243,7 @@ shtns_cfg shtns_create_with_grid(shtns_cfg base, int mmax, int nofft)
 /// release all resources allocated by a grid.
 void shtns_unset_grid(shtns_cfg shtns)
 {
-	if (ref_count(shtns, &shtns->wg) == 1)	VFREE(shtns->wg);
+	if (ref_count(shtns, &shtns->wg) == 1)	VFREE(shtns->wg - VSIZE2);
 	shtns->wg = NULL;
 	free_SHTarrays(shtns);
 	shtns->nlat = 0;	shtns->nlat_2 = 0;
@@ -1464,7 +1462,7 @@ int shtns_set_grid_auto(shtns_cfg shtns, enum shtns_type flags, double eps, int 
 	planFFT(shtns, layout);		// initialize fftw
 	init_sht_array_func(shtns);		// array of SHT functions is now set.
 
-	alloc_SHTarrays(shtns, vector, analys);		// allocate dynamic arrays
+	alloc_SHTarrays(shtns);		// allocate dynamic arrays
 	shtns->grid = GRID_NONE;
 	switch(flags) {
 		case sht_gauss : 	 shtns->grid = GRID_GAUSS;	break;
@@ -1602,13 +1600,13 @@ int shtns_use_threads(int num_threads)
 	return omp_threads;
 }
 
-/// fill the given array with Gauss weights. returns the number of weights written, which
-/// may be zero if the grid is not a Gauss grid.
+/// fill the given array with quadrature weights. returns the number of weights written, which
+/// may be zero if the grid has no quadrature rule
 int shtns_gauss_wts(shtns_cfg shtns, double *wts)
 {
 	int i = 0;
 	if (shtns->wg) {
-		const double rescale = shtns->weight_norm_1;		// weights are stored with a rescaling that depends on SHT_NORM.
+		const double rescale = shtns->wg[-1];		// weights are stored with a rescaling that depends on SHT_NORM.
 		do {
 			wts[i] = shtns->wg[i] * rescale;
 		} while(++i < shtns->nlat_2);

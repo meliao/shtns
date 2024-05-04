@@ -144,7 +144,6 @@ struct shtns_info {		// MUST start with "int nlm;"
 	double *wg;					///< Gauss weights for Gauss-Legendre quadrature.
 	double *st_1;				///< 1/sin(theta);
 	double mpos_scale_analys;	///< scale factor for analysis, handles real-norm (0.5 or 1.0);
-	double weight_norm_1;		///< general scale factor for analysis
 
 	fftw_plan ifftc, fftc;
 	fftw_plan ifft_cplx, fft_cplx;		// for complex-valued spatial fields.

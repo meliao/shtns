@@ -96,7 +96,7 @@ V	//	SYM_ASYM_M0_V(BtF, teori)
 V	//	SYM_ASYM_M0_V(BpF, peori)
 
 Q		double r0 = split_sym_asym_m0_accl0(BrF, reori, NLAT_2, k_inc, wg);
-Q		{	rnd vr0 = vall(r0 * shtns->weight_norm_1);
+Q		{	rnd vr0 = vall(r0 * wg[-1]);
 Q			for (int k=nk-1; k>=0; --k) { 	vstor(reori, 2*k, vread(reori, 2*k) - vr0 );	}	// remove mean from even
 Q		}
 V		split_sym_asym_m0(BtF, teori, NLAT_2, k_inc);
