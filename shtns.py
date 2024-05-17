@@ -346,7 +346,9 @@ class sht(object):
     		q_ptr = [qi.data.ptr for qi in q]   # get device data pointers
     		out = [cupy.empty(self.spat_shape) for i in range(n)]
     		out_ptr = [o.data.ptr for o in out]
+    		cupy.cuda.runtime.deviceSynchronize()
     		self._gpu_synth_list[n-1](*q_ptr, *out_ptr)
+    		cupy.cuda.runtime.deviceSynchronize()
     	else:
     		out = [np.empty(self.spat_shape) for i in range(n)]
     		self._cpu_synth_list[n-1](*q, *out)
@@ -372,7 +374,9 @@ class sht(object):
     		v_ptr = [vi.data.ptr for vi in v]   # get device data pointers
     		out = [cupy.empty(self.nlm, dtype=complex) for i in range(n)]
     		out_ptr = [o.data.ptr for o in out]
+    		cupy.cuda.runtime.deviceSynchronize()
     		self._gpu_analys_list[n-1](*v_ptr, *out_ptr)
+    		cupy.cuda.runtime.deviceSynchronize()
     	else:
     		out = [np.empty(self.nlm, dtype=complex) for i in range(n)]
     		self._cpu_analys_list[n-1](*v, *out)
@@ -387,7 +391,9 @@ class sht(object):
     	if cupy is not None  and  isinstance(slm, cupy.ndarray):
     		vt = cupy.empty(self.spat_shape)
     		vp = cupy.empty(self.spat_shape)
+    		cupy.cuda.runtime.deviceSynchronize()
     		self.cu_SHsph_to_spat(slm.data.ptr,vt.data.ptr,vp.data.ptr)
+    		cupy.cuda.runtime.deviceSynchronize()
     		return vt,vp
     	else:
     		vt = np.empty(self.spat_shape)
