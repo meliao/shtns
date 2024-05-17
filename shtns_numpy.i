@@ -493,7 +493,7 @@ struct shtns_rot_ {		// describe a rotation matrix
 			for i in range(0,n):
 				if q[i].size != self.nlm: raise RuntimeError("spectral array has wrong size.")
 				if q[i].dtype.num != np.dtype('complex128').num: raise RuntimeError("spectral array should be dtype=complex.")
-				if q[i].flags.contiguous == False: q[i] = q[i].copy()		# contiguous array required.
+				if q[i].flags.forc == False: q[i] = q[i].copy()		# contiguous array required.
 			if n==1:	#scalar transform
 				vr = np.empty(self.spat_shape)
 				self.SH_to_spat(q[0],vr)
@@ -524,7 +524,7 @@ struct shtns_rot_ {		// describe a rotation matrix
 			for i in range(0,n):
 				if v[i].shape != self.spat_shape: raise RuntimeError("spatial array has wrong shape.")
 				if v[i].dtype.num != np.dtype('float64').num: raise RuntimeError("spatial array should be dtype=float64.")
-				if v[i].flags.contiguous == False: v[i] = v[i].copy()		# contiguous array required.
+				if v[i].flags.forc == False: v[i] = v[i].copy()		# contiguous array required.
 			if n==1:
 				q = np.empty(self.nlm, dtype=complex)
 				self.spat_to_SH(v[0],q)
@@ -546,7 +546,7 @@ struct shtns_rot_ {		// describe a rotation matrix
 			if self.nlat == 0: raise RuntimeError("Grid not set. Call .set_grid() mehtod.")
 			if slm.size != self.nlm: raise RuntimeError("spectral array has wrong size.")
 			if slm.dtype.num != np.dtype('complex128').num: raise RuntimeError("spectral array should be dtype=complex.")
-			if slm.flags.contiguous == False: slm = slm.copy()		# contiguous array required.
+			if slm.flags.forc == False: slm = slm.copy()		# contiguous array required.
 			vt = np.empty(self.spat_shape)
 			vp = np.empty(self.spat_shape)
 			self.SHsph_to_spat(slm,vt,vp)
@@ -568,7 +568,7 @@ struct shtns_rot_ {		// describe a rotation matrix
 			for i in range(0,n):
 				if q[i].size != (self.lmax+1)**2: raise RuntimeError("spectral array has wrong size.")
 				if q[i].dtype.num != np.dtype('complex128').num: raise RuntimeError("spectral array should be dtype=complex.")
-				if q[i].flags.contiguous == False: q[i] = q[i].copy()		# contiguous array required.
+				if q[i].flags.forc == False: q[i] = q[i].copy()		# contiguous array required.
 			if n==1:	#scalar transform
 				z = np.empty(self.spat_shape, dtype=complex)
 				self.SH_to_spat_cplx(q[0],z)
@@ -601,7 +601,7 @@ struct shtns_rot_ {		// describe a rotation matrix
 			for i in range(0,n):
 				if v[i].shape != self.spat_shape: raise RuntimeError("spatial array has wrong shape.")
 				if v[i].dtype.num != np.dtype('complex128').num: raise RuntimeError("spatial array should be dtype=complex128.")
-				if v[i].flags.contiguous == False: v[i] = v[i].copy()		# contiguous array required.
+				if v[i].flags.forc == False: v[i] = v[i].copy()		# contiguous array required.
 			if n==1:
 				q = np.empty((self.lmax+1)**2, dtype=complex)
 				self.spat_cplx_to_SH(v[0],q)
