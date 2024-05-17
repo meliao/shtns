@@ -40,6 +40,10 @@ print(_shtns.build_info())
 
 %pythoncode{
 	import numpy as np
+	try:
+		import cupy
+	except ImportError:
+		cupy = None
 }
 
 %{
@@ -191,6 +195,11 @@ struct shtns_rot_ {		// describe a rotation matrix
 				self.l[ii] = lloop
 		self.m.flags.writeable = False		# prevent writing in m and l arrays
 		self.l.flags.writeable = False
+		self._cpu_synth_list = [self.SH_to_spat, self.SHsphtor_to_spat, self.SHqst_to_spat]
+		self._cpu_analys_list = [self.spat_to_SH, self.spat_to_SHsphtor, self.spat_to_SHqst]
+		if cupy is not None:
+			self._gpu_synth_list = [self.cu_SH_to_spat, self.cu_SHsphtor_to_spat, self.cu_SHqst_to_spat]
+			self._gpu_analys_list = [self.cu_spat_to_SH, self.cu_spat_to_SHsphtor, self.cu_spat_to_SHqst]
 	%}
 	%feature("kwargs") shtns_info;
 	shtns_info(int lmax, int mmax=-1, int mres=1, int norm=sht_orthonormal, int nthreads=0) {	// default arguments : mmax, mres and norm
@@ -494,21 +503,16 @@ struct shtns_rot_ {		// describe a rotation matrix
 				if q[i].size != self.nlm: raise RuntimeError("spectral array has wrong size.")
 				if q[i].dtype.num != np.dtype('complex128').num: raise RuntimeError("spectral array should be dtype=complex.")
 				if q[i].flags.forc == False: q[i] = q[i].copy()		# contiguous array required.
-			if n==1:	#scalar transform
-				vr = np.empty(self.spat_shape)
-				self.SH_to_spat(q[0],vr)
-				return vr
-			elif n==2:	# 2D vector transform
-				vt = np.empty(self.spat_shape)		# v_theta
-				vp = np.empty(self.spat_shape)		# v_phi
-				self.SHsphtor_to_spat(q[0],q[1],vt,vp)
-				return vt,vp
-			else:		# 3D vector transform
-				vr = np.empty(self.spat_shape)		# v_r
-				vt = np.empty(self.spat_shape)		# v_theta
-				vp = np.empty(self.spat_shape)		# v_phi
-				self.SHqst_to_spat(q[0],q[1],q[2],vr,vt,vp)
-				return vr,vt,vp
+
+			if cupy is not None  and  isinstance(q[0], cupy.ndarray):
+				q_ptr = [qi.data.ptr for qi in q]   # get device data pointers
+				out = [cupy.empty(self.spat_shape) for i in range(n)]
+				out_ptr = [o.data.ptr for o in out]
+				self._gpu_synth_list[n-1](*q_ptr, *out_ptr)
+			else:
+				out = [np.empty(self.spat_shape) for i in range(n)]
+				self._cpu_synth_list[n-1](*q, *out)
+			return out[0] if n==1 else tuple(out)
 
 		def analys(self,*arg):
 			"""
@@ -525,21 +529,16 @@ struct shtns_rot_ {		// describe a rotation matrix
 				if v[i].shape != self.spat_shape: raise RuntimeError("spatial array has wrong shape.")
 				if v[i].dtype.num != np.dtype('float64').num: raise RuntimeError("spatial array should be dtype=float64.")
 				if v[i].flags.forc == False: v[i] = v[i].copy()		# contiguous array required.
-			if n==1:
-				q = np.empty(self.nlm, dtype=complex)
-				self.spat_to_SH(v[0],q)
-				return q
-			elif n==2:
-				s = np.empty(self.nlm, dtype=complex)
-				t = np.empty(self.nlm, dtype=complex)
-				self.spat_to_SHsphtor(v[0],v[1],s,t)
-				return s,t
+
+			if cupy is not None  and  isinstance(v[0], cupy.ndarray):
+				v_ptr = [vi.data.ptr for vi in v]   # get device data pointers
+				out = [cupy.empty(self.nlm, dtype=complex) for i in range(n)]
+				out_ptr = [o.data.ptr for o in out]
+				self._gpu_analys_list[n-1](*v_ptr, *out_ptr)
 			else:
-				q = np.empty(self.nlm, dtype=complex)
-				s = np.empty(self.nlm, dtype=complex)
-				t = np.empty(self.nlm, dtype=complex)
-				self.spat_to_SHqst(v[0],v[1],v[2],q,s,t)
-				return q,s,t
+				out = [np.empty(self.nlm, dtype=complex) for i in range(n)]
+				self._cpu_analys_list[n-1](*v, *out)
+			return out[0] if n==1 else tuple(out)
 
 		def synth_grad(self,slm):
 			"""(vtheta,vphi) = synth_grad(sht self, slm) : compute the spatial representation of the gradient of slm"""
@@ -547,10 +546,16 @@ struct shtns_rot_ {		// describe a rotation matrix
 			if slm.size != self.nlm: raise RuntimeError("spectral array has wrong size.")
 			if slm.dtype.num != np.dtype('complex128').num: raise RuntimeError("spectral array should be dtype=complex.")
 			if slm.flags.forc == False: slm = slm.copy()		# contiguous array required.
-			vt = np.empty(self.spat_shape)
-			vp = np.empty(self.spat_shape)
-			self.SHsph_to_spat(slm,vt,vp)
-			return vt,vp
+			if cupy is not None  and  isinstance(slm, cupy.ndarray):
+				vt = cupy.empty(self.spat_shape)
+				vp = cupy.empty(self.spat_shape)
+				self.cu_SHsph_to_spat(slm.data.ptr,vt.data.ptr,vp.data.ptr)
+				return vt,vp
+			else:
+				vt = np.empty(self.spat_shape)
+				vp = np.empty(self.spat_shape)
+				self.SHsph_to_spat(slm,vt,vp)
+				return vt,vp
 
 		def synth_cplx(self,*arg):
 			"""
