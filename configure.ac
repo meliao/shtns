@@ -118,6 +118,8 @@ AX_CHECK_COMPILE_FLAG([-qopenmp-simd])
 AX_CHECK_COMPILE_FLAG([-fno-tree-loop-distribute-patterns])
 # avoid insering VZEROUPPER instructions everywhere.
 AX_CHECK_COMPILE_FLAG([-mno-vzeroupper])
+# avoid inserting stack protections in compute kernels:
+AX_CHECK_COMPILE_FLAG([-fno-stack-protector])
 
 ## check for nasty bug in binutils, apply possible workaround. See https://bitbucket.org/nschaeff/shtns/issues/37/
 bug_as=`echo 'asm("vmovaps 64(,%rax), %zmm0");' > x.c ; $CC -c x.c ; objdump -dw x.o | grep -c '1('`

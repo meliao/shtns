@@ -66,7 +66,7 @@ sht_init_gpu.o : sht_init.c Makefile sht_legendre.c sht_func.c sht_com.c $(hfile
 sht_odd_nlat.o : sht_odd_nlat.c Makefile sht_private.h
 	$(cc) -c $< -o $@
 sht_fly.o : sht_fly.c Makefile $(hfiles) SHT/SH_to_spat_fly.c SHT/spat_to_SH_fly.c
-	$(cc) -c $< -o $@
+	$(shtcc) -c $< -o $@
 sht_omp.o : sht_omp.c Makefile $(hfiles) SHT/SH_to_spat_omp.c SHT/spat_to_SH_omp.c
 	$(cc) -c $< -o $@
 sht_kernels_s.o : sht_kernels_s.c Makefile $(hfiles) SHT/SH_to_spat_kernel.c

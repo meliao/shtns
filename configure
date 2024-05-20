@@ -4111,6 +4111,38 @@ esac
 fi
 rm -f core conftest.err conftest.$ac_objext conftest.beam conftest.$ac_ext
 
+# avoid inserting stack protections in compute kernels:
+
+  { printf "%s\n" "$as_me:${as_lineno-$LINENO}: checking whether $CC accepts -fno-stack-protector" >&5
+printf %s "checking whether $CC accepts -fno-stack-protector... " >&6; }
+  ax_check_save_flags=$CFLAGS
+  CFLAGS="$CFLAGS -fno-stack-protector"
+  cat confdefs.h - <<_ACEOF >conftest.$ac_ext
+/* end confdefs.h.  */
+
+int
+main (void)
+{
+
+  ;
+  return 0;
+}
+_ACEOF
+if ac_fn_c_try_compile "$LINENO"
+then :
+  CFLAGS=$ax_check_save_flags
+     { printf "%s\n" "$as_me:${as_lineno-$LINENO}: result: yes" >&5
+printf "%s\n" "yes" >&6; }
+     CFLAGS="$CFLAGS -fno-stack-protector"
+else case e in #(
+  e) CFLAGS=$ax_check_save_flags
+     { printf "%s\n" "$as_me:${as_lineno-$LINENO}: result: no" >&5
+printf "%s\n" "no" >&6; }
+     : ;;
+esac
+fi
+rm -f core conftest.err conftest.$ac_objext conftest.beam conftest.$ac_ext
+
 
 ## check for nasty bug in binutils, apply possible workaround. See https://bitbucket.org/nschaeff/shtns/issues/37/
 bug_as=`echo 'asm("vmovaps 64(,%rax), %zmm0");' > x.c ; $CC -c x.c ; objdump -dw x.o | grep -c '1('`
