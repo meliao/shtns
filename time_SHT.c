@@ -993,7 +993,10 @@ int main(int argc, char *argv[])
 
 		for (int ip=0; ip<NPHI; ip++) {
 			double y11 = (MRES==1 && MMAX>0) ? cos(ip*2.*M_PI/NPHI + M_PI/12.) : 0;		// cos(phi + pi/12)
-			for (int it=0;it<NLAT; it++)	Sh[ip*shtns->nlat_padded + it] = 1.0 + shtns->ct[it] + y11*shtns->st[it];
+			for (int it=0;it<NLAT; it++) {
+				long idx = (layout & SHT_PHI_CONTIGUOUS) ? it*shtns->nphi + ip : ip*shtns->nlat_padded + it;	// phi-contiguous or theta-contiguous layouts
+				Sh[idx] = 1.0 + shtns->ct[it] + y11*shtns->st[it];
+			}
 		}
 		spat_to_SH(shtns, Sh, Slm);
 		double err = 0.0;
@@ -1019,7 +1022,8 @@ int main(int argc, char *argv[])
 		for (int ip=0; ip<NPHI; ip++) {
 			double y11 = (MRES==1 && MMAX>0) ? cos(ip*2.*M_PI/NPHI + M_PI/12.) : 0;		// cos(phi + pi/12)
 			for (int it=0;it<NLAT; it++) {
-				double t = fabs(Sh[ip*shtns->nlat_padded + it] - (1.0 + shtns->ct[it] + y11*shtns->st[it]));
+				long idx = (layout & SHT_PHI_CONTIGUOUS) ? it*shtns->nphi + ip : ip*shtns->nlat_padded + it;	// phi-contiguous or theta-contiguous layouts
+				double t = fabs(Sh[idx] - (1.0 + shtns->ct[it] + y11*shtns->st[it]));
 				if (err < t) err = t;
 			}
 		}
