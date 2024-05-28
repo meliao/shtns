@@ -208,18 +208,28 @@ void leg_m_kernel(
 				ro[f][i] = 0;
 			}
 		}
-		int l = 0;
-	#ifdef LEG_ISHIOKA
+
+		if (S==1 && !ROBERT_FORM) {		// for vectors, divide by sin(theta) -- except in Robert form
+			#pragma unroll
+			for (int i=0; i<NW; i++) {
+				const int it = BLOCKSIZE*NW * blockIdx.x + ((HI_LLIM) ? NW*j+i : j+i*BLOCKSIZE);
+				y0[i] = (it < nlat_2) ? ct[it+3*nlat_2] : 0;		// 1/sin(theta)
+			}
+		}
+	  #ifdef LEG_ISHIOKA
 		#pragma unroll
-		for (int i=0; i<NW; i++) y0[i] = (S==1 && !ROBERT_FORM) ? rsqrt(1 - ct2[i]) : 1;    // for vectors, divide by sin(theta) -- except in Robert form
+		for (int i=0; i<NW; i++) y1[i] = al[1]*ct2[i] + al[0];
+	  #else
 		#pragma unroll
-		for (int i=0; i<NW; i++) y1[i] = (al[1]*ct2[i] + al[0])*y0[i];
-	#else
-		#pragma unroll
-		for (int i=0; i<NW; i++) y0[i] = (S==1 && !ROBERT_FORM) ? al[0]*rsqrt(1 - ct2[i]*ct2[i]) : al[0];    // for vectors, divide by sin(theta) -- except in Robert form
-		#pragma unroll
-		for (int i=0; i<NW; i++) y1[i] = (al[1]*ct2[i])*y0[i];
-	#endif
+		for (int i=0; i<NW; i++) y1[i] = al[1]*ct2[i];
+	 #endif
+		if (S==1 && !ROBERT_FORM) {
+			#pragma unroll
+			for (int i=0; i<NW; i++) y1[i] *= y0[i];
+		} else {
+			#pragma unroll
+			for (int i=0; i<NW; i++) y0[i] = 1;
+		}
 
 		al+=2;
 		if (BLOCKSIZE > WARPSZE) { __syncthreads(); } else { _syncwarp; }
@@ -235,6 +245,7 @@ void leg_m_kernel(
 		}
 	#endif
 
+		int l = 0;
 		while (l<=llim - LSPAN) {	// compute even and odd parts
 		  #ifdef LEG_ISHIOKA
 			for (int k = 0; k<LSPAN; k+=4) {
@@ -965,6 +976,7 @@ void ileg_m_kernel(const real_g* __restrict__ al, const real_g* __restrict__ ct,
 		if (BLOCKSIZE > WARPSZE) {	__syncthreads(); } else { _syncwarp_fence; }
 
 		y0 = (it < nlat_2) ? ct[it + nlat_2] : 0;		// weights are stored just after ct.
+		if (S==1)  y1 = (it < nlat_2) ? ct[it + 3*nlat_2] : 0;		// 1/sin(theta)
 	#ifdef ILEG_ISHIOKA
 		cost *= cost;	// ct2
 	#endif
@@ -975,11 +987,10 @@ void ileg_m_kernel(const real_g* __restrict__ al, const real_g* __restrict__ ct,
 			int it = j % (BLOCKSIZE/NW) + k*(BLOCKSIZE/NW);
 			my_reo[k] = yl[(2*f0  + (ll&1))*l_inc + it];
 		}
+		if (S==1) y0 *= (ROBERT_FORM) ? y1*y1 : y1;
 	  #ifdef ILEG_ISHIOKA
-		if (S==1) y0 *= (ROBERT_FORM) ? 1/(1-cost) : rsqrt(1 - cost);
 		y1 = (ak[1]*cost + ak[0]) * y0;
 	  #else
-		if (S==1) y0 *= (ROBERT_FORM) ? 1/(1-cost*cost) : rsqrt(1 - cost*cost);
 		y1 = (ak[1]*cost) * y0;
 	  #endif
 		if (WARPSZE < LSPAN+2  &&  j<LSPAN+2-WARPSZE)	ak[WARPSZE+j] = al[WARPSZE+j];		// sometimes a bit more than a warp is needed
