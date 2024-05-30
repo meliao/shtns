@@ -226,13 +226,13 @@ __device__ __forceinline__ bool polar_skip_sint(float sint, int llim, int m) {
 	return false;
 }
 
-__device__ __forceinline__ bool polar_skip_sint2(double sint2, int llim, int m)
+__device__ __forceinline__ bool polar_skip_cost(double cost, int llim, int m)
 {
 	// polar optimization (see Reinecke 2013, section 3.3) -- squared
 	int mm = m - ((LMAX > 10350) ? max(80, llim>>7) : 80);
-	return (mm>0) && (mm*mm > (int) (sint2*(llim*llim)));
+	return (mm>0) && (mm*mm > (int) ((1.-cost*cost)*(llim*llim)));
 }
-__device__ __forceinline__ bool polar_skip_sint2(float sint2, int llim, int m) {
+__device__ __forceinline__ bool polar_skip_cost(float cost, int llim, int m) {
 	return false;
 }
 
@@ -605,18 +605,6 @@ void leg_m_kernel(
 				}
 			}
 
-	#ifdef LEG_ISHIOKA
-		#pragma unroll
-		for (int i=0; i<NW; i++) {	COST(i,j) = ct2[i];		ct2[i] *= ct2[i];	}	// cos(theta)^2
-		#pragma unroll
-		for (int i=0; i<NW; i++) 	y1[i] = 1 - ct2[i];		// y1 = sin(theta)^2
-	#else
-		#pragma unroll
-		for (int i=0; i<NW; i++) 	y1[i] = 1 - ct2[i]*ct2[i];		// y1 = sin(theta)^2
-	#endif
-		#pragma unroll
-		for (int i=0; i<NW; i++) 	y0[i] = 1;
-
 		#pragma unroll
 		for (int i=0; i<NW; i++) {
 			#pragma unroll
@@ -628,7 +616,7 @@ void leg_m_kernel(
 
 		bool skip_block = false;
 		if (NLAT_2 > BLOCKSIZE*NW) {	// polar optimization
-			if (j == BLOCKSIZE-1)	skip_block = polar_skip_sint2(y1[NW-1], llim, m);
+			if (j == BLOCKSIZE-1)	skip_block = polar_skip_cost(ct2[NW-1], llim, m);
 			#if WARPSZE==32
 			if (BLOCKSIZE == WARPSZE) skip_block = _any(skip_block);	// get largest value in block/warp
 			#else
@@ -643,6 +631,14 @@ void leg_m_kernel(
 		} else if (BLOCKSIZE > WARPSZE) { __syncthreads(); } else { _syncwarp; }
 		// at this point, block is in sync (consistent view of shared memory).
 	if (!skip_block) {
+
+		#ifdef LEG_ISHIOKA
+			#pragma unroll
+			for (int i=0; i<NW; i++) {	COST(i,j) = ct2[i];		ct2[i] *= ct2[i];	}	// cos(theta)^2
+		#endif
+		#pragma unroll
+		for (int i=0; i<NW; i++) 	y0[i] = 1;
+
 		#if HI_LLIM==1
 		int ny = 0;		// only used for HI_LLIM
 		#else
@@ -650,38 +646,44 @@ void leg_m_kernel(
 		#endif
 		{	// compute sin(theta)^(m-S)
 			l = (S==1 && ROBERT_FORM) ? m : m-S;		// multiply vectors by sin(theta) with robert_form
-			if (l&1) {	// square-root needed
+			if (S==0 || l!=0) {
 				#pragma unroll
-				for (int i=0; i<NW; i++)	y0[i] = sqrt(y1[i]);
-			}
-			l >>= 1;
-			#if HI_LLIM==1
-			int nsint = 0;
-			#endif
-			do {
+				for (int i=0; i<NW; i++) {
+					const int it = BLOCKSIZE*NW * blockIdx.x + ((HI_LLIM) ? NW*j+i : j+i*BLOCKSIZE);
+					y1[i] = (it < nlat_2) ? ct[it + 2*nlat_2] : 0;		// sin(theta)
+				}
 				if (l&1) {
 					#pragma unroll
-					for (int i=0; i<NW; i++) y0[i] *= y1[i];
+					for (int i=0; i<NW; i++) y0[i] = y1[i];
+				}
+				#if HI_LLIM==1
+				int nsint = 0;
+				#endif
+				while( l >>= 1 ) {
+					#pragma unroll
+					for (int i=0; i<NW; i++) y1[i] *= y1[i];
 					#if HI_LLIM==1
-						ny += nsint;
-						if (y0[NW-1] < (SHT_ACCURACY+1/SHT_SCALE_FACTOR)) {
+						nsint += nsint;
+						if (y1[NW-1] < 1/SHT_SCALE_FACTOR) {
+							nsint--;
 							#pragma unroll
-							for (int i=0; i<NW; i++) y0[i] *= SHT_SCALE_FACTOR;
-							ny--;
+							for (int i=0; i<NW; i++) y1[i] *= SHT_SCALE_FACTOR;
 						}
 					#endif
-				}
-				#pragma unroll
-				for (int i=0; i<NW; i++) y1[i] *= y1[i];
-				#if HI_LLIM==1
-					nsint += nsint;
-					if (y1[NW-1] < 1/SHT_SCALE_FACTOR) {
-						nsint--;
+					if (l&1) {
 						#pragma unroll
-						for (int i=0; i<NW; i++) y1[i] *= SHT_SCALE_FACTOR;
+						for (int i=0; i<NW; i++) y0[i] *= y1[i];
+						#if HI_LLIM==1
+							ny += nsint;
+							if (y0[NW-1] < (SHT_ACCURACY+1/SHT_SCALE_FACTOR)) {
+								#pragma unroll
+								for (int i=0; i<NW; i++) y0[i] *= SHT_SCALE_FACTOR;
+								ny--;
+							}
+						#endif
 					}
-				#endif
-			} while(l >>= 1);
+				}
+			}
 		}
 
 	#ifdef LEG_ISHIOKA
@@ -1223,9 +1225,7 @@ void ileg_m_kernel(const real_g* __restrict__ al, const real_g* __restrict__ ct,
 		const int ll = (j % (BLOCKSIZE/NFIELDS)) / (BLOCKSIZE/NW);		// actualy ll = 2*l + (imag ? 1 : 0)
 		real my_reo[NW];			// in registers
 		const int m = im*MRES;
-		y0 = cost * cost;			// cos(theta)^2
 		int l = (im*(2*(LMAX+1)-MRES-m))>>1;
-		y1 = 1 - y0;		// sin(theta)^2
 	  #ifdef ILEG_ISHIOKA
 		al += l+m;
 	  #else
@@ -1236,7 +1236,7 @@ void ileg_m_kernel(const real_g* __restrict__ al, const real_g* __restrict__ ct,
 
 		#if NLAT_2 > BLKSZE_A
 		{	// polar optimization
-			bool skip_block = (j == BLOCKSIZE-1) ? polar_skip_sint2(y1, llim, m) : false;
+			bool skip_block = (j == BLOCKSIZE-1) ? polar_skip_cost(cost, llim, m) : false;
 			#if WARPSZE == 32
 			if (BLOCKSIZE == WARPSZE) skip_block = _any(skip_block);	// get largest value in block/warp
 			#else
@@ -1299,8 +1299,9 @@ void ileg_m_kernel(const real_g* __restrict__ al, const real_g* __restrict__ ct,
 				my_reo[k] = yl[ofs + k*(BLOCKSIZE/NW)];
 			}
 
+		y1 = (it < nlat_2) ? ct[it + 2*nlat_2] : 0;		// sin(theta)
 	  #ifdef ILEG_ISHIOKA
-		cost = y0;		// cos(theta)^2
+		cost *= cost;		// cos(theta)^2
 	  #endif
 		#if HI_LLIM==1
 		int ny = 0;
@@ -1309,12 +1310,10 @@ void ileg_m_kernel(const real_g* __restrict__ al, const real_g* __restrict__ ct,
 			y0 = MPOS_SCALE;	// y0
 			l = m - S;		// exponent of sin(theta)
 			if (ROBERT_FORM && S==1) {
-				if (MRES==1 && l==0) {
-					y0 *= rsqrt(y1);	// division by sin(theta) only for m=1 in Robert form
+				if (MRES==1 && l==0) {		// division by sin(theta) only for m=1 in Robert form (incorrect at the poles)
+					if (it < nlat_2) y0 *= ct[it + 3*nlat_2];		// 1/sin(theta)
 				} else --l;		// otherwise we just reduce the exponent of sin(theta)^l
 			}
-			if (l&1) y0 *= sqrt(y1);	// sqrt only computed when needed
-			l>>=1;
 			#if HI_LLIM==1
 			int nsint = 0;
 			#endif
