@@ -1348,7 +1348,7 @@ int shtns_set_grid_auto(shtns_cfg shtns, enum shtns_type flags, double eps, int 
 	int vector = !(flags & SHT_SCALAR_ONLY);
 	int latdir = (flags & SHT_SOUTH_POLE_FIRST) ? -1 : 1;		// choose latitudinal direction (change sign of ct)
 	int cfg_loaded = 0;
-	int analys = 1;
+	int accuracy_check = 1;
 	const int req_flags = flags;		// requested flags.
 
 	if (*nlat & 1) quick_init = 1;	// only one type of transform works with nlat odd. NEVER try others.
@@ -1444,7 +1444,7 @@ int shtns_set_grid_auto(shtns_cfg shtns, enum shtns_type flags, double eps, int 
 	}
 
 	if (*nlat <= shtns->lmax) shtns_runerr("Nlat must be larger than Lmax");
-	if ((flags != sht_gauss)&&(*nlat <= 2*shtns->lmax)) printf("!WARNING! Nlat must be larger than 2*Lmax for analysis to work (sampling theorem)!");
+	if ((flags != sht_gauss)&&(*nlat <= 2*shtns->lmax)) { accuracy_check=0; printf("\033[93m !WARNING! Nlat must be larger than 2*Lmax for analysis to work (sampling theorem)!\033[0m\n"); }
 	if (IS_TOO_LARGE(*nlat, shtns->nlat)) shtns_runerr("Nlat too large");
 	if (IS_TOO_LARGE(*nphi, shtns->nphi)) shtns_runerr("Nphi too large");
 
@@ -1494,12 +1494,13 @@ int shtns_set_grid_auto(shtns_cfg shtns, enum shtns_type flags, double eps, int 
   #endif
 
 	if ((layout & SHT_LOAD_SAVE_CFG) && (!cfg_loaded)) cfg_loaded = (config_load(shtns, req_flags) > 0);
+	const double t_estimate = 5e-10*LMAX*NLAT*MMAX/VSIZE2 * shtns->howmany;		// very rough cost estimate (in seconds for 1 core @ 1Ghz).
 	if ((quick_init == 0) && (!cfg_loaded)) {
 		choose_best_sht(shtns, &nloop, vector);
 		if (layout & SHT_LOAD_SAVE_CFG) config_save(shtns, req_flags);
-	}
-	double t_estimate = 5e-10*LMAX*NLAT*MMAX/VSIZE2 * shtns->howmany;		// very rough cost estimate (in seconds for 1 core @ 1Ghz).
-	if ((t_estimate < 0.3*shtns->nthreads) || ((quick_init == 0) && (!cfg_loaded))) {	// don't perform accuracy checks for too large transforms (takes too much time).
+	} else if (t_estimate >= 0.3*shtns->nthreads)  accuracy_check = 0;	// don't perform accuracy checks for too large transforms (takes too much time).
+
+	if (accuracy_check) {
 		t = SHT_error(shtns, vector);		// compute SHT accuracy.
 		if (verbose) printf("        + SHT accuracy = %.3g\n",t);
 		if (t > ((layout & SHT_FP32) ? 5e-3 : 1.e-6) || isNotFinite(t)) {
