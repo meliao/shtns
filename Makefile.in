@@ -25,7 +25,7 @@ test : test_suite test_rot
 
 @target@ : Makefile $(objs)
 	rm -f @target@
-	ar rcs @target@ $(objs)
+	@target_cmd@ @target@ $(objs)
 	@echo "**** link with : @LDFLAGS@ @LIBS@"
 
 install-lib : $(libname)

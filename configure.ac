@@ -6,7 +6,7 @@ AC_INIT([SHTns],[3.6.6],[],[shtns],[https://bitbucket.org/nschaeff/shtns])
 AC_LANG([C])
 AC_CONFIG_SRCDIR([sht_init.c])
 AC_CONFIG_HEADERS([sht_config.h])
-target="libshtns.a"		# by default, build the library.
+target="libshtns"		# by default, build the library.
 objs="sht_fly.o"
 install="install-lib"	# by default, install the library.
 
@@ -27,7 +27,9 @@ AC_ARG_ENABLE([hip],
 AC_ARG_ENABLE([magic-layout],
 	AS_HELP_STRING([--enable-magic-layout], [Compile specific version for the MagIC code]), [], [enable_magic_layout=no])
 AC_ARG_ENABLE([python],
-	AS_HELP_STRING([--enable-python], [Build Python interface]), [], [enable_python=no])
+	AS_HELP_STRING([--enable-python], [Build Python interface, implies --enable-shared]), [], [enable_python=no])
+AC_ARG_ENABLE([shared],
+	AS_HELP_STRING([--enable-shared], [allows building of a shared library (instead of a static one)]), [], [enable_shared=no])
 AC_ARG_ENABLE([f77],
 	AS_HELP_STRING([--disable-f77], [Do not include F77 wrapper to call SHTns library from Fortran]))
 AC_ARG_ENABLE([simd],
@@ -145,7 +147,7 @@ AS_IF([test "x$enable_knl" != "xyes"], [
 	# this is an icc compile option, try if it is supported:
 	AX_CHECK_COMPILE_FLAG([-qopt-zmm-usage=high])
   ],[
-	target="libshtns_mic.a"
+	target="libshtns_mic"
 	# KNL native cross-compiling
 	AX_CHECK_COMPILE_FLAG([-march=knl],[], [
 	    CC=icc
@@ -182,9 +184,13 @@ AC_CHECK_LIB([m],[cos],,[AC_MSG_ERROR([math library not found.])])
 # Checks related to Python:
 AS_IF([test "x$enable_python" != "xno"], [
 	AS_IF([test "x$enable_openmp" = "xdefault"], [enable_openmp=yes])   # enable openmp by default
+	enable_shared=yes   # shared library required
+	install="install-py"	# install python extension instead of C library.
+])
+
+AS_IF([test "x$enable_shared" != "xno"], [
 	CFLAGS="$CFLAGS -fpic"	# required compile flag for python extensions.
 	CFLAGS2="$CFLAGS2 -fpic"	# required compile flag for python extensions.
-	install="install-py"	# install python extension instead of C library.
 ])
 
 # for MagIC code, also disable matrix transforms.
@@ -198,9 +204,9 @@ AS_IF([test "x$enable_openmp" = "xyes"], [
 	dnl AC_CHECK_HEADERS([omp.h])
 	objs="$objs sht_omp.o"
 	AS_IF([test "x$enable_knl" != "xno"], [
-		target="libshtns_mic_omp.a"
+		target="libshtns_mic_omp"
 	],[
-		target="libshtns_omp.a"
+		target="libshtns_omp"
 	])
 ])
 
@@ -222,10 +228,10 @@ AS_IF([test "x$enable_hip" != "xno"], [
 	    AS_CASE([$enable_hip], "mi100", [hip_arch=gfx908], "mi200", [hip_arch=gfx90a], "mi250", [hip_arch=gfx90a], [hip_arch=$enable_hip])
 	    gpu_compile="$gpu_compile --offload-arch=$hip_arch:xnack+ --offload-arch=$hip_arch:xnack-"
 	])
-	target="libshtns_cuda.a"
+	target="libshtns_cuda"
 	AS_IF([test "x$enable_openmp" = "xyes"], [
 	    gpu_compile="$gpu_compile -fopenmp"
-	    target="libshtns_cuda_omp.a"
+	    target="libshtns_cuda_omp"
 	])
 	AC_CHECK_FILE([vkfft/vkFFT.h], AC_DEFINE([VKFFT_BACKEND],[2],[Use vkFFT for the FFT on the GPU when possible]))
 ])
@@ -257,12 +263,12 @@ AS_IF([test "x$enable_cuda" != "xno"], [
 	gpu_cflags="-DSHTNS_GPU=1"  # GPU transforms, 1 for CUDA, 2 for HIP
 	# for nvcc, the underlying gcc is not always c++11 by default, so we need to explicitely ask for it.
 	gpu_compile="nvcc -std=c++11 $nvcc_gencode_flags -lineinfo -Xptxas=-v $gpu_cflags"
-	target="libshtns_cuda.a"
+	target="libshtns_cuda"
 	AS_IF([test "x$enable_openmp" = "xyes"], [
 	    gpu_compile="$gpu_compile -Xcompiler -fopenmp"
-	    target="libshtns_cuda_omp.a"
+	    target="libshtns_cuda_omp"
 	])
-	AS_IF([test "x$enable_python" != "xno"], [
+	AS_IF([test "x$enable_shared" != "xno"], [
 	    gpu_compile="$gpu_compile -Xcompiler -fpic"
 	])
 	AC_CHECK_FILE([vkfft/vkFFT.h], AC_DEFINE([VKFFT_BACKEND],[1],[Use vkFFT for the FFT on the GPU when possible]))
@@ -376,8 +382,18 @@ AC_CHECK_FUNCS([fftw_cost])
 AC_PROG_FC
 #### end Fortran #####
 
+## add correct extension to target:
+AS_IF([test "x$enable_shared" != "xno"], [
+	target="${target}.so"
+	target_cmd="$CC $CFLAGS -shared $LDFLAGS $LIBS -o"
+],[
+	target="${target}.a"
+	target_cmd="ar rcs"
+])
+
 echo "prefix=$prefix"
 AC_SUBST([target])
+AC_SUBST([target_cmd])
 AC_SUBST([install])
 AC_SUBST([objs])
 AC_SUBST([CC2])

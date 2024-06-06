@@ -648,6 +648,7 @@ CFLAGS2
 CC2
 objs
 install
+target_cmd
 target
 ac_ct_FC
 FCFLAGS
@@ -711,6 +712,7 @@ enable_cuda
 enable_hip
 enable_magic_layout
 enable_python
+enable_shared
 enable_f77
 enable_simd
 enable_ishioka
@@ -1358,7 +1360,9 @@ Optional Features:
                           Enable compilation for AMD gpu using HIP, optionally
                           specifying architecture
   --enable-magic-layout   Compile specific version for the MagIC code
-  --enable-python         Build Python interface
+  --enable-python         Build Python interface, implies --enable-shared
+  --enable-shared         allows building of a shared library (instead of a
+                          static one)
   --disable-f77           Do not include F77 wrapper to call SHTns library
                           from Fortran
   --disable-simd          Do not use vector extensions (SSE2, AVX, AVX2,
@@ -2457,7 +2461,7 @@ ac_compiler_gnu=$ac_cv_c_compiler_gnu
 
 ac_config_headers="$ac_config_headers sht_config.h"
 
-target="libshtns.a"		# by default, build the library.
+target="libshtns"		# by default, build the library.
 objs="sht_fly.o"
 install="install-lib"	# by default, install the library.
 
@@ -2531,6 +2535,15 @@ then :
   enableval=$enable_python;
 else case e in #(
   e) enable_python=no ;;
+esac
+fi
+
+# Check whether --enable-shared was given.
+if test ${enable_shared+y}
+then :
+  enableval=$enable_shared;
+else case e in #(
+  e) enable_shared=no ;;
 esac
 fi
 
@@ -4298,7 +4311,7 @@ rm -f core conftest.err conftest.$ac_objext conftest.beam conftest.$ac_ext
 
 else case e in #(
   e)
-	target="libshtns_mic.a"
+	target="libshtns_mic"
 	# KNL native cross-compiling
 
   { printf "%s\n" "$as_me:${as_lineno-$LINENO}: checking whether $CC accepts -march=knl" >&5
@@ -4820,9 +4833,16 @@ then :
 then :
   enable_openmp=yes
 fi   # enable openmp by default
+	enable_shared=yes   # shared library required
+	install="install-py"	# install python extension instead of C library.
+
+fi
+
+if test "x$enable_shared" != "xno"
+then :
+
 	CFLAGS="$CFLAGS -fpic"	# required compile flag for python extensions.
 	CFLAGS2="$CFLAGS2 -fpic"	# required compile flag for python extensions.
-	install="install-py"	# install python extension instead of C library.
 
 fi
 
@@ -4923,11 +4943,11 @@ printf "%s\n" "$ac_cv_prog_c_openmp" >&6; }
 	if test "x$enable_knl" != "xno"
 then :
 
-		target="libshtns_mic_omp.a"
+		target="libshtns_mic_omp"
 
 else case e in #(
   e)
-		target="libshtns_omp.a"
+		target="libshtns_omp"
 	 ;;
 esac
 fi
@@ -5020,12 +5040,12 @@ esac
 	 ;;
 esac
 fi
-	target="libshtns_cuda.a"
+	target="libshtns_cuda"
 	if test "x$enable_openmp" = "xyes"
 then :
 
 	    gpu_compile="$gpu_compile -fopenmp"
-	    target="libshtns_cuda_omp.a"
+	    target="libshtns_cuda_omp"
 
 fi
 	{ printf "%s\n" "$as_me:${as_lineno-$LINENO}: checking for vkfft/vkFFT.h" >&5
@@ -5349,15 +5369,15 @@ fi
 	gpu_cflags="-DSHTNS_GPU=1"  # GPU transforms, 1 for CUDA, 2 for HIP
 	# for nvcc, the underlying gcc is not always c++11 by default, so we need to explicitely ask for it.
 	gpu_compile="nvcc -std=c++11 $nvcc_gencode_flags -lineinfo -Xptxas=-v $gpu_cflags"
-	target="libshtns_cuda.a"
+	target="libshtns_cuda"
 	if test "x$enable_openmp" = "xyes"
 then :
 
 	    gpu_compile="$gpu_compile -Xcompiler -fopenmp"
-	    target="libshtns_cuda_omp.a"
+	    target="libshtns_cuda_omp"
 
 fi
-	if test "x$enable_python" != "xno"
+	if test "x$enable_shared" != "xno"
 then :
 
 	    gpu_compile="$gpu_compile -Xcompiler -fpic"
@@ -6135,7 +6155,23 @@ ac_compiler_gnu=$ac_cv_c_compiler_gnu
 
 #### end Fortran #####
 
+## add correct extension to target:
+if test "x$enable_shared" != "xno"
+then :
+
+	target="${target}.so"
+	target_cmd="$CC $CFLAGS -shared $LDFLAGS $LIBS -o"
+
+else case e in #(
+  e)
+	target="${target}.a"
+	target_cmd="ar rcs"
+ ;;
+esac
+fi
+
 echo "prefix=$prefix"
+
 
 
 
