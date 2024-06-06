@@ -15,7 +15,7 @@ FEATURES:
 - flexible truncation (degree, order, azimuthal periodicity).
 - spatial data can be stored in latitude-major or longitude-major arrays.
 - various conventions (normalization and Condon-Shortley phase).
-- can be used from **Fortran, c/c++, Python, and Java** programs.
+- can be used from **Fortran, c/c++, Python, Julia, and Java** programs.
 - highly efficient Gauss algorithm working with Gauss nodes (based on
   Gauss-Legendre quadrature).
 - support for **regular grids** (but they require twice the number of nodes than Gauss grid)
@@ -52,6 +52,11 @@ Requirements: FFTW library, and numpy for the python module.
         pip install shtns
 
     or from the source tree with `pip install .` or `python setup.py install --user`
+
+- The **Julia package** is [maintained separately](https://github.com/fgerick/SHTns.jl) and can be installed from julia with
+
+        import Pkg; Pkg.add("SHTns")
+
 
 Please note that, in order **to get the best performance, it is highly recommended to
 compile and install the FFTW library yourself**, because many distributions
