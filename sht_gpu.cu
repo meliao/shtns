@@ -157,8 +157,8 @@ static int init_cuda_buffer_fft(shtns_cfg shtns, int cuda_gpu_id, int sizeof_rea
 			#endif
 		} else if (shtns->fft_mode & FFT_THETA_CONTIG) {
 			printf("!!! Use theta-contiguous FFT on GPU !!!\n");
-			int howmany = shtns->nlat_2 * shtns->howmany;		// support batched transforms
-			int dist = shtns->nlat_padded / 2;
+			long howmany = shtns->nlat_2 * shtns->howmany;		// support batched transforms
+			long dist = shtns->nlat_padded / 2;
 			#if defined(HAVE_LIBCUFFT) || defined(HAVE_LIBROCFFT)
 				res = cufftPlanMany(&shtns->cufft_plan, 1, &nfft, &nfft, dist, 1, &nfft, dist, 1, (sizeof_real==4) ? CUFFT_C2C : CUFFT_Z2Z, howmany);
 			#endif
@@ -709,7 +709,7 @@ shtns_cfg cushtns_clone(shtns_cfg shtns, cudaStream_t compute_stream, cudaStream
 	}
 }
 
-void fourier_to_spat_gpu(shtns_cfg shtns, void* q, const int mmax, const int sizeof_real = 8)
+void fourier_to_spat_gpu(shtns_cfg shtns, void* q, const int mmax, const long sizeof_real = 8)
 {
 	const int nphi = shtns->nphi;
 	if (nphi > 1) {
@@ -720,7 +720,7 @@ void fourier_to_spat_gpu(shtns_cfg shtns, void* q, const int mmax, const int siz
 			xfft = shtns->gpu_buf_in;
 			transpose_cplx_zero(shtns->comp_stream, q, xfft, shtns->nlat_2, nphi, mmax, sizeof_real);		// zero out m>mmax during transpose
 		} else if (2*(mmax+1) <= nphi) {
-			const int nlat = shtns->nlat_padded;
+			const long nlat = shtns->nlat_padded;
 			cudaMemsetAsync( ((char*)q) + sizeof_real*(mmax+1)*nlat, 0, sizeof_real*(nphi-2*mmax-1)*nlat, shtns->comp_stream );		// zero out m>mmax before fft
 		}
 		res = (sizeof_real==8) ? cufftExecZ2Z(shtns->cufft_plan, (cufftDoubleComplex*) xfft, (cufftDoubleComplex*) q, CUFFT_INVERSE) :
@@ -730,7 +730,7 @@ void fourier_to_spat_gpu(shtns_cfg shtns, void* q, const int mmax, const int siz
 		// VkFFT: always THETA_CONTIGUOUS
 		// rely on vkfft to avoid reading the unused Fourier modes above shtns->mmax
 		if (mmax < shtns->mmax) {	// some zero must be added, only if more than nominal
-			const int nlat = shtns->nlat_padded;
+			const long nlat = shtns->nlat_padded;
 			cudaMemsetAsync( ((char*)q) + sizeof_real*(mmax+1)*nlat, 0, sizeof_real*(nphi-2*mmax-1)*nlat, shtns->comp_stream );		// zero out m>mmax before fft
 		}
 		VkFFTLaunchParams launchParams = {};
@@ -740,7 +740,7 @@ void fourier_to_spat_gpu(shtns_cfg shtns, void* q, const int mmax, const int siz
 	}
 }
 
-void spat_to_fourier_gpu(shtns_cfg shtns, void* q, const int mmax, const int sizeof_real = 8)
+void spat_to_fourier_gpu(shtns_cfg shtns, void* q, const int mmax, const long sizeof_real = 8)
 {
 	const int nphi = shtns->nphi;
 	if (nphi > 1) {
@@ -1053,10 +1053,10 @@ void SH_to_spat_gpu(shtns_cfg shtns, cplx *Qlm, double *Vr, const long int llim)
 	if (CUDA_ERROR_CHECK) return;
 
 	// copy back spatial data
-	err = cudaMemcpy(Vr, d_q, shtns->nspat * shtns->sizeof_real, cudaMemcpyDeviceToHost);
+	err = cudaMemcpy(Vr, d_q, (long) shtns->nspat * shtns->sizeof_real, cudaMemcpyDeviceToHost);
 	if (err != cudaSuccess) { CUDA_ERROR_CHECK;	return; }
 	if (shtns->sizeof_real == 4) {	// convert float to double in-place
-		for (int i=shtns->nspat-1; i>=0; i--) 	Vr[i] = ((float*)Vr)[i];
+		for (long i=shtns->nspat-1; i>=0; i--) 	Vr[i] = ((float*)Vr)[i];
 	}
 }
 
@@ -1073,7 +1073,7 @@ void SHsphtor_to_spat_gpu(shtns_cfg shtns, cplx *Slm, cplx *Tlm, double *Vt, dou
 	const long nlm_stride = shtns->nlm_stride * howmany;
 	const long spat_stride = shtns->spat_stride;
 	long nlm_pad = (howmany==1) ? shtns->nlm : shtns->spec_dist*howmany;
-	const int sizeof_real = shtns->sizeof_real;
+	const long sizeof_real = shtns->sizeof_real;
 
 	if (llim < mmax*mres) {
 		mmax = llim / mres;	// truncate mmax too !
