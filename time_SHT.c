@@ -332,7 +332,7 @@ void test_SHT()
 
 	tcpu = clock();
 	ta2 = wtime();
-	spat_to_SH(shtns, Sh,Slm);
+	spat_to_SH_time(shtns, Sh,Slm);
 	for (jj=1; jj< SHT_ITER; jj++) {
 		spat_to_SH_time(shtns, Sh,Tlm);
 	}
