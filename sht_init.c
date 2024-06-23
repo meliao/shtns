@@ -426,6 +426,9 @@ static void planFFT(shtns_cfg shtns, int layout)
 		// shtns->howmany MUST be 1!
 		phi_inc=1;  theta_inc=NPHI;
 		shtns->nspat = NPHI * NLAT;		// no padding, no batching.
+		#ifdef SHTNS_GPU
+		if (shtns->mmax == NPHI/2) shtns->nspat += NLAT;		// on GPU, a little bit of extra space is needed for odd NPHI, to store the Fourier coefficients.
+		#endif
 		shtns->nlat_padded = NLAT;
 	}
 
@@ -440,7 +443,9 @@ static void planFFT(shtns_cfg shtns, int layout)
 	Sh = (double *) VMALLOC(shtns->nspat * sizeof(cplx));
 
 	if (NLAT & 1) {		// odd nlat => c2r transforms
+		if (verbose) printf("(odd layout: phi_inc=%d, theta_inc=%d)\n",phi_inc,theta_inc);
 		if (howmany != 1) shtns_runerr("batch transform not supported for odd nlat\n");
+		shtns->fft_mode = FFT_OOP | ((phi_inc==1) ? FFT_PHI_CONTIG_ODD : FFT_THETA_CONTIG_ODD);
 		const int ncplx = NPHI/2 +1;
 		shtns->fftc = fftw_plan_many_dft_r2c(1, &nfft, NLAT, Sh, &nfft, phi_inc, theta_inc, ShF, &ncplx, NLAT, 1, FFTW_ESTIMATE);
 		shtns->ifftc = fftw_plan_many_dft_c2r(1, &nfft, NLAT, ShF, &ncplx, NLAT, 1, Sh, &nfft, phi_inc, theta_inc, FFTW_ESTIMATE);
@@ -488,15 +493,6 @@ static void planFFT(shtns_cfg shtns, int layout)
 		// for complex transform it is much simpler (out-of-place):
 		shtns->ifft_cplx = fftw_plan_many_dft(1, &nfft, NLAT, ShF, &nfft, NLAT, 1, (cplx*)Sh, &nfft, 1, NPHI, FFTW_BACKWARD, shtns->fftw_plan_mode);
 		shtns->fft_cplx =  fftw_plan_many_dft(1, &nfft, NLAT, ShF, &nfft, 1, NPHI, (cplx*)Sh, &nfft, NLAT, 1, FFTW_BACKWARD, shtns->fftw_plan_mode);
-	#if defined( HAVE_LIBCUFFT ) && !defined( VKFFT_BACKEND )
-	} else if ((!(layout & SHT_THETA_CONTIGUOUS)) && (nfft % 16 == 0) && (shtns->nlat % 32 == 0) && (howmany==1)) {		// use the fastest layout compatible with cuFFT
-		if (verbose) printf("(best cuFFT layout: phi_inc=2, theta_inc=NA)\n");
-		shtns->fft_mode = FFT_PHI_CONTIG_CPLX | FFT_OOP;	// out-of-place
-		// Fourier -> spatial
-		shtns->ifftc = fftw_plan_many_dft(1, &nfft, NLAT/2, ShF, &nfft, NLAT/2, 1, (cplx*) Sh, &nfft, 1, nfft, FFTW_BACKWARD, shtns->fftw_plan_mode);		
-		// spatial -> Fourier
-		shtns->fftc = fftw_plan_many_dft(1, &nfft, NLAT/2, (cplx*) Sh, &nfft, 1, nfft, ShF, &nfft, NLAT/2, 1, FFTW_BACKWARD, shtns->fftw_plan_mode);
-	#endif
 	} else {	//if (layout & SHT_THETA_CONTIGUOUS) {		// use only in-place here, supposed to be faster.
 		if ((NLAT & 1)==0) {
 			if (verbose) printf("(theta-contiguous layout: phi_inc=%d, theta_inc=%d)\n",phi_inc,theta_inc);
@@ -1391,7 +1387,7 @@ int shtns_set_grid_auto(shtns_cfg shtns, enum shtns_type flags, double eps, int 
 		if ((layout & SHT_FP32) && (layout & SHT_ALLOW_GPU)) {
 			quick_init = 1;		// for now, FP32 only works on GPU anyway, no need to compare to cpu.
 		}
-		if ((layout & SHT_ALLOW_GPU) && (*nlat % 4)) printf("!!! Warning !!! Nlat must be a multiple of 4 to run on GPU\n");
+		if (((layout & (SHT_ALLOW_GPU | SHT_PHI_CONTIGUOUS)) == SHT_ALLOW_GPU) && (*nlat % 4)) printf("!!! Warning !!! Nlat must be a multiple of 4 to run on GPU, unless phi-contiguous layout is requested\n");
 	#endif
 
 	if (vector) {
@@ -1481,7 +1477,7 @@ int shtns_set_grid_auto(shtns_cfg shtns, enum shtns_type flags, double eps, int 
 
   #ifdef SHTNS_GPU
 	int gpu_ok = -1;
-	if ((layout & SHT_ALLOW_GPU) && (NLAT % 4 == 0)) {
+	if ((layout & SHT_ALLOW_GPU) && (NLAT % 4 == 0 || (layout & SHT_PHI_CONTIGUOUS))) {		// gpu requires NLAT multiple of 4, unless phi-contiguous layout is used
 		gpu_ok = cushtns_init_gpu(shtns);		// try to initialize cuda gpu
 		if (gpu_ok >= 0) {
 			int err = init_gpu_staging_buffer(shtns);		// initialize staging buffers for auto-offload feature.

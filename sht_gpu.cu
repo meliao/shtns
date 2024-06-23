@@ -45,6 +45,7 @@
 #endif
 
 enum cushtns_flags { CUSHT_OFF=0, CUSHT_ON=1, CUSHT_OWN_XFER_STREAM=4, CUSHT_NO_ISHIOKA=32, CUSHT_PROFILING=64};
+#define FFT_PHI_CONTIG (FFT_PHI_CONTIG_SPLIT | FFT_PHI_CONTIG_ODD)
 
 #include "sht_gpu_kernels.cu"
 
@@ -147,16 +148,7 @@ static int init_cuda_buffer_fft(shtns_cfg shtns, int cuda_gpu_id, int sizeof_rea
 		#if defined(HAVE_LIBCUFFT) || defined(HAVE_LIBROCFFT)
 			cufftResult res = CUFFT_SUCCESS;
 		#endif
-		if ((shtns->fft_mode & FFT_PHI_CONTIG_CPLX) && (nfft % 16 == 0) && (shtns->nlat_2 % 16 == 0)) {	// DEPRECATED: use the fastest data-layout for large sizes in CUFFT
-			printf("!!! Use phi-contiguous FFT +transpose: WARNING, the spatial data is neither phi-contiguous nor theta-contiguous !!!\n");
-			#if defined(HAVE_LIBCUFFT) || defined(HAVE_LIBROCFFT)
-				res = cufftPlanMany(&shtns->cufft_plan, 1, &nfft, &nfft, 1, shtns->nphi, &nfft, 1, shtns->nphi, (sizeof_real==4) ? CUFFT_C2C : CUFFT_Z2Z, shtns->nlat_2);
-			#else
-				printf("WARNING: layout not available without cuFFT/rocFFT.\n");
-				err_count ++;
-				return 1;
-			#endif
-		} else if (shtns->fft_mode & FFT_THETA_CONTIG) {
+		if (shtns->fft_mode & FFT_THETA_CONTIG) {
 			printf("!!! Use theta-contiguous FFT on GPU !!!\n");
 			long howmany = shtns->nlat_2 * shtns->howmany;		// support batched transforms
 			long dist = shtns->nlat_padded / 2;
@@ -193,6 +185,43 @@ static int init_cuda_buffer_fft(shtns_cfg shtns, int cuda_gpu_id, int sizeof_rea
 					err_count ++;
 				}
 			#endif
+		} else if (shtns->fft_mode & FFT_PHI_CONTIG) {
+			printf("!!! Use phi-contiguous FFT on GPU (with transpose step) !!!\n");
+			long howmany = shtns->nlat * shtns->howmany;		// support batched transforms
+			long dist = shtns->nlat_padded / 2;
+			#ifdef VKFFT_BACKEND
+				CUdevice vkfft_device_struct;
+				VkFFTConfiguration config = {};		//zero-initialize configuration
+				config.FFTdim = 1; //FFT dimension: 1D, but we use a second dimension to get non-unit strides.
+				config.size[0] = nfft;
+				config.isInputFormatted = 1;		// out-of-place: separate buffer for input and output
+				config.inverseReturnToInputBuffer = 1;
+				config.inputBufferStride[0] = nfft;		// spatial data
+				config.bufferStride[0] = nfft/2 + 1;	// spectral data
+				config.doublePrecision = sizeof_real / 8;
+				if (0) {	// disable zero-padding for now, as it is broken for large nfft
+					config.performZeropadding[0] = 1;
+					config.frequencyZeroPadding = 1;
+					config.fft_zeropad_left[0] = shtns->mmax + 1;			// first zero element
+					config.fft_zeropad_right[0] = nfft - shtns->mmax;		// first non-zero element
+				}
+				config.numberBatches = howmany;
+				config.performR2C = 1;
+				//config.disableMergeSequencesR2C = 1;		// reduces performance (don't use)
+				//config.disableReorderFourStep = 1;		// avoids the use of temp buffer for large transforms at the cost of a mangled output.
+				cuDeviceGet(&vkfft_device_struct, cuda_gpu_id);
+				config.device = &vkfft_device_struct;
+				config.stream = &shtns->comp_stream;
+				config.num_streams = 1;
+				VkFFTResult vk_res = initializeVkFFT(&shtns->vkfft_plan, config);
+
+				const int ver = VkFFTGetVersion();
+				printf("=> Using VkFFT v%d.%d.%d\n",ver/10000,(ver%10000)/100,ver%100);
+				if (vk_res != VKFFT_SUCCESS) {
+					printf("vkfft init FAILED with error code %d\n", vk_res);
+					err_count ++;
+				}
+			#endif			
 		} else {
 			printf("WARNING: layout not available on GPU.\n");
 			err_count ++;
@@ -213,16 +242,20 @@ static int init_cuda_buffer_fft(shtns_cfg shtns, int cuda_gpu_id, int sizeof_rea
 	}
 
 	// Allocate working arrays for SHT on GPU:
-	const int howmany = shtns->howmany;		// batch size
-	const int nlm2 = shtns->nlm + (shtns->mmax+1);		// one more data per m
+	const long howmany = shtns->howmany;		// batch size
+	const long nlm2 = shtns->nlm + (shtns->mmax+1);		// one more data per m
+	const long nphi = shtns->nphi;
 	const size_t nlm_stride = ((2*nlm2+WARPSZE-1)/WARPSZE) * WARPSZE;
-	const size_t spat_stride = ((shtns->nlat_padded*shtns->nphi+WARPSZE-1)/WARPSZE) * WARPSZE;
+	const size_t spat_stride = ((shtns->nlat_padded*(nphi + (nphi/2==shtns->mmax))+WARPSZE-1)/WARPSZE) * WARPSZE;		// for odd nphi, reserve more space to store the full Fourier data
 	const size_t dual_stride = (spat_stride < nlm_stride*howmany) ? nlm_stride*howmany : spat_stride;		// we need two spatial buffers to also hold spectral data.
 
 	size_t sze = nlm_stride;		// 1 spectral buffer for scalar only ...
 	if (shtns->mx_stdt) sze *= 2;	// ... 2 spectral buffer for vector transforms.
-	if (shtns->fft_mode & FFT_PHI_CONTIG_CPLX) {
-		if (spat_stride > sze) sze = spat_stride;		// one spatial buffer for FFT -OR- 2 spectral buffers should fit in.
+	if (shtns->fft_mode & FFT_PHI_CONTIG) {
+		size_t fft_sze = ((shtns->nlat_padded*2*(nphi/2+1)+WARPSZE-1)/WARPSZE) * WARPSZE;	// Fourier data in R2C format takes up a little more space
+		if (shtns->mx_stdt) {	// for vector transform, we need to keep 2 spectral buffers together with a Fourier buffer:
+			sze += fft_sze;
+		} else if (fft_sze > sze) sze = fft_sze;		// one spatial buffer for FFT -OR- 2 spectral buffers should fit in.
 	}
 	err = cudaMalloc( (void **)&shtns->gpu_buf_in,  sze * sizeof_real * howmany );
 	if (err != cudaSuccess)	{	err_count++;	CUDA_ERROR_CHECK;  }
@@ -410,7 +443,7 @@ int init_cuda_program(shtns_cfg shtns, const char* gpu_arch_target)
 	s += sprintf(s, "#define NF_A %d\n", nf_a);
 	s += sprintf(s, "#define LSPAN_A %d\n", lspan_a);
 	s += sprintf(s, "#define NW_S %d\n", nw_s);
-	s += sprintf(s, "#define MPOS_SCALE %g\n", shtns->mpos_scale_analys);
+	s += sprintf(s, "#define MPOS_SCALE %g\n", shtns->mpos_scale_analys * ((shtns->fft_mode & FFT_PHI_CONTIG) ? 2 : 1));
 	s += sprintf(s, "#define NLAT_2 %d\n", shtns->nlat_2);
 	s += sprintf(s, "typedef %s real;\n", (shtns->sizeof_real == 4) ? "float" : "double");	// single or double-precision data
 	if (shtns->sizeof_real_g == 4) {
@@ -421,6 +454,7 @@ int init_cuda_program(shtns_cfg shtns, const char* gpu_arch_target)
 	}
 	s += sprintf(s, "#define SHT_HI_PREC %d\n", (shtns->sizeof_real == 4) ? 1 : 0);		// improve numerical accuracy by computing the mean separately for scalar (S=0) transforms.
 	if ((shtns->kernel_flags & CUSHT_NO_ISHIOKA) == 0) 	s += sprintf(s, "#define LEG_ISHIOKA\n#define ILEG_ISHIOKA\n");		// use ishioka's recurrence in gpu kernels
+	if (shtns->fft_mode & FFT_PHI_CONTIG) s += sprintf(s, "#define LAYOUT_REAL_FFT\n");
 	#if SHT_VERBOSE > 1
 		printf("%s", src);		// displays the defines for debug purposes
 	#endif
@@ -592,7 +626,7 @@ int cushtns_init_gpu(shtns_cfg shtns)
 	#endif
 	if (prop.warpSize != WARPSZE) return -1;		// failure, warpsize must be known at compile time (does it?).
 	if (prop.major < 3) return -1;			// failure, SHTns requires compute cap. >= 3 (warp shuffle instructions)
-	if (shtns->nlat % 4) return -1;			// failure, nlat must be a multiple of 4.
+	if (shtns->nlat % 4  &&  shtns->fft_mode == FFT_THETA_CONTIG) return -1;			// failure, nlat must be a multiple of 4 if theta-contiguous layout is requested
 
 	int sizeof_real_g = (shtns->lmax > SHT_L_RESCALE_FLY_FLOAT && fast_fp64) ? sizeof(double) : sizeof_real;		// decide if recurrence happens in double precision or not.
 	if (sizeof_real==4) {
@@ -717,10 +751,7 @@ void fourier_to_spat_gpu(shtns_cfg shtns, void* q, const int mmax, const long si
 	#ifndef VKFFT_BACKEND
 		cufftResult res = CUFFT_SUCCESS;
 		void* xfft = q;
-		if (shtns->fft_mode & FFT_PHI_CONTIG_CPLX) {
-			xfft = shtns->gpu_buf_in;
-			transpose_cplx_zero(shtns->comp_stream, q, xfft, shtns->nlat_2, nphi, mmax, sizeof_real);		// zero out m>mmax during transpose
-		} else if (2*(mmax+1) <= nphi) {
+		if (2*(mmax+1) <= nphi) {
 			const long nlat = shtns->nlat_padded;
 			cudaMemsetAsync( ((char*)q) + sizeof_real*(mmax+1)*nlat, 0, sizeof_real*(nphi-2*mmax-1)*nlat, shtns->comp_stream );		// zero out m>mmax before fft
 		}
@@ -728,14 +759,23 @@ void fourier_to_spat_gpu(shtns_cfg shtns, void* q, const int mmax, const long si
 								 cufftExecC2C(shtns->cufft_plan, (cufftComplex*)       xfft, (cufftComplex*)       q, CUFFT_INVERSE);
 		if (res != CUFFT_SUCCESS) printf("[fourier_to_spat_gpu] cufft error %d\n", res);
 	#else
-		// VkFFT: always THETA_CONTIGUOUS
-		// rely on vkfft to avoid reading the unused Fourier modes above shtns->mmax
-		if (mmax < shtns->mmax) {	// some zero must be added, only if more than nominal
-			const long nlat = shtns->nlat_padded;
-			cudaMemsetAsync( ((char*)q) + sizeof_real*(mmax+1)*nlat, 0, sizeof_real*(nphi-2*mmax-1)*nlat, shtns->comp_stream );		// zero out m>mmax before fft
-		}
+		char* xfft;
 		VkFFTLaunchParams launchParams = {};
-		launchParams.buffer = (void**) &q;
+		if (shtns->fft_mode & FFT_PHI_CONTIG) {
+			xfft = (char*) shtns->gpu_buf_in;
+			if (shtns->mx_stdt) xfft += shtns->nlm_stride * 2*sizeof_real;	// vector transforms: do not overwrite temporary spectral data stored in gpu_buf_in
+			transpose_cplx_zero_C2R(shtns->comp_stream, q, xfft, shtns->nlat, nphi/2+1, nphi/2, mmax, sizeof_real);		// zero out m>mmax during transpose
+			launchParams.buffer = (void**) &xfft;
+			launchParams.inputBuffer = (void**) &q;
+		} else {
+			// THETA_CONTIGUOUS
+			// rely on vkfft to avoid reading the unused Fourier modes above shtns->mmax
+			if (mmax < shtns->mmax) {	// some zero must be added, only if more than nominal
+				const long nlat = shtns->nlat_padded;
+				cudaMemsetAsync( ((char*)q) + sizeof_real*(mmax+1)*nlat, 0, sizeof_real*(nphi-2*mmax-1)*nlat, shtns->comp_stream );		// zero out m>mmax before fft
+			}
+			launchParams.buffer = (void**) &q;
+		}
 		VkFFTAppend(&shtns->vkfft_plan, 1, &launchParams);
 	#endif
 	}
@@ -747,17 +787,28 @@ void spat_to_fourier_gpu(shtns_cfg shtns, void* q, const int mmax, const long si
 	if (nphi > 1) {
 	#ifndef VKFFT_BACKEND
 		cufftResult res = CUFFT_SUCCESS;
-		void* xfft = (shtns->fft_mode & FFT_PHI_CONTIG_CPLX) ? shtns->gpu_buf_in : q;
+		void* xfft = q;
 		res = (sizeof_real==8) ? cufftExecZ2Z(shtns->cufft_plan, (cufftDoubleComplex*) q, (cufftDoubleComplex*) xfft, CUFFT_FORWARD) :
 								 cufftExecC2C(shtns->cufft_plan, (cufftComplex*) q, (cufftComplex*) xfft, CUFFT_FORWARD);
 		if (res != CUFFT_SUCCESS) printf("[spat_to_fourier_gpu] cufft error %d\n", res);
 		if (q != xfft)
 			transpose_cplx_skip(shtns->comp_stream, xfft, q, nphi, shtns->nlat_2, mmax, sizeof_real);		// ignore m > mmax during transpose
 	#else
-		// VkFFT: always THETA_CONTIGUOUS
+		char* xfft;
 		VkFFTLaunchParams launchParams = {};
-		launchParams.buffer = (void**) &q;
+		if (shtns->fft_mode & FFT_PHI_CONTIG) {
+			xfft = (char*) shtns->gpu_buf_in;
+			if (shtns->mx_stdt) xfft += shtns->nlm_stride * 2*sizeof_real;	// vector transforms: do not overwrite temporary spectral data stored in gpu_buf_in
+			launchParams.buffer = (void**) &xfft;
+			launchParams.inputBuffer = (void**) &q;			
+		} else {
+			// THETA_CONTIGUOUS
+			launchParams.buffer = (void**) &q;
+		}
 		VkFFTAppend(&shtns->vkfft_plan, -1, &launchParams);
+		if (shtns->fft_mode & FFT_PHI_CONTIG) {
+			transpose_cplx_skip_R2C(shtns->comp_stream, xfft, q, nphi/2+1, shtns->nlat, mmax, sizeof_real);		// ignore m > mmax during transpose
+		}
 	#endif
 	}
 }

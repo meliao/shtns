@@ -131,7 +131,11 @@ void leg_m_kernel(
 	const int j = threadIdx.x;
 	const int b = blockIdx.y;		// position in batch
 	//const int m_inc = 2*nlat_2;
+  #ifndef LAYOUT_REAL_FFT
 	const int k_inc = 1;
+  #else
+	const int k_inc = 2;
+  #endif
 
 	const int LSPAN = (WARPSZE==32 && BLOCKSIZE >= 2*WARPSZE) ? BLOCKSIZE/2 : WARPSZE;		// always WARPSZE for amd
 	static_assert(LSPAN <= BLOCKSIZE, "LSPAN must not exceed BLOCKSIZE");
@@ -372,8 +376,15 @@ void leg_m_kernel(
 				  #if SHT_HI_PREC & 1
 					if (S==0)	{	north += mean[f];	south += mean[f];	}		// mean added at the very end for improved accuracy when mean >> std
 				  #endif
+				  #ifndef LAYOUT_REAL_FFT
 					q[it*k_inc              + (b*NFIELDS+f)*q_dist] = north;
 					q[(nlat_2*2-1-it)*k_inc + (b*NFIELDS+f)*q_dist] = south;
+				  #else
+					q[it*k_inc              + (b*NFIELDS+f)*q_dist] = north;
+					q[it*k_inc +1           + (b*NFIELDS+f)*q_dist] = 0;
+					q[(m_inc-1-it)*k_inc    + (b*NFIELDS+f)*q_dist] = south;
+					q[(m_inc-1-it)*k_inc +1 + (b*NFIELDS+f)*q_dist] = 0;
+				  #endif
 				}
 			}
 		}
@@ -784,14 +795,15 @@ void leg_m_kernel(
 				rei[f][i] = rei[f][i]+roi[f][i]*COST(i,j);
 			  #else
 				real t    = rer[f][i]+ror[f][i];
-				rer[f][i] = rer[f][i]-ror[f][i];
-				ror[f][i] = rei[f][i]-roi[f][i];
-				rei[f][i] = rei[f][i]+roi[f][i];
+				rer[f][i] = rer[f][i]-ror[f][i];	// south, real
+				ror[f][i] = rei[f][i]-roi[f][i];	// south, imag
+				rei[f][i] = rei[f][i]+roi[f][i];	// north, imag
 			  #endif
-				roi[f][i] = t;
+				roi[f][i] = t;			// north, real
 			}
 		}
 
+	  #ifndef LAYOUT_REAL_FFT
 		/// store mangled for complex fft
 		if ((!HI_LLIM) || (NW==1)) {
 			#pragma unroll
@@ -803,8 +815,10 @@ void leg_m_kernel(
 				}
 			}
 		}
+	  #endif
 	}
 
+	#ifndef LAYOUT_REAL_FFT
 		#pragma unroll
 		for (int i=0; i<NW; i++) {
 			const real sgn = (HI_LLIM && NW>1) ? (i^1)-i : (j^1)-j; 	//(it^1) - it;	// 1 - 2*(j&1);		// 1 for even j, -1 for odd j.
@@ -820,6 +834,22 @@ void leg_m_kernel(
 				}
 			}
 		}
+	#else
+		#pragma unroll
+		for (int f=0; f<NFIELDS; f++) {
+			long ofs = (b*NFIELDS+f)*q_dist + im*2*m_inc;
+			#pragma unroll
+			for (int i=0; i<NW; i++) {
+				const int it = BLOCKSIZE*NW * blockIdx.x + ((HI_LLIM) ? NW*j+i : j+i*BLOCKSIZE);
+				if (it < nlat_2) {
+					q[ofs + it*k_inc] 			  = roi[f][i];	// north, real
+					q[ofs + it*k_inc+1]			  = rei[f][i];	// north, imag
+					q[ofs + (m_inc-it-1)*k_inc]	  = rer[f][i];	// south, real
+					q[ofs + (m_inc-it-1)*k_inc+1] = ror[f][i];	// south, imag
+				}
+			}
+		}
+	#endif
 	}
 #endif
 }
@@ -883,8 +913,13 @@ void ileg_m_kernel(const real_g* __restrict__ al, const real_g* __restrict__ ct,
 			for (int f=0; f<NFIELDS; f++) my_reo[f] = 0;	// first, we use my_reo to store the mean of each field, as NW >= NFIELDS
 			for (int k=j; k<nlat_2; k+=BLOCKSIZE) {
 				real w = ct[nlat_2 +k];
+			  #ifndef LAYOUT_REAL_FFT
 				#pragma unroll
 				for (int f=0; f<NFIELDS; f++)	my_reo[f] += w * (q[k + f*q_dist]  +  q[nlat_2*2-1 - k + f*q_dist]);
+			  #else
+				#pragma unroll
+				for (int f=0; f<NFIELDS; f++)	my_reo[f] += w * (q[k*2 + f*q_dist]  +  q[(m_inc-1-k)*2 + f*q_dist]);
+			  #endif
 			}
 				// reduction of my_reo[f] : sum accross all threads
 				#pragma unroll
@@ -909,8 +944,13 @@ void ileg_m_kernel(const real_g* __restrict__ al, const real_g* __restrict__ ct,
 
 		#pragma unroll
 		for (int f=0; f<NFIELDS; f++) {
+		  #ifndef LAYOUT_REAL_FFT
 			real x0 = (it < nlat_2) ? q[it              + f*q_dist] : 0;	// north
 			real x1 = (it < nlat_2) ? q[nlat_2*2-1 - it + f*q_dist] : 0;	// south
+		  #else
+			real x0 = (it < nlat_2) ? q[it*2             + f*q_dist] : 0;	// north
+			real x1 = (it < nlat_2) ? q[(m_inc-1 - it)*2 + f*q_dist] : 0;	// south
+		  #endif
 		  #if SHT_HI_PREC & 1
 			yl[f*2*l_inc +j]     = (x0+x1) - ((S==0) ? my_reo[f] : 0);	// even, subtract mean
 		  #else
@@ -1071,6 +1111,7 @@ void ileg_m_kernel(const real_g* __restrict__ al, const real_g* __restrict__ ct,
 	  #endif
 		#pragma unroll
 		for (int f=0; f<NFIELDS; f++) {
+		  #ifndef LAYOUT_REAL_FFT
 			real qer = (it < nlat_2) ? q[im*m_inc        + it            + f*q_dist] : 0;	// north imag (ani)
 			real t0  = (it < nlat_2) ? q[(nphi-im)*m_inc + it            + f*q_dist] : 0;	// north real (an)
 			real qor = (it < nlat_2) ? q[im*m_inc        + nlat_2*2-1-it + f*q_dist] : 0;	// south imag (asi)
@@ -1082,6 +1123,18 @@ void ileg_m_kernel(const real_g* __restrict__ al, const real_g* __restrict__ ct,
 			yl[(f*4+2)*l_inc + j]    = (qer - qor)*cost_;	// ror
 			yl[(f*4+1)*l_inc +(j^1)] = (qei - qoi)*sgn;		// rei, exchange even and odd lanes
 			yl[f*4*l_inc     + j]    =  qer + qor;			// rer
+		  #else
+			long ofs = f*q_dist + im*2*m_inc;
+			real qer = (it < nlat_2) ? q[ofs + it*2] : 0;	// north, real
+			real qei  = (it < nlat_2) ? q[ofs + it*2+1] : 0;	// north, imag
+			real qor = (it < nlat_2) ? q[ofs + 2*(m_inc - it-1)] : 0;	// south, real
+			real qoi  = (it < nlat_2) ? q[ofs + 2*(m_inc - it-1)+1] : 0;	// south, imag
+
+			yl[(f*4+3)*l_inc + j] = (qei - qoi)*cost_;	// roi
+			yl[(f*4+2)*l_inc + j] = (qer - qor)*cost_;	// ror
+			yl[(f*4+1)*l_inc + j] =  qei + qoi;			// rei
+			yl[f*4*l_inc     + j] =  qer + qor;			// rer
+		  #endif
 		}
 
 		const int ofs = (4*f0+(ll&3))*l_inc + j % (BLOCKSIZE/NW);
