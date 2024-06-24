@@ -542,21 +542,19 @@ static void planFFT(shtns_cfg shtns, int layout)
 /// \internal Sets the value tm[im] used for polar optimiation on-the-fly.
 static void PolarOptimize(shtns_cfg shtns, double eps)
 {
-	int im, m, l, it;
-	double v;
-	double y[LMAX+1];
-
-	for (im=0;im<=MMAX;im++)	shtns->tm[im] = 0;
+	for (int im=0;im<=MMAX;im++)	shtns->tm[im] = 0;
 
 	if (eps > 0.0) {
-		for (im=1;im<=MMAX;im++) {
-			m = im*MRES;
-			it = shtns->tm[im-1] -1;	// tm[im] is monotonic.
+		double y[LMAX+1];
+		for (int im=1;im<=MMAX;im++) {
+			int m = im*MRES;
+			int it = shtns->tm[im-1] -1;	// tm[im] is monotonic.
+			double v;
 			do {
 				it++;
 				legendre_sphPlm_array(shtns, LMAX, im, shtns->ct[it], y+m);
 				v = 0.0;
-				for (l=m; l<=LMAX; l++) {
+				for (int l=m; l<=LMAX; l++) {
 					double ya = fabs(y[l]);
 					if ( v < ya )	v = ya;
 				}
@@ -566,8 +564,13 @@ static void PolarOptimize(shtns_cfg shtns, double eps)
 		if (verbose) printf("        + polar optimization threshold = %.1e\n",eps);
 		if (verbose>1) {
 			printf("          tm[im]=");
-			for (im=0;im<=MMAX;im++)
-				printf(" %d",shtns->tm[im]);
+			int im=0;
+			if (verbose <= 2  &&  MMAX >= 256) {	// don't print everything
+				for (im=0;im<=50;im++)	printf(" %d",shtns->tm[im]);
+				printf(" ...");
+				im = MMAX-15;
+			}
+			for (;im<=MMAX;im++)	printf(" %d",shtns->tm[im]);
 			printf("\n");
 		}
 	}
