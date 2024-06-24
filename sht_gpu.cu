@@ -111,6 +111,7 @@ double cushtns_profiling_read_time(shtns_cfg shtns, double* time_1, double* time
 		cudaEventSynchronize(shtns->gpu_timer[2]);		// wait for the events to happen
 		cudaEventElapsedTime(&t1_ms, shtns->gpu_timer[0], shtns->gpu_timer[1]);
 		cudaEventElapsedTime(&t2_ms, shtns->gpu_timer[1], shtns->gpu_timer[2]);
+		cudaGetLastError();		// clears error which may arise if the event has not been recorded first.
 	}
 	*time_1 = t1_ms*1e-3;	*time_2 = t2_ms*1e-3;
 	return (t1_ms+t2_ms)*1e-3;
