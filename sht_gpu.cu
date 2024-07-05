@@ -144,20 +144,37 @@ static int init_cuda_buffer_fft(shtns_cfg shtns, int cuda_gpu_id, int sizeof_rea
 	int nfft = shtns->nphi;
 	//int nreal = 2*(nfft/2+1);
 	if (nfft > 1) {
-		// cufftPlanMany(cufftHandle *plan, int rank, int *n,   int *inembed, int istride, int idist,   int *onembed, int ostride, int odist,   cufftType type, int batch);
 		#if defined(HAVE_LIBCUFFT) || defined(HAVE_LIBROCFFT)
 			cufftResult res = CUFFT_SUCCESS;
-		#endif
-		if (shtns->fft_mode & FFT_THETA_CONTIG) {
-			printf("!!! Use theta-contiguous FFT on GPU !!!\n");
-			long howmany = shtns->nlat_2 * shtns->howmany;		// support batched transforms
-			long dist = shtns->nlat_padded / 2;
-			#if defined(HAVE_LIBCUFFT) || defined(HAVE_LIBROCFFT)
+			if (shtns->fft_mode & FFT_THETA_CONTIG) {
+				printf("!!! Use theta-contiguous FFT on GPU !!!\n");
+				long howmany = shtns->nlat_2 * shtns->howmany;		// support batched transforms
+				long dist = shtns->nlat_padded / 2;
 				res = cufftPlanMany(&shtns->cufft_plan, 1, &nfft, &nfft, dist, 1, &nfft, dist, 1, (sizeof_real==4) ? CUFFT_C2C : CUFFT_Z2Z, howmany);
+			} else {
+				printf("WARNING: layout not available on GPU with cuFFT/rocFFT. Try to compile with VkFFT instead.\n");
+				err_count ++;
+				return 1;
+			}
+			if (res != CUFFT_SUCCESS) {
+				printf("cufft init FAILED with error code %d\n", res);
+				err_count ++;
+			}
+			res = cufftSetStream(shtns->cufft_plan, shtns->comp_stream);	// select stream for cufft
+			size_t worksize = 0;
+			cufftGetSize(shtns->cufft_plan, &worksize);
+			#if SHT_VERBOSE > 1
+				printf("cufft work-area size: %ld \t nlat*nphi = %d\n", worksize/sizeof_real, shtns->nlat * shtns->nphi);
 			#endif
-			#ifdef VKFFT_BACKEND
-				CUdevice vkfft_device_struct;
-				VkFFTConfiguration config = {};		//zero-initialize configuration
+		#endif
+
+		#ifdef VKFFT_BACKEND
+			CUdevice vkfft_device_struct;
+			VkFFTConfiguration config = {};		//zero-initialize configuration
+			if (shtns->fft_mode & FFT_THETA_CONTIG) {
+				printf("!!! Use theta-contiguous FFT on GPU !!!\n");
+				long howmany = shtns->nlat_2 * shtns->howmany;		// support batched transforms
+				long dist = shtns->nlat_padded / 2;
 				config.FFTdim = 2; //FFT dimension: 1D, but we use a second dimension to get non-unit strides.
 				config.size[0] = howmany;
 				config.size[1] = nfft;
@@ -171,34 +188,15 @@ static int init_cuda_buffer_fft(shtns_cfg shtns, int cuda_gpu_id, int sizeof_rea
 					config.fft_zeropad_left[1] = shtns->mmax + 1;			// first zero element
 					config.fft_zeropad_right[1] = nfft - shtns->mmax;		// first non-zero element
 				}
-				//config.disableReorderFourStep = 1;		// avoids the use of temp buffer for large transforms at the cost of a mangled output.
-				cuDeviceGet(&vkfft_device_struct, cuda_gpu_id);
-				config.device = &vkfft_device_struct;
-				config.stream = &shtns->comp_stream;
-				config.num_streams = 1;
-				VkFFTResult vk_res = initializeVkFFT(&shtns->vkfft_plan, config);
-
-				const int ver = VkFFTGetVersion();
-				printf("=> Using VkFFT v%d.%d.%d\n",ver/10000,(ver%10000)/100,ver%100);
-				if (vk_res != VKFFT_SUCCESS) {
-					printf("vkfft init FAILED with error code %d\n", vk_res);
-					err_count ++;
-				}
-			#endif
-		} else if (shtns->fft_mode & FFT_PHI_CONTIG) {
-			printf("!!! Use phi-contiguous FFT on GPU (with transpose step) !!!\n");
-			long howmany = shtns->nlat * shtns->howmany;		// support batched transforms
-			long dist = shtns->nlat_padded / 2;
-			#ifdef VKFFT_BACKEND
-				CUdevice vkfft_device_struct;
-				VkFFTConfiguration config = {};		//zero-initialize configuration
-				config.FFTdim = 1; //FFT dimension: 1D, but we use a second dimension to get non-unit strides.
+			} else if (shtns->fft_mode & FFT_PHI_CONTIG) {
+				printf("!!! Use phi-contiguous FFT on GPU (with transpose step) !!!\n");
+				long howmany = shtns->nlat * shtns->howmany;		// support batched transforms
+				config.FFTdim = 1; // 1D FFT
 				config.size[0] = nfft;
 				config.isInputFormatted = 1;		// out-of-place: separate buffer for input and output
 				config.inverseReturnToInputBuffer = 1;
 				config.inputBufferStride[0] = nfft;		// spatial data
 				config.bufferStride[0] = nfft/2 + 1;	// spectral data
-				config.doublePrecision = sizeof_real / 8;
 				if (0) {	// disable zero-padding for now, as it is broken for large nfft
 					config.performZeropadding[0] = 1;
 					config.frequencyZeroPadding = 1;
@@ -209,35 +207,24 @@ static int init_cuda_buffer_fft(shtns_cfg shtns, int cuda_gpu_id, int sizeof_rea
 				config.performR2C = 1;
 				//config.disableMergeSequencesR2C = 1;		// reduces performance (don't use)
 				//config.disableReorderFourStep = 1;		// avoids the use of temp buffer for large transforms at the cost of a mangled output.
-				cuDeviceGet(&vkfft_device_struct, cuda_gpu_id);
-				config.device = &vkfft_device_struct;
-				config.stream = &shtns->comp_stream;
-				config.num_streams = 1;
-				VkFFTResult vk_res = initializeVkFFT(&shtns->vkfft_plan, config);
+			} else {
+				printf("WARNING: layout not available on GPU.\n");
+				err_count ++;
+				return 1;
+			}
+			config.doublePrecision = sizeof_real / 8;
+			cuDeviceGet(&vkfft_device_struct, cuda_gpu_id);
+			config.device = &vkfft_device_struct;
+			config.stream = &shtns->comp_stream;
+			config.num_streams = 1;
+			VkFFTResult vk_res = initializeVkFFT(&shtns->vkfft_plan, config);
 
-				const int ver = VkFFTGetVersion();
-				printf("=> Using VkFFT v%d.%d.%d\n",ver/10000,(ver%10000)/100,ver%100);
-				if (vk_res != VKFFT_SUCCESS) {
-					printf("vkfft init FAILED with error code %d\n", vk_res);
-					err_count ++;
-				}
-			#endif			
-		} else {
-			printf("WARNING: layout not available on GPU.\n");
-			err_count ++;
-			return 1;
-		}		
-		#if defined(HAVE_LIBCUFFT) || defined(HAVE_LIBROCFFT)
-			if (res != CUFFT_SUCCESS) {
-				printf("cufft init FAILED with error code %d\n", res);
+			const int ver = VkFFTGetVersion();
+			printf("=> Using VkFFT v%d.%d.%d\n",ver/10000,(ver%10000)/100,ver%100);
+			if (vk_res != VKFFT_SUCCESS) {
+				printf("vkfft init FAILED with error code %d\n", vk_res);
 				err_count ++;
 			}
-			res = cufftSetStream(shtns->cufft_plan, shtns->comp_stream);	// select stream for cufft
-			size_t worksize = 0;
-			cufftGetSize(shtns->cufft_plan, &worksize);
-			#if SHT_VERBOSE > 1
-				printf("cufft work-area size: %ld \t nlat*nphi = %d\n", worksize/sizeof_real, shtns->nlat * shtns->nphi);
-			#endif
 		#endif
 	}
 
