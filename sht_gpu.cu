@@ -791,8 +791,6 @@ void spat_to_fourier_gpu(shtns_cfg shtns, void* q, const int mmax, const long si
 		res = (sizeof_real==8) ? cufftExecZ2Z(shtns->cufft_plan, (cufftDoubleComplex*) q, (cufftDoubleComplex*) xfft, CUFFT_FORWARD) :
 								 cufftExecC2C(shtns->cufft_plan, (cufftComplex*) q, (cufftComplex*) xfft, CUFFT_FORWARD);
 		if (res != CUFFT_SUCCESS) printf("[spat_to_fourier_gpu] cufft error %d\n", res);
-		if (q != xfft)
-			transpose_cplx_skip(shtns->comp_stream, xfft, q, nphi, shtns->nlat_2, mmax, sizeof_real);		// ignore m > mmax during transpose
 	#else
 		char* xfft;
 		VkFFTLaunchParams launchParams = {};
