@@ -38,10 +38,6 @@
 #define SHTNS_PRIVATE
 #include "shtns.h"
 
-#ifdef _OPENMP
-  #include <omp.h>
-#endif
-
 #ifdef SHTNS_GPU
 #if SHTNS_GPU == 1
 	#ifdef HAVE_LIBCUFFT

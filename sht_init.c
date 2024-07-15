@@ -38,6 +38,7 @@
 shtns_cfg sht_data = NULL;
 
 #ifdef _OPENMP
+  #include <omp.h>
   int omp_threads = 1;	// multi-thread disabled by default.
   #if HAVE_LIBFFTW3_OMP
 	#define OMP_FFTW
