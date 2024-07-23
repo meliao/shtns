@@ -89,7 +89,7 @@ shtns_o = shtns_o_com + shtns_o_cpu
 cuda_path = os.environ.get('CUDA_PATH','')
 if cuda_path != '':
     config_cmd.append('--enable-cuda')
-    cargs_gpu = ['-I' + cuda_path + '/include']
+    cargs_gpu = ['-I' + cuda_path + '/include', '-DSHTNS_GPU']
     libdir_gpu = [cuda_path + '/lib64', cuda_path + '/lib64/stubs']
     libs_gpu = ['cudart','nvrtc','cuda','stdc++']
     shtns_cuda_module = Extension('_shtns_cuda', sources=['shtns_cuda_wrap.c'],

@@ -111,7 +111,7 @@ clean :
 
 # generate python and c glue code with SWIG.
 shtns_numpy_wrap.c : shtns_numpy.i sht_private.h shtns.h
-	-swig -python -module shtns_cuda -o shtns_cuda_wrap.c shtns_numpy.i
+	-swig -python -module shtns_cuda -o shtns_cuda_wrap.c -DSHTNS_GPU shtns_numpy.i
 	-swig -python shtns_numpy.i
 	-rm -f shtns_cuda.py
 

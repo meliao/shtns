@@ -3021,6 +3021,17 @@ static swig_module_info swig_module = {swig_types, 7, 0, 0, 0, 0};
 #include <numpy/arrayobject.h>
 #include "sht_private.h"
 
+#ifdef SHTNS_GPU
+void cu_spat_to_SH(shtns_cfg shtns, double *Vr, cplx *Qlm, int ltr);
+void cu_SH_to_spat(shtns_cfg shtns, cplx *Qlm, double *Vr, int ltr);
+void cu_SHsph_to_spat(shtns_cfg, cplx *Slm, double *Vt, double *Vp, int ltr);
+void cu_SHtor_to_spat(shtns_cfg, cplx *Tlm, double *Vt, double *Vp, int ltr);
+void cu_SHsphtor_to_spat(shtns_cfg, cplx *Slm, cplx *Tlm, double *Vt, double *Vp, int ltr);
+void cu_spat_to_SHsphtor(shtns_cfg, double *Vt, double *Vp, cplx *Slm, cplx *Tlm, int ltr);
+void cu_SHqst_to_spat(shtns_cfg, cplx *Qlm, cplx *Slm, cplx *Tlm, double* Vr, double *Vt, double *Vp, int ltr);
+void cu_spat_to_SHqst(shtns_cfg, double *Vr, double *Vt, double *Vp, cplx *Qlm, cplx *Slm, cplx *Tlm, int ltr);
+#endif
+
 
 // variables used for exception handling.
 static int shtns_error = 0;
@@ -3496,6 +3507,97 @@ SWIGINTERN int shtns_info_idx(struct shtns_info *self,unsigned int l,unsigned in
 	}
 SWIGINTERN int shtns_info_im_from_idx(struct shtns_info *self,long lm){
 		return im_from_lm(lm, self->lmax, self->mmax);
+	}
+
+#if defined(LLONG_MAX) && !defined(SWIG_LONG_LONG_AVAILABLE)
+#  define SWIG_LONG_LONG_AVAILABLE
+#endif
+
+
+#ifdef SWIG_LONG_LONG_AVAILABLE
+SWIGINTERN int
+SWIG_AsVal_unsigned_SS_long_SS_long (PyObject *obj, unsigned long long *val)
+{
+  int res = SWIG_TypeError;
+  if (PyLong_Check(obj)) {
+    unsigned long long v = PyLong_AsUnsignedLongLong(obj);
+    if (!PyErr_Occurred()) {
+      if (val) *val = v;
+      return SWIG_OK;
+    } else {
+      PyErr_Clear();
+      res = SWIG_OverflowError;
+    }
+  } else {
+    unsigned long v;
+    res = SWIG_AsVal_unsigned_SS_long (obj,&v);
+    if (SWIG_IsOK(res)) {
+      if (val) *val = v;
+      return res;
+    }
+  }
+#ifdef SWIG_PYTHON_CAST_MODE
+  {
+    const double mant_max = 1LL << DBL_MANT_DIG;
+    double d;
+    res = SWIG_AsVal_double (obj,&d);
+    if (SWIG_IsOK(res) && !SWIG_CanCastAsInteger(&d, 0, mant_max))
+      return SWIG_OverflowError;
+    if (SWIG_IsOK(res) && SWIG_CanCastAsInteger(&d, 0, mant_max)) {
+      if (val) *val = (unsigned long long)(d);
+      return SWIG_AddCast(res);
+    }
+    res = SWIG_TypeError;
+  }
+#endif
+  return res;
+}
+#endif
+
+
+SWIGINTERNINLINE int
+SWIG_AsVal_size_t (PyObject * obj, size_t *val)
+{
+  int res = SWIG_TypeError;
+#ifdef SWIG_LONG_LONG_AVAILABLE
+  if (sizeof(size_t) <= sizeof(unsigned long)) {
+#endif
+    unsigned long v;
+    res = SWIG_AsVal_unsigned_SS_long (obj, val ? &v : 0);
+    if (SWIG_IsOK(res) && val) *val = (size_t)(v);
+#ifdef SWIG_LONG_LONG_AVAILABLE
+  } else if (sizeof(size_t) <= sizeof(unsigned long long)) {
+    unsigned long long v;
+    res = SWIG_AsVal_unsigned_SS_long_SS_long (obj, val ? &v : 0);
+    if (SWIG_IsOK(res) && val) *val = (size_t)(v);
+  }
+#endif
+  return res;
+}
+
+SWIGINTERN void shtns_info_cu_spat_to_SH(struct shtns_info *self,size_t Vr,size_t Qlm){
+		cu_spat_to_SH(self, (void*)Vr, (void*)Qlm, self->lmax);
+	}
+SWIGINTERN void shtns_info_cu_SH_to_spat(struct shtns_info *self,size_t Qlm,size_t Vr){
+		cu_SH_to_spat(self, (void*)Qlm, (void*)Vr, self->lmax);
+	}
+SWIGINTERN void shtns_info_cu_SHsph_to_spat(struct shtns_info *self,size_t Slm,size_t Vt,size_t Vp){
+		cu_SHsph_to_spat(self, (void*)Slm, (void*)Vt, (void*)Vp, self->lmax);
+	}
+SWIGINTERN void shtns_info_cu_SHtor_to_spat(struct shtns_info *self,size_t Tlm,size_t Vt,size_t Vp){
+		cu_SHtor_to_spat(self, (void*)Tlm, (void*)Vt, (void*)Vp, self->lmax);
+	}
+SWIGINTERN void shtns_info_cu_SHsphtor_to_spat(struct shtns_info *self,size_t Slm,size_t Tlm,size_t Vt,size_t Vp){
+		cu_SHsphtor_to_spat(self, (void*)Slm, (void*)Tlm, (void*)Vt, (void*)Vp, self->lmax);
+	}
+SWIGINTERN void shtns_info_cu_spat_to_SHsphtor(struct shtns_info *self,size_t Vt,size_t Vp,size_t Slm,size_t Tlm){
+		cu_spat_to_SHsphtor(self, (void*)Vt, (void*)Vp, (void*)Slm, (void*)Tlm, self->lmax);
+	}
+SWIGINTERN void shtns_info_cu_spat_to_SHqst(struct shtns_info *self,size_t Vr,size_t Vt,size_t Vp,size_t Qlm,size_t Slm,size_t Tlm){
+		cu_spat_to_SHqst(self, (void*)Vr, (void*)Vt, (void*)Vp, (void*)Qlm, (void*)Slm, (void*)Tlm, self->lmax);
+	}
+SWIGINTERN void shtns_info_cu_SHqst_to_spat(struct shtns_info *self,size_t Qlm,size_t Slm,size_t Tlm,size_t Vr,size_t Vt,size_t Vp){
+		cu_SHqst_to_spat(self, (void*)Qlm, (void*)Slm, (void*)Tlm, (void*)Vr, (void*)Vt, (void*)Vp, self->lmax);
 	}
 SWIGINTERN void shtns_info_spat_to_SH(struct shtns_info *self,PyObject *Vr,PyObject *Qlm){
 		if (check_spatial(1,Vr, self->nspat) && check_spectral(2,Qlm, self->nlm))
@@ -4613,6 +4715,470 @@ SWIGINTERN PyObject *_wrap_sht_im_from_idx(PyObject *self, PyObject *args) {
     }
   }
   resultobj = SWIG_From_int((int)(result));
+  return resultobj;
+fail:
+  return NULL;
+}
+
+
+SWIGINTERN PyObject *_wrap_sht_cu_spat_to_SH(PyObject *self, PyObject *args) {
+  PyObject *resultobj = 0;
+  struct shtns_info *arg1 = (struct shtns_info *) 0 ;
+  size_t arg2 ;
+  size_t arg3 ;
+  void *argp1 = 0 ;
+  int res1 = 0 ;
+  size_t val2 ;
+  int ecode2 = 0 ;
+  size_t val3 ;
+  int ecode3 = 0 ;
+  PyObject *swig_obj[3] ;
+  
+  if (!SWIG_Python_UnpackTuple(args, "sht_cu_spat_to_SH", 3, 3, swig_obj)) SWIG_fail;
+  res1 = SWIG_ConvertPtr(swig_obj[0], &argp1,SWIGTYPE_p_shtns_info, 0 |  0 );
+  if (!SWIG_IsOK(res1)) {
+    SWIG_exception_fail(SWIG_ArgError(res1), "in method '" "sht_cu_spat_to_SH" "', argument " "1"" of type '" "struct shtns_info *""'"); 
+  }
+  arg1 = (struct shtns_info *)(argp1);
+  ecode2 = SWIG_AsVal_size_t(swig_obj[1], &val2);
+  if (!SWIG_IsOK(ecode2)) {
+    SWIG_exception_fail(SWIG_ArgError(ecode2), "in method '" "sht_cu_spat_to_SH" "', argument " "2"" of type '" "size_t""'");
+  } 
+  arg2 = (size_t)(val2);
+  ecode3 = SWIG_AsVal_size_t(swig_obj[2], &val3);
+  if (!SWIG_IsOK(ecode3)) {
+    SWIG_exception_fail(SWIG_ArgError(ecode3), "in method '" "sht_cu_spat_to_SH" "', argument " "3"" of type '" "size_t""'");
+  } 
+  arg3 = (size_t)(val3);
+  {
+    shtns_error = 0;	// clear exception
+    shtns_info_cu_spat_to_SH(arg1,arg2,arg3);
+    if (shtns_error) {
+      // test for exception
+      SWIG_exception(shtns_error, shtns_err_msg);		return NULL;
+    }
+  }
+  resultobj = SWIG_Py_Void();
+  return resultobj;
+fail:
+  return NULL;
+}
+
+
+SWIGINTERN PyObject *_wrap_sht_cu_SH_to_spat(PyObject *self, PyObject *args) {
+  PyObject *resultobj = 0;
+  struct shtns_info *arg1 = (struct shtns_info *) 0 ;
+  size_t arg2 ;
+  size_t arg3 ;
+  void *argp1 = 0 ;
+  int res1 = 0 ;
+  size_t val2 ;
+  int ecode2 = 0 ;
+  size_t val3 ;
+  int ecode3 = 0 ;
+  PyObject *swig_obj[3] ;
+  
+  if (!SWIG_Python_UnpackTuple(args, "sht_cu_SH_to_spat", 3, 3, swig_obj)) SWIG_fail;
+  res1 = SWIG_ConvertPtr(swig_obj[0], &argp1,SWIGTYPE_p_shtns_info, 0 |  0 );
+  if (!SWIG_IsOK(res1)) {
+    SWIG_exception_fail(SWIG_ArgError(res1), "in method '" "sht_cu_SH_to_spat" "', argument " "1"" of type '" "struct shtns_info *""'"); 
+  }
+  arg1 = (struct shtns_info *)(argp1);
+  ecode2 = SWIG_AsVal_size_t(swig_obj[1], &val2);
+  if (!SWIG_IsOK(ecode2)) {
+    SWIG_exception_fail(SWIG_ArgError(ecode2), "in method '" "sht_cu_SH_to_spat" "', argument " "2"" of type '" "size_t""'");
+  } 
+  arg2 = (size_t)(val2);
+  ecode3 = SWIG_AsVal_size_t(swig_obj[2], &val3);
+  if (!SWIG_IsOK(ecode3)) {
+    SWIG_exception_fail(SWIG_ArgError(ecode3), "in method '" "sht_cu_SH_to_spat" "', argument " "3"" of type '" "size_t""'");
+  } 
+  arg3 = (size_t)(val3);
+  {
+    shtns_error = 0;	// clear exception
+    shtns_info_cu_SH_to_spat(arg1,arg2,arg3);
+    if (shtns_error) {
+      // test for exception
+      SWIG_exception(shtns_error, shtns_err_msg);		return NULL;
+    }
+  }
+  resultobj = SWIG_Py_Void();
+  return resultobj;
+fail:
+  return NULL;
+}
+
+
+SWIGINTERN PyObject *_wrap_sht_cu_SHsph_to_spat(PyObject *self, PyObject *args) {
+  PyObject *resultobj = 0;
+  struct shtns_info *arg1 = (struct shtns_info *) 0 ;
+  size_t arg2 ;
+  size_t arg3 ;
+  size_t arg4 ;
+  void *argp1 = 0 ;
+  int res1 = 0 ;
+  size_t val2 ;
+  int ecode2 = 0 ;
+  size_t val3 ;
+  int ecode3 = 0 ;
+  size_t val4 ;
+  int ecode4 = 0 ;
+  PyObject *swig_obj[4] ;
+  
+  if (!SWIG_Python_UnpackTuple(args, "sht_cu_SHsph_to_spat", 4, 4, swig_obj)) SWIG_fail;
+  res1 = SWIG_ConvertPtr(swig_obj[0], &argp1,SWIGTYPE_p_shtns_info, 0 |  0 );
+  if (!SWIG_IsOK(res1)) {
+    SWIG_exception_fail(SWIG_ArgError(res1), "in method '" "sht_cu_SHsph_to_spat" "', argument " "1"" of type '" "struct shtns_info *""'"); 
+  }
+  arg1 = (struct shtns_info *)(argp1);
+  ecode2 = SWIG_AsVal_size_t(swig_obj[1], &val2);
+  if (!SWIG_IsOK(ecode2)) {
+    SWIG_exception_fail(SWIG_ArgError(ecode2), "in method '" "sht_cu_SHsph_to_spat" "', argument " "2"" of type '" "size_t""'");
+  } 
+  arg2 = (size_t)(val2);
+  ecode3 = SWIG_AsVal_size_t(swig_obj[2], &val3);
+  if (!SWIG_IsOK(ecode3)) {
+    SWIG_exception_fail(SWIG_ArgError(ecode3), "in method '" "sht_cu_SHsph_to_spat" "', argument " "3"" of type '" "size_t""'");
+  } 
+  arg3 = (size_t)(val3);
+  ecode4 = SWIG_AsVal_size_t(swig_obj[3], &val4);
+  if (!SWIG_IsOK(ecode4)) {
+    SWIG_exception_fail(SWIG_ArgError(ecode4), "in method '" "sht_cu_SHsph_to_spat" "', argument " "4"" of type '" "size_t""'");
+  } 
+  arg4 = (size_t)(val4);
+  {
+    shtns_error = 0;	// clear exception
+    shtns_info_cu_SHsph_to_spat(arg1,arg2,arg3,arg4);
+    if (shtns_error) {
+      // test for exception
+      SWIG_exception(shtns_error, shtns_err_msg);		return NULL;
+    }
+  }
+  resultobj = SWIG_Py_Void();
+  return resultobj;
+fail:
+  return NULL;
+}
+
+
+SWIGINTERN PyObject *_wrap_sht_cu_SHtor_to_spat(PyObject *self, PyObject *args) {
+  PyObject *resultobj = 0;
+  struct shtns_info *arg1 = (struct shtns_info *) 0 ;
+  size_t arg2 ;
+  size_t arg3 ;
+  size_t arg4 ;
+  void *argp1 = 0 ;
+  int res1 = 0 ;
+  size_t val2 ;
+  int ecode2 = 0 ;
+  size_t val3 ;
+  int ecode3 = 0 ;
+  size_t val4 ;
+  int ecode4 = 0 ;
+  PyObject *swig_obj[4] ;
+  
+  if (!SWIG_Python_UnpackTuple(args, "sht_cu_SHtor_to_spat", 4, 4, swig_obj)) SWIG_fail;
+  res1 = SWIG_ConvertPtr(swig_obj[0], &argp1,SWIGTYPE_p_shtns_info, 0 |  0 );
+  if (!SWIG_IsOK(res1)) {
+    SWIG_exception_fail(SWIG_ArgError(res1), "in method '" "sht_cu_SHtor_to_spat" "', argument " "1"" of type '" "struct shtns_info *""'"); 
+  }
+  arg1 = (struct shtns_info *)(argp1);
+  ecode2 = SWIG_AsVal_size_t(swig_obj[1], &val2);
+  if (!SWIG_IsOK(ecode2)) {
+    SWIG_exception_fail(SWIG_ArgError(ecode2), "in method '" "sht_cu_SHtor_to_spat" "', argument " "2"" of type '" "size_t""'");
+  } 
+  arg2 = (size_t)(val2);
+  ecode3 = SWIG_AsVal_size_t(swig_obj[2], &val3);
+  if (!SWIG_IsOK(ecode3)) {
+    SWIG_exception_fail(SWIG_ArgError(ecode3), "in method '" "sht_cu_SHtor_to_spat" "', argument " "3"" of type '" "size_t""'");
+  } 
+  arg3 = (size_t)(val3);
+  ecode4 = SWIG_AsVal_size_t(swig_obj[3], &val4);
+  if (!SWIG_IsOK(ecode4)) {
+    SWIG_exception_fail(SWIG_ArgError(ecode4), "in method '" "sht_cu_SHtor_to_spat" "', argument " "4"" of type '" "size_t""'");
+  } 
+  arg4 = (size_t)(val4);
+  {
+    shtns_error = 0;	// clear exception
+    shtns_info_cu_SHtor_to_spat(arg1,arg2,arg3,arg4);
+    if (shtns_error) {
+      // test for exception
+      SWIG_exception(shtns_error, shtns_err_msg);		return NULL;
+    }
+  }
+  resultobj = SWIG_Py_Void();
+  return resultobj;
+fail:
+  return NULL;
+}
+
+
+SWIGINTERN PyObject *_wrap_sht_cu_SHsphtor_to_spat(PyObject *self, PyObject *args) {
+  PyObject *resultobj = 0;
+  struct shtns_info *arg1 = (struct shtns_info *) 0 ;
+  size_t arg2 ;
+  size_t arg3 ;
+  size_t arg4 ;
+  size_t arg5 ;
+  void *argp1 = 0 ;
+  int res1 = 0 ;
+  size_t val2 ;
+  int ecode2 = 0 ;
+  size_t val3 ;
+  int ecode3 = 0 ;
+  size_t val4 ;
+  int ecode4 = 0 ;
+  size_t val5 ;
+  int ecode5 = 0 ;
+  PyObject *swig_obj[5] ;
+  
+  if (!SWIG_Python_UnpackTuple(args, "sht_cu_SHsphtor_to_spat", 5, 5, swig_obj)) SWIG_fail;
+  res1 = SWIG_ConvertPtr(swig_obj[0], &argp1,SWIGTYPE_p_shtns_info, 0 |  0 );
+  if (!SWIG_IsOK(res1)) {
+    SWIG_exception_fail(SWIG_ArgError(res1), "in method '" "sht_cu_SHsphtor_to_spat" "', argument " "1"" of type '" "struct shtns_info *""'"); 
+  }
+  arg1 = (struct shtns_info *)(argp1);
+  ecode2 = SWIG_AsVal_size_t(swig_obj[1], &val2);
+  if (!SWIG_IsOK(ecode2)) {
+    SWIG_exception_fail(SWIG_ArgError(ecode2), "in method '" "sht_cu_SHsphtor_to_spat" "', argument " "2"" of type '" "size_t""'");
+  } 
+  arg2 = (size_t)(val2);
+  ecode3 = SWIG_AsVal_size_t(swig_obj[2], &val3);
+  if (!SWIG_IsOK(ecode3)) {
+    SWIG_exception_fail(SWIG_ArgError(ecode3), "in method '" "sht_cu_SHsphtor_to_spat" "', argument " "3"" of type '" "size_t""'");
+  } 
+  arg3 = (size_t)(val3);
+  ecode4 = SWIG_AsVal_size_t(swig_obj[3], &val4);
+  if (!SWIG_IsOK(ecode4)) {
+    SWIG_exception_fail(SWIG_ArgError(ecode4), "in method '" "sht_cu_SHsphtor_to_spat" "', argument " "4"" of type '" "size_t""'");
+  } 
+  arg4 = (size_t)(val4);
+  ecode5 = SWIG_AsVal_size_t(swig_obj[4], &val5);
+  if (!SWIG_IsOK(ecode5)) {
+    SWIG_exception_fail(SWIG_ArgError(ecode5), "in method '" "sht_cu_SHsphtor_to_spat" "', argument " "5"" of type '" "size_t""'");
+  } 
+  arg5 = (size_t)(val5);
+  {
+    shtns_error = 0;	// clear exception
+    shtns_info_cu_SHsphtor_to_spat(arg1,arg2,arg3,arg4,arg5);
+    if (shtns_error) {
+      // test for exception
+      SWIG_exception(shtns_error, shtns_err_msg);		return NULL;
+    }
+  }
+  resultobj = SWIG_Py_Void();
+  return resultobj;
+fail:
+  return NULL;
+}
+
+
+SWIGINTERN PyObject *_wrap_sht_cu_spat_to_SHsphtor(PyObject *self, PyObject *args) {
+  PyObject *resultobj = 0;
+  struct shtns_info *arg1 = (struct shtns_info *) 0 ;
+  size_t arg2 ;
+  size_t arg3 ;
+  size_t arg4 ;
+  size_t arg5 ;
+  void *argp1 = 0 ;
+  int res1 = 0 ;
+  size_t val2 ;
+  int ecode2 = 0 ;
+  size_t val3 ;
+  int ecode3 = 0 ;
+  size_t val4 ;
+  int ecode4 = 0 ;
+  size_t val5 ;
+  int ecode5 = 0 ;
+  PyObject *swig_obj[5] ;
+  
+  if (!SWIG_Python_UnpackTuple(args, "sht_cu_spat_to_SHsphtor", 5, 5, swig_obj)) SWIG_fail;
+  res1 = SWIG_ConvertPtr(swig_obj[0], &argp1,SWIGTYPE_p_shtns_info, 0 |  0 );
+  if (!SWIG_IsOK(res1)) {
+    SWIG_exception_fail(SWIG_ArgError(res1), "in method '" "sht_cu_spat_to_SHsphtor" "', argument " "1"" of type '" "struct shtns_info *""'"); 
+  }
+  arg1 = (struct shtns_info *)(argp1);
+  ecode2 = SWIG_AsVal_size_t(swig_obj[1], &val2);
+  if (!SWIG_IsOK(ecode2)) {
+    SWIG_exception_fail(SWIG_ArgError(ecode2), "in method '" "sht_cu_spat_to_SHsphtor" "', argument " "2"" of type '" "size_t""'");
+  } 
+  arg2 = (size_t)(val2);
+  ecode3 = SWIG_AsVal_size_t(swig_obj[2], &val3);
+  if (!SWIG_IsOK(ecode3)) {
+    SWIG_exception_fail(SWIG_ArgError(ecode3), "in method '" "sht_cu_spat_to_SHsphtor" "', argument " "3"" of type '" "size_t""'");
+  } 
+  arg3 = (size_t)(val3);
+  ecode4 = SWIG_AsVal_size_t(swig_obj[3], &val4);
+  if (!SWIG_IsOK(ecode4)) {
+    SWIG_exception_fail(SWIG_ArgError(ecode4), "in method '" "sht_cu_spat_to_SHsphtor" "', argument " "4"" of type '" "size_t""'");
+  } 
+  arg4 = (size_t)(val4);
+  ecode5 = SWIG_AsVal_size_t(swig_obj[4], &val5);
+  if (!SWIG_IsOK(ecode5)) {
+    SWIG_exception_fail(SWIG_ArgError(ecode5), "in method '" "sht_cu_spat_to_SHsphtor" "', argument " "5"" of type '" "size_t""'");
+  } 
+  arg5 = (size_t)(val5);
+  {
+    shtns_error = 0;	// clear exception
+    shtns_info_cu_spat_to_SHsphtor(arg1,arg2,arg3,arg4,arg5);
+    if (shtns_error) {
+      // test for exception
+      SWIG_exception(shtns_error, shtns_err_msg);		return NULL;
+    }
+  }
+  resultobj = SWIG_Py_Void();
+  return resultobj;
+fail:
+  return NULL;
+}
+
+
+SWIGINTERN PyObject *_wrap_sht_cu_spat_to_SHqst(PyObject *self, PyObject *args) {
+  PyObject *resultobj = 0;
+  struct shtns_info *arg1 = (struct shtns_info *) 0 ;
+  size_t arg2 ;
+  size_t arg3 ;
+  size_t arg4 ;
+  size_t arg5 ;
+  size_t arg6 ;
+  size_t arg7 ;
+  void *argp1 = 0 ;
+  int res1 = 0 ;
+  size_t val2 ;
+  int ecode2 = 0 ;
+  size_t val3 ;
+  int ecode3 = 0 ;
+  size_t val4 ;
+  int ecode4 = 0 ;
+  size_t val5 ;
+  int ecode5 = 0 ;
+  size_t val6 ;
+  int ecode6 = 0 ;
+  size_t val7 ;
+  int ecode7 = 0 ;
+  PyObject *swig_obj[7] ;
+  
+  if (!SWIG_Python_UnpackTuple(args, "sht_cu_spat_to_SHqst", 7, 7, swig_obj)) SWIG_fail;
+  res1 = SWIG_ConvertPtr(swig_obj[0], &argp1,SWIGTYPE_p_shtns_info, 0 |  0 );
+  if (!SWIG_IsOK(res1)) {
+    SWIG_exception_fail(SWIG_ArgError(res1), "in method '" "sht_cu_spat_to_SHqst" "', argument " "1"" of type '" "struct shtns_info *""'"); 
+  }
+  arg1 = (struct shtns_info *)(argp1);
+  ecode2 = SWIG_AsVal_size_t(swig_obj[1], &val2);
+  if (!SWIG_IsOK(ecode2)) {
+    SWIG_exception_fail(SWIG_ArgError(ecode2), "in method '" "sht_cu_spat_to_SHqst" "', argument " "2"" of type '" "size_t""'");
+  } 
+  arg2 = (size_t)(val2);
+  ecode3 = SWIG_AsVal_size_t(swig_obj[2], &val3);
+  if (!SWIG_IsOK(ecode3)) {
+    SWIG_exception_fail(SWIG_ArgError(ecode3), "in method '" "sht_cu_spat_to_SHqst" "', argument " "3"" of type '" "size_t""'");
+  } 
+  arg3 = (size_t)(val3);
+  ecode4 = SWIG_AsVal_size_t(swig_obj[3], &val4);
+  if (!SWIG_IsOK(ecode4)) {
+    SWIG_exception_fail(SWIG_ArgError(ecode4), "in method '" "sht_cu_spat_to_SHqst" "', argument " "4"" of type '" "size_t""'");
+  } 
+  arg4 = (size_t)(val4);
+  ecode5 = SWIG_AsVal_size_t(swig_obj[4], &val5);
+  if (!SWIG_IsOK(ecode5)) {
+    SWIG_exception_fail(SWIG_ArgError(ecode5), "in method '" "sht_cu_spat_to_SHqst" "', argument " "5"" of type '" "size_t""'");
+  } 
+  arg5 = (size_t)(val5);
+  ecode6 = SWIG_AsVal_size_t(swig_obj[5], &val6);
+  if (!SWIG_IsOK(ecode6)) {
+    SWIG_exception_fail(SWIG_ArgError(ecode6), "in method '" "sht_cu_spat_to_SHqst" "', argument " "6"" of type '" "size_t""'");
+  } 
+  arg6 = (size_t)(val6);
+  ecode7 = SWIG_AsVal_size_t(swig_obj[6], &val7);
+  if (!SWIG_IsOK(ecode7)) {
+    SWIG_exception_fail(SWIG_ArgError(ecode7), "in method '" "sht_cu_spat_to_SHqst" "', argument " "7"" of type '" "size_t""'");
+  } 
+  arg7 = (size_t)(val7);
+  {
+    shtns_error = 0;	// clear exception
+    shtns_info_cu_spat_to_SHqst(arg1,arg2,arg3,arg4,arg5,arg6,arg7);
+    if (shtns_error) {
+      // test for exception
+      SWIG_exception(shtns_error, shtns_err_msg);		return NULL;
+    }
+  }
+  resultobj = SWIG_Py_Void();
+  return resultobj;
+fail:
+  return NULL;
+}
+
+
+SWIGINTERN PyObject *_wrap_sht_cu_SHqst_to_spat(PyObject *self, PyObject *args) {
+  PyObject *resultobj = 0;
+  struct shtns_info *arg1 = (struct shtns_info *) 0 ;
+  size_t arg2 ;
+  size_t arg3 ;
+  size_t arg4 ;
+  size_t arg5 ;
+  size_t arg6 ;
+  size_t arg7 ;
+  void *argp1 = 0 ;
+  int res1 = 0 ;
+  size_t val2 ;
+  int ecode2 = 0 ;
+  size_t val3 ;
+  int ecode3 = 0 ;
+  size_t val4 ;
+  int ecode4 = 0 ;
+  size_t val5 ;
+  int ecode5 = 0 ;
+  size_t val6 ;
+  int ecode6 = 0 ;
+  size_t val7 ;
+  int ecode7 = 0 ;
+  PyObject *swig_obj[7] ;
+  
+  if (!SWIG_Python_UnpackTuple(args, "sht_cu_SHqst_to_spat", 7, 7, swig_obj)) SWIG_fail;
+  res1 = SWIG_ConvertPtr(swig_obj[0], &argp1,SWIGTYPE_p_shtns_info, 0 |  0 );
+  if (!SWIG_IsOK(res1)) {
+    SWIG_exception_fail(SWIG_ArgError(res1), "in method '" "sht_cu_SHqst_to_spat" "', argument " "1"" of type '" "struct shtns_info *""'"); 
+  }
+  arg1 = (struct shtns_info *)(argp1);
+  ecode2 = SWIG_AsVal_size_t(swig_obj[1], &val2);
+  if (!SWIG_IsOK(ecode2)) {
+    SWIG_exception_fail(SWIG_ArgError(ecode2), "in method '" "sht_cu_SHqst_to_spat" "', argument " "2"" of type '" "size_t""'");
+  } 
+  arg2 = (size_t)(val2);
+  ecode3 = SWIG_AsVal_size_t(swig_obj[2], &val3);
+  if (!SWIG_IsOK(ecode3)) {
+    SWIG_exception_fail(SWIG_ArgError(ecode3), "in method '" "sht_cu_SHqst_to_spat" "', argument " "3"" of type '" "size_t""'");
+  } 
+  arg3 = (size_t)(val3);
+  ecode4 = SWIG_AsVal_size_t(swig_obj[3], &val4);
+  if (!SWIG_IsOK(ecode4)) {
+    SWIG_exception_fail(SWIG_ArgError(ecode4), "in method '" "sht_cu_SHqst_to_spat" "', argument " "4"" of type '" "size_t""'");
+  } 
+  arg4 = (size_t)(val4);
+  ecode5 = SWIG_AsVal_size_t(swig_obj[4], &val5);
+  if (!SWIG_IsOK(ecode5)) {
+    SWIG_exception_fail(SWIG_ArgError(ecode5), "in method '" "sht_cu_SHqst_to_spat" "', argument " "5"" of type '" "size_t""'");
+  } 
+  arg5 = (size_t)(val5);
+  ecode6 = SWIG_AsVal_size_t(swig_obj[5], &val6);
+  if (!SWIG_IsOK(ecode6)) {
+    SWIG_exception_fail(SWIG_ArgError(ecode6), "in method '" "sht_cu_SHqst_to_spat" "', argument " "6"" of type '" "size_t""'");
+  } 
+  arg6 = (size_t)(val6);
+  ecode7 = SWIG_AsVal_size_t(swig_obj[6], &val7);
+  if (!SWIG_IsOK(ecode7)) {
+    SWIG_exception_fail(SWIG_ArgError(ecode7), "in method '" "sht_cu_SHqst_to_spat" "', argument " "7"" of type '" "size_t""'");
+  } 
+  arg7 = (size_t)(val7);
+  {
+    shtns_error = 0;	// clear exception
+    shtns_info_cu_SHqst_to_spat(arg1,arg2,arg3,arg4,arg5,arg6,arg7);
+    if (shtns_error) {
+      // test for exception
+      SWIG_exception(shtns_error, shtns_err_msg);		return NULL;
+    }
+  }
+  resultobj = SWIG_Py_Void();
   return resultobj;
 fail:
   return NULL;
@@ -6564,6 +7130,14 @@ static PyMethodDef SwigMethods[] = {
 	 { "sht___spat_shape", _wrap_sht___spat_shape, METH_O, "sht___spat_shape(sht self)"},
 	 { "sht_idx", _wrap_sht_idx, METH_VARARGS, "sht_idx(sht self, unsigned int l, unsigned int m) -> int"},
 	 { "sht_im_from_idx", _wrap_sht_im_from_idx, METH_VARARGS, "sht_im_from_idx(sht self, long lm) -> int"},
+	 { "sht_cu_spat_to_SH", _wrap_sht_cu_spat_to_SH, METH_VARARGS, "EXPERIMENTAL: parameters are raw pointers to GPU memory, for instance a.data.ptr if a is a cupy array."},
+	 { "sht_cu_SH_to_spat", _wrap_sht_cu_SH_to_spat, METH_VARARGS, "EXPERIMENTAL: parameters are raw pointers to GPU memory, for instance a.data.ptr if a is a cupy array."},
+	 { "sht_cu_SHsph_to_spat", _wrap_sht_cu_SHsph_to_spat, METH_VARARGS, "EXPERIMENTAL: parameters are raw pointers to GPU memory, for instance a.data.ptr if a is a cupy array."},
+	 { "sht_cu_SHtor_to_spat", _wrap_sht_cu_SHtor_to_spat, METH_VARARGS, "EXPERIMENTAL: parameters are raw pointers to GPU memory, for instance a.data.ptr if a is a cupy array."},
+	 { "sht_cu_SHsphtor_to_spat", _wrap_sht_cu_SHsphtor_to_spat, METH_VARARGS, "EXPERIMENTAL: parameters are raw pointers to GPU memory, for instance a.data.ptr if a is a cupy array."},
+	 { "sht_cu_spat_to_SHsphtor", _wrap_sht_cu_spat_to_SHsphtor, METH_VARARGS, "EXPERIMENTAL: parameters are raw pointers to GPU memory, for instance a.data.ptr if a is a cupy array."},
+	 { "sht_cu_spat_to_SHqst", _wrap_sht_cu_spat_to_SHqst, METH_VARARGS, "EXPERIMENTAL: parameters are raw pointers to GPU memory, for instance a.data.ptr if a is a cupy array."},
+	 { "sht_cu_SHqst_to_spat", _wrap_sht_cu_SHqst_to_spat, METH_VARARGS, "EXPERIMENTAL: parameters are raw pointers to GPU memory, for instance a.data.ptr if a is a cupy array."},
 	 { "sht_spat_to_SH", _wrap_sht_spat_to_SH, METH_VARARGS, "sht_spat_to_SH(sht self, PyObject * Vr, PyObject * Qlm)"},
 	 { "sht_SH_to_spat", _wrap_sht_SH_to_spat, METH_VARARGS, "sht_SH_to_spat(sht self, PyObject * Qlm, PyObject * Vr)"},
 	 { "sht_spat_cplx_to_SH", _wrap_sht_spat_cplx_to_SH, METH_VARARGS, "sht_spat_cplx_to_SH(sht self, PyObject * z, PyObject * alm)"},
@@ -7139,7 +7713,7 @@ SWIG_init(void) {
   }
   PyDict_SetItemString(md, "cvar", globals);
   SWIG_addvarlink(globals, "__version__", Swig_var___version___get, Swig_var___version___set);
-  SWIG_Python_SetConstant(d, "SHTNS_INTERFACE",SWIG_From_int((int)(0x30603)));
+  SWIG_Python_SetConstant(d, "SHTNS_INTERFACE",SWIG_From_int((int)(0x30700)));
   SWIG_Python_SetConstant(d, "sht_orthonormal",SWIG_From_int((int)(sht_orthonormal)));
   SWIG_Python_SetConstant(d, "sht_fourpi",SWIG_From_int((int)(sht_fourpi)));
   SWIG_Python_SetConstant(d, "sht_schmidt",SWIG_From_int((int)(sht_schmidt)));

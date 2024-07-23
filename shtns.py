@@ -64,6 +64,10 @@ class _SwigNonDynamicMeta(type):
 
 
 import numpy as np
+try:
+	import cupy
+except ImportError:
+	cupy = None
 
 SHTNS_INTERFACE = _shtns.SHTNS_INTERFACE
 
@@ -141,6 +145,11 @@ class sht(object):
         		self.l[ii] = lloop
         self.m.flags.writeable = False		# prevent writing in m and l arrays
         self.l.flags.writeable = False
+        self._cpu_synth_list = [self.SH_to_spat, self.SHsphtor_to_spat, self.SHqst_to_spat]
+        self._cpu_analys_list = [self.spat_to_SH, self.spat_to_SHsphtor, self.spat_to_SHqst]
+        if cupy is not None:
+        	self._gpu_synth_list = [self.cu_SH_to_spat, self.cu_SHsphtor_to_spat, self.cu_SHqst_to_spat]
+        	self._gpu_analys_list = [self.cu_spat_to_SH, self.cu_spat_to_SHsphtor, self.cu_spat_to_SHqst]
 
 
 
@@ -229,6 +238,38 @@ class sht(object):
         r"""im_from_idx(sht self, long lm) -> int"""
         return _shtns.sht_im_from_idx(self, lm)
 
+    def cu_spat_to_SH(self, Vr, Qlm):
+        r"""EXPERIMENTAL: parameters are raw pointers to GPU memory, for instance a.data.ptr if a is a cupy array."""
+        return _shtns.sht_cu_spat_to_SH(self, Vr, Qlm)
+
+    def cu_SH_to_spat(self, Qlm, Vr):
+        r"""EXPERIMENTAL: parameters are raw pointers to GPU memory, for instance a.data.ptr if a is a cupy array."""
+        return _shtns.sht_cu_SH_to_spat(self, Qlm, Vr)
+
+    def cu_SHsph_to_spat(self, Slm, Vt, Vp):
+        r"""EXPERIMENTAL: parameters are raw pointers to GPU memory, for instance a.data.ptr if a is a cupy array."""
+        return _shtns.sht_cu_SHsph_to_spat(self, Slm, Vt, Vp)
+
+    def cu_SHtor_to_spat(self, Tlm, Vt, Vp):
+        r"""EXPERIMENTAL: parameters are raw pointers to GPU memory, for instance a.data.ptr if a is a cupy array."""
+        return _shtns.sht_cu_SHtor_to_spat(self, Tlm, Vt, Vp)
+
+    def cu_SHsphtor_to_spat(self, Slm, Tlm, Vt, Vp):
+        r"""EXPERIMENTAL: parameters are raw pointers to GPU memory, for instance a.data.ptr if a is a cupy array."""
+        return _shtns.sht_cu_SHsphtor_to_spat(self, Slm, Tlm, Vt, Vp)
+
+    def cu_spat_to_SHsphtor(self, Vt, Vp, Slm, Tlm):
+        r"""EXPERIMENTAL: parameters are raw pointers to GPU memory, for instance a.data.ptr if a is a cupy array."""
+        return _shtns.sht_cu_spat_to_SHsphtor(self, Vt, Vp, Slm, Tlm)
+
+    def cu_spat_to_SHqst(self, Vr, Vt, Vp, Qlm, Slm, Tlm):
+        r"""EXPERIMENTAL: parameters are raw pointers to GPU memory, for instance a.data.ptr if a is a cupy array."""
+        return _shtns.sht_cu_spat_to_SHqst(self, Vr, Vt, Vp, Qlm, Slm, Tlm)
+
+    def cu_SHqst_to_spat(self, Qlm, Slm, Tlm, Vr, Vt, Vp):
+        r"""EXPERIMENTAL: parameters are raw pointers to GPU memory, for instance a.data.ptr if a is a cupy array."""
+        return _shtns.sht_cu_SHqst_to_spat(self, Qlm, Slm, Tlm, Vr, Vt, Vp)
+
     def spat_to_SH(self, Vr, Qlm):
         r"""spat_to_SH(sht self, PyObject * Vr, PyObject * Qlm)"""
         return _shtns.sht_spat_to_SH(self, Vr, Qlm)
@@ -299,22 +340,19 @@ class sht(object):
     	for i in range(0,n):
     		if q[i].size != self.nlm: raise RuntimeError("spectral array has wrong size.")
     		if q[i].dtype.num != np.dtype('complex128').num: raise RuntimeError("spectral array should be dtype=complex.")
-    		if q[i].flags.contiguous == False: q[i] = q[i].copy()		# contiguous array required.
-    	if n==1:	#scalar transform
-    		vr = np.empty(self.spat_shape)
-    		self.SH_to_spat(q[0],vr)
-    		return vr
-    	elif n==2:	# 2D vector transform
-    		vt = np.empty(self.spat_shape)		# v_theta
-    		vp = np.empty(self.spat_shape)		# v_phi
-    		self.SHsphtor_to_spat(q[0],q[1],vt,vp)
-    		return vt,vp
-    	else:		# 3D vector transform
-    		vr = np.empty(self.spat_shape)		# v_r
-    		vt = np.empty(self.spat_shape)		# v_theta
-    		vp = np.empty(self.spat_shape)		# v_phi
-    		self.SHqst_to_spat(q[0],q[1],q[2],vr,vt,vp)
-    		return vr,vt,vp
+    		if q[i].flags.forc == False: q[i] = q[i].copy()		# contiguous array required.
+
+    	if cupy is not None  and  isinstance(q[0], cupy.ndarray):
+    		q_ptr = [qi.data.ptr for qi in q]   # get device data pointers
+    		out = [cupy.empty(self.spat_shape) for i in range(n)]
+    		out_ptr = [o.data.ptr for o in out]
+    		cupy.cuda.runtime.deviceSynchronize()
+    		self._gpu_synth_list[n-1](*q_ptr, *out_ptr)
+    		cupy.cuda.runtime.deviceSynchronize()
+    	else:
+    		out = [np.empty(self.spat_shape) for i in range(n)]
+    		self._cpu_synth_list[n-1](*q, *out)
+    	return out[0] if n==1 else tuple(out)
 
     def analys(self,*arg):
     	"""
@@ -330,33 +368,38 @@ class sht(object):
     	for i in range(0,n):
     		if v[i].shape != self.spat_shape: raise RuntimeError("spatial array has wrong shape.")
     		if v[i].dtype.num != np.dtype('float64').num: raise RuntimeError("spatial array should be dtype=float64.")
-    		if v[i].flags.contiguous == False: v[i] = v[i].copy()		# contiguous array required.
-    	if n==1:
-    		q = np.empty(self.nlm, dtype=complex)
-    		self.spat_to_SH(v[0],q)
-    		return q
-    	elif n==2:
-    		s = np.empty(self.nlm, dtype=complex)
-    		t = np.empty(self.nlm, dtype=complex)
-    		self.spat_to_SHsphtor(v[0],v[1],s,t)
-    		return s,t
+    		if v[i].flags.forc == False: v[i] = v[i].copy()		# contiguous array required.
+
+    	if cupy is not None  and  isinstance(v[0], cupy.ndarray):
+    		v_ptr = [vi.data.ptr for vi in v]   # get device data pointers
+    		out = [cupy.empty(self.nlm, dtype=complex) for i in range(n)]
+    		out_ptr = [o.data.ptr for o in out]
+    		cupy.cuda.runtime.deviceSynchronize()
+    		self._gpu_analys_list[n-1](*v_ptr, *out_ptr)
+    		cupy.cuda.runtime.deviceSynchronize()
     	else:
-    		q = np.empty(self.nlm, dtype=complex)
-    		s = np.empty(self.nlm, dtype=complex)
-    		t = np.empty(self.nlm, dtype=complex)
-    		self.spat_to_SHqst(v[0],v[1],v[2],q,s,t)
-    		return q,s,t
+    		out = [np.empty(self.nlm, dtype=complex) for i in range(n)]
+    		self._cpu_analys_list[n-1](*v, *out)
+    	return out[0] if n==1 else tuple(out)
 
     def synth_grad(self,slm):
     	"""(vtheta,vphi) = synth_grad(sht self, slm) : compute the spatial representation of the gradient of slm"""
     	if self.nlat == 0: raise RuntimeError("Grid not set. Call .set_grid() mehtod.")
     	if slm.size != self.nlm: raise RuntimeError("spectral array has wrong size.")
     	if slm.dtype.num != np.dtype('complex128').num: raise RuntimeError("spectral array should be dtype=complex.")
-    	if slm.flags.contiguous == False: slm = slm.copy()		# contiguous array required.
-    	vt = np.empty(self.spat_shape)
-    	vp = np.empty(self.spat_shape)
-    	self.SHsph_to_spat(slm,vt,vp)
-    	return vt,vp
+    	if slm.flags.forc == False: slm = slm.copy()		# contiguous array required.
+    	if cupy is not None  and  isinstance(slm, cupy.ndarray):
+    		vt = cupy.empty(self.spat_shape)
+    		vp = cupy.empty(self.spat_shape)
+    		cupy.cuda.runtime.deviceSynchronize()
+    		self.cu_SHsph_to_spat(slm.data.ptr,vt.data.ptr,vp.data.ptr)
+    		cupy.cuda.runtime.deviceSynchronize()
+    		return vt,vp
+    	else:
+    		vt = np.empty(self.spat_shape)
+    		vp = np.empty(self.spat_shape)
+    		self.SHsph_to_spat(slm,vt,vp)
+    		return vt,vp
 
     def synth_cplx(self,*arg):
     	"""
@@ -374,7 +417,7 @@ class sht(object):
     	for i in range(0,n):
     		if q[i].size != (self.lmax+1)**2: raise RuntimeError("spectral array has wrong size.")
     		if q[i].dtype.num != np.dtype('complex128').num: raise RuntimeError("spectral array should be dtype=complex.")
-    		if q[i].flags.contiguous == False: q[i] = q[i].copy()		# contiguous array required.
+    		if q[i].flags.forc == False: q[i] = q[i].copy()		# contiguous array required.
     	if n==1:	#scalar transform
     		z = np.empty(self.spat_shape, dtype=complex)
     		self.SH_to_spat_cplx(q[0],z)
@@ -407,7 +450,7 @@ class sht(object):
     	for i in range(0,n):
     		if v[i].shape != self.spat_shape: raise RuntimeError("spatial array has wrong shape.")
     		if v[i].dtype.num != np.dtype('complex128').num: raise RuntimeError("spatial array should be dtype=complex128.")
-    		if v[i].flags.contiguous == False: v[i] = v[i].copy()		# contiguous array required.
+    		if v[i].flags.forc == False: v[i] = v[i].copy()		# contiguous array required.
     	if n==1:
     		q = np.empty((self.lmax+1)**2, dtype=complex)
     		self.spat_cplx_to_SH(v[0],q)
