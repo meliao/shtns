@@ -432,7 +432,7 @@ int init_cuda_program(shtns_cfg shtns, const char* gpu_arch_target)
 	s += sprintf(s, "#define NW_S %d\n", nw_s);
 	s += sprintf(s, "#define MPOS_SCALE %g\n", shtns->mpos_scale_analys * ((shtns->fft_mode & FFT_PHI_CONTIG) ? 2 : 1));
 	s += sprintf(s, "#define NLAT_2 %d\n", shtns->nlat_2);
-	s += sprintf(s, "typedef %s real;\n", (shtns->sizeof_real == 4) ? "float" : "double");	// single or double-precision data
+	s += sprintf(s, (shtns->sizeof_real == 4) ? "typedef float real;\ntypedef float2 real2;\n" : "typedef double real;\ntypedef double2 real2;\n");	// single or double-precision data
 	if (shtns->sizeof_real_g == 4) {
 		 s += sprintf(s, "typedef float real_g;\n#define SHT_ACCURACY 1.0e-15f\n#define SHT_SCALE_FACTOR 7.2057594037927936e16f\n");	// for single-precision recurrence
 	} else {

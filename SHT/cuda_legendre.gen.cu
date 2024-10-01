@@ -209,6 +209,9 @@ __device__ __forceinline__ void atomicAdd_sht(float* address, float val) {
 #endif
 #endif
 
+__device__ __forceinline__  double2 make_real2(double a, double b) {	return make_double2(a,b);	}
+__device__ __forceinline__  float2  make_real2(float a,  float b)  {	return make_float2 (a,b);	}
+
 __device__ __forceinline__ bool polar_skip_sint(double sint, int llim, int m)
 {
 	// polar optimization (see Reinecke 2013, section 3.3)
@@ -516,10 +519,8 @@ void leg_m_kernel(
 					q[it*k_inc              + (b*NFIELDS+f)*q_dist] = north;
 					q[(nlat_2*2-1-it)*k_inc + (b*NFIELDS+f)*q_dist] = south;
 				  #else
-					q[it*k_inc              + (b*NFIELDS+f)*q_dist] = north;
-					q[it*k_inc +1           + (b*NFIELDS+f)*q_dist] = 0;
-					q[(m_inc-1-it)*k_inc    + (b*NFIELDS+f)*q_dist] = south;
-					q[(m_inc-1-it)*k_inc +1 + (b*NFIELDS+f)*q_dist] = 0;
+					*((real2*)(q+it*k_inc           + (b*NFIELDS+f)*q_dist)) = make_real2(north, (real)0);
+					*((real2*)(q+(m_inc-1-it)*k_inc + (b*NFIELDS+f)*q_dist)) = make_real2(south, (real)0);
 				  #endif
 				}
 			}
@@ -955,6 +956,23 @@ void leg_m_kernel(
 	}
 
 	#ifndef LAYOUT_REAL_FFT
+	  #if HI_LLIM==1 && NW_S==2
+		const int ofs_m1 = im*m_inc;
+		const int ofs_m2 = (nphi-im)*m_inc;
+		#pragma unroll
+		for (int i=0; i<NW; i+=2) {
+			const int it = BLOCKSIZE*NW * blockIdx.x + NW*j+i;
+			if (it < nlat_2) {
+				#pragma unroll
+				for (int f=0; f<NFIELDS; f++) {
+					*((real2*)(q+ofs_m1 + it*k_inc              + (b*NFIELDS+f)*q_dist)) = make_real2(roi[f][i]-rei[f][i+1], roi[f][i+1]+rei[f][i]);
+					*((real2*)(q+ofs_m2 + it*k_inc              + (b*NFIELDS+f)*q_dist)) = make_real2(roi[f][i]+rei[f][i+1], roi[f][i+1]-rei[f][i]);
+					*((real2*)(q+ofs_m1 + (nlat_2*2-2-it)*k_inc + (b*NFIELDS+f)*q_dist)) = make_real2(rer[f][i+1]-ror[f][i], rer[f][i]+ror[f][i+1]);
+					*((real2*)(q+ofs_m2 + (nlat_2*2-2-it)*k_inc + (b*NFIELDS+f)*q_dist)) = make_real2(rer[f][i+1]+ror[f][i], rer[f][i]-ror[f][i+1]);
+				}
+			}
+		}
+	  #else
 		#pragma unroll
 		for (int i=0; i<NW; i++) {
 			const real sgn = (HI_LLIM && NW>1) ? (i^1)-i : (j^1)-j; 	//(it^1) - it;	// 1 - 2*(j&1);		// 1 for even j, -1 for odd j.
@@ -970,6 +988,7 @@ void leg_m_kernel(
 				}
 			}
 		}
+	  #endif
 	#else
 		#pragma unroll
 		for (int f=0; f<NFIELDS; f++) {
@@ -978,10 +997,8 @@ void leg_m_kernel(
 			for (int i=0; i<NW; i++) {
 				const int it = BLOCKSIZE*NW * blockIdx.x + ((HI_LLIM) ? NW*j+i : j+i*BLOCKSIZE);
 				if (it < nlat_2) {
-					q[ofs + it*k_inc] 			  = roi[f][i];	// north, real
-					q[ofs + it*k_inc+1]			  = rei[f][i];	// north, imag
-					q[ofs + (m_inc-it-1)*k_inc]	  = rer[f][i];	// south, real
-					q[ofs + (m_inc-it-1)*k_inc+1] = ror[f][i];	// south, imag
+					*((real2*)(q+ofs + it*k_inc)) = 			make_real2(roi[f][i], rei[f][i]);	// north, real+imag
+					*((real2*)(q+ofs + (m_inc-it-1)*k_inc)) =	make_real2(rer[f][i], ror[f][i]);	// south, real+imag
 				}
 			}
 		}
