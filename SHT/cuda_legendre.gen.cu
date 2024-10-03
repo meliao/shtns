@@ -239,7 +239,7 @@ __device__ __forceinline__ bool polar_skip_sint2(float sint2, int llim, int m) {
 /// requirements : blockSize must be 1 in the y- and z-direction and BLKSZE_S in the x-direction.
 /// llim MUST BE <= 1800, unless HI_LLIM=1
 template<int S> __global__
-#if NLAT_2<=64 && defined(__gfx90a__)
+#if defined(__gfx90a__) && BLKSZE_S <= 64 && BLKSZE_SH2ISH <= 64
 __launch_bounds__(64, 1)	// leads to better performance for small transforms on MI250
 #endif
 void leg_m_kernel(

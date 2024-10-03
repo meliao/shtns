@@ -339,16 +339,19 @@ int init_cuda_program(shtns_cfg shtns, const char* gpu_arch_target)
 	else if (shtns->howmany % 2 == 0) {	nf_s=2;	nw_s=2; 	nf_a=2;	}
 	else if (shtns->howmany % 3 == 0) { nf_s=3; nw_s=1; 	nf_a=1;	}
 #else
-	const bool gfx90a = (strcmp(gpu_arch_target,"gfx90a") >= 0);	// MI200+
+	const bool gfx90a = (strcmp(gpu_arch_target,"gfx90a") >= 0);	// MI200 series
+	const bool gfx94x = (strcmp(gpu_arch_target,"gfx94") >= 0);		// MI300 series
 	if (shtns->howmany % 2 == 0) {	nf_a=2;		nf_s=2; }
-	if (gfx90a) {	// MI200+
+	if (shtns->sizeof_real == 4  &&  nf_a==2) lspan_a = 32;
+	if (gfx90a || gfx94x) {	// MI200+ or MI300+
 		nw_s=4;
-		lspan_a = (nf_a > 1) ? 32 : 16;		// 16 for nf_a=1
-		if (hi_llim  &&  nf_s==1  &&  shtns->howmany % 3 == 0)	nf_s=3;
-		if (shtns->howmany % 4 == 0) { nf_a=4;	if (hi_llim) { nf_s=4;	nw_s=2; } }	// nw_s=2 also allows fusion with sh2ish
+		if (nf_s==1  &&  shtns->howmany % 3 == 0) {	nf_s=3;	nw_s=3; }
+		if (hi_llim  &&  shtns->howmany % 4 == 0) { nf_s=4;	nw_s=2; }	// nw_s=2 also allows fusion with sh2ish
 		if (shtns->sizeof_real == 4) {	// maximize nf_s
-			if (nf_a==4 && shtns->sizeof_real_g==8) nf_a=2;	// actually a better value for real data with double recurrence
-			for (int k=8; k>0; k--) if (shtns->howmany % k == 0) { nf_s=k; nw_s=2; break; }
+			nw_s = 3;		// nw_s=4 should be avoided in fp32 mode
+			if (nwarp_target % 3  &&  (nwarp_target % 2 == 0  ||  (nwarp_target+1) % 3))  nw_s = 2;
+			if (shtns->howmany % 4 == 0) 	  {	nf_a=4;		nf_s=4;	}
+			else if (shtns->howmany % 3 == 0) {	nf_s=3;	}
 		}
 	} else {	// assume MI100
 		if (nwarp_target > 2  &&  !hi_llim)	nf_s=1;
@@ -385,18 +388,22 @@ int init_cuda_program(shtns_cfg shtns, const char* gpu_arch_target)
 		if (SHT_VERBOSE > 1) printf("optimize NW synthesis:\n");
 		optimize_nwarp(&nw_s, nwarp_target, nwarp_s, 1.3f);		// maybe we should reduce nw_s ?
 	}
+	#if WARPSZE == 64
+		// maximize nf_s when nw_s is small
+		if (nw_s <= 2 && nf_s < 4) 	for (int k=((shtns->sizeof_real==4) ? 8 : 4); k>0; k--) if (shtns->howmany % k == 0) { nf_s=k; break; }
+	#endif
 
 	int nwarp_s0=0;		int nblocks_s0=0;
 	if (sh2ish_fuse) {
 		// for scalar synthesis we should try to fuse sh2ish and leg_m_kernel for better performance.
 		// this requires a larger blocksize (nwarp_s), up to MAX_THREADS_PER_BLOCK.
-		if (nw_s == 4 && nwarp_s == 1) {  nw_s=2; nwarp_s=2; }	// MI250: nw_s=4 does not work well with fuse
+		//if (nw_s == 4 && nwarp_s == 1) {  nw_s=2; nwarp_s=2; }	// MI250: nw_s=4 does not work well with fuse
 		nwarp_s0 = MAX_THREADS_PER_BLOCK/WARPSZE;		// start with maximum number of warps per block
 		if (SHT_VERBOSE > 1) printf("optimize scalar synthesis:\n");
 		nblocks_s0 = optimize_nwarp(&nwarp_s0, nwarp_target, nw_s, 1.14f);
 		if (nwarp_s0==1  && nblocks_s0<=MAX_THREADS_PER_BLOCK/WARPSZE) { nwarp_s0=nblocks_s0;  nblocks_s0=1; }	// if one warp and several blocks, do one block and several warps!
 		if (nblocks_s0 > 1) sh2ish_fuse = false;	// disable sh2ish_fuse, very likely slower or only marginally faster
-		if (nw_s == 4 && shtns->sizeof_real==8) sh2ish_fuse = false;			// MI250
+		//if (nw_s == 4 && shtns->sizeof_real==8) sh2ish_fuse = false;			// MI250
 		if (hi_llim && shtns->sizeof_real == 8) sh2ish_fuse = false;	// don't fuse hi_llim double-precision.
 	}
 	//if (nf_a * shtns->nlat_2 <= 512   &&   !ISHIOKA)  ==> we can include ish2sh into the ilegendre kernel.
