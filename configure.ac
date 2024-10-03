@@ -106,7 +106,7 @@ AS_IF([test "x$enable_knl" != "xyes"], [
 	# KNL native cross-compiling
 	AX_CHECK_COMPILE_FLAG([-march=knl],[], [
 	    CC=icc
-	    AX_CHECK_COMPILE_FLAG([-xMIC-AVX512],[CC="$CC -xMIC-AVX512"], [AC_MSG_ERROR(["Xeon Phi (KNL) not supported by $CC. Use a recent gcc or icc compiler."])])
+	    AX_CHECK_COMPILE_FLAG([-xMIC-AVX512],[CC="$CC -xMIC-AVX512"], [AC_MSG_ERROR(["Xeon Phi (KNL) not supported by $CC. Use a recent gcc or icc compiler."],2)])
 	])
 ])
 CFLAGS="$CFLAGS -O3"
@@ -151,7 +151,7 @@ AS_IF([test "x$enable_knl" != "xyes"], [
 	# KNL native cross-compiling
 	AX_CHECK_COMPILE_FLAG([-march=knl],[], [
 	    CC=icc
-	    AX_CHECK_COMPILE_FLAG([-xMIC-AVX512],[CC="$CC -xMIC-AVX512"], [AC_MSG_ERROR(["Xeon Phi (KNL) not supported by $CC. Use a recent gcc or icc compiler."])])
+	    AX_CHECK_COMPILE_FLAG([-xMIC-AVX512],[CC="$CC -xMIC-AVX512"], [AC_MSG_ERROR(["Xeon Phi (KNL) not supported by $CC. Use a recent gcc or icc compiler."],2)])
 	])
 	# With KNL, enable mkl and openmp by default.
 	AS_IF([test "x$enable_mkl" = "xdefault"], [enable_mkl=yes])
@@ -179,7 +179,7 @@ AX_CHECK_COMPILE_FLAG([-std=gnu11],, [
 AC_CHECK_HEADERS([stdlib.h stdio.h string.h math.h complex.h])
 
 # Checks for libraries.
-AC_CHECK_LIB([m],[cos],,[AC_MSG_ERROR([math library not found.])])
+AC_CHECK_LIB([m],[cos],,[AC_MSG_ERROR([math library not found.],2)])
 
 # Checks related to Python:
 AS_IF([test "x$enable_python" != "xno"], [
@@ -215,7 +215,7 @@ AS_IF([test "x$enable_hip" != "xno"], [
 	CFLAGS="$CFLAGS -I${ROCM_PATH}/include -D__HIP_PLATFORM_AMD__"
 	LDFLAGS="$LDFLAGS -L${ROCM_PATH}/lib"
 	echo $LDFLAGS
-	AC_CHECK_LIB([amdhip64],[hipMalloc],,[AC_MSG_ERROR([hip library not found. Environment variable ROCM_PATH is not correctly set: \$ROCM_PATH/lib should contain the rocm libraries.])])
+	AC_CHECK_LIB([amdhip64],[hipMalloc],,[AC_MSG_ERROR([hip library not found. Environment variable ROCM_PATH is not correctly set: \$ROCM_PATH/lib should contain the rocm libraries.],5)])
 	dnl AC_CHECK_LIB([hipfft],[hipfftCreate],,[AC_MSG_NOTICE([hipftt library not found.])])
 	dnl AC_CHECK_LIB([rocfft],[rocfft_execute],,[AC_MSG_NOTICE([rocfft library not found.])])
 
@@ -241,10 +241,10 @@ AS_IF([test "x$enable_cuda" != "xno"], [
 	# assume 64 bit mode, add default directory to find CUDA
 	LDFLAGS="$LDFLAGS -L$CUDA_PATH/lib64 -L$CUDA_PATH/lib64/stubs"
 	echo $LDFLAGS
-	AC_CHECK_LIB([cudart],[cudaMalloc],,[AC_MSG_ERROR([cudart library not found. Environment variable CUDA_PATH is not correctly set: \$CUDA_PATH/lib64 should contain the cuda libraries.])])
+	AC_CHECK_LIB([cudart],[cudaMalloc],,[AC_MSG_ERROR([cudart library not found. Environment variable CUDA_PATH is not correctly set: \$CUDA_PATH/lib64 should contain the cuda libraries.],4)])
 	dnl AC_CHECK_LIB([cufft],[cufftPlanMany],,[AC_MSG_NOTICE([cufft library not found.])])
-	AC_CHECK_LIB([nvrtc],[nvrtcGetPTX],,[AC_MSG_ERROR([nvrtc library not found.])])
-	AC_CHECK_LIB([cuda],[cuLaunchKernel],,[AC_MSG_ERROR([cuda library not found.])])
+	AC_CHECK_LIB([nvrtc],[nvrtcGetPTX],,[AC_MSG_ERROR([nvrtc library not found.],4)])
+	AC_CHECK_LIB([cuda],[cuLaunchKernel],,[AC_MSG_ERROR([cuda library not found.],4)])
 
 	nvcc_gencode_flags=""
 	# find cuda arch:
@@ -258,7 +258,7 @@ AS_IF([test "x$enable_cuda" != "xno"], [
 	    AX_CHECK_CUDA_ARCH([$cuda_cc])
 	])
 	AS_IF([test "x$nvcc_gencode_flags" == "x"],[
-	    AC_MSG_ERROR([nvcc does not support any compatible gpu. Is nvcc available ?])
+	    AC_MSG_ERROR([nvcc does not support any compatible gpu. Is nvcc available ?],4)
 	])
 	gpu_cflags="-DSHTNS_GPU=1"  # GPU transforms, 1 for CUDA, 2 for HIP
 	# for nvcc, the underlying gcc is not always c++11 by default, so we need to explicitely ask for it.
@@ -314,7 +314,7 @@ AS_IF([test "x$enable_mkl" == "xyes"], [
 	],["$mkl_libs"])
   ])
   AS_IF([test "x$mkl_found" == "xno"], [
-    AS_IF([test "x$enable_mkl" == "xyes"], [AC_MSG_ERROR(["FFTW interface not found in MKL."])], [enable_mkl=no])
+    AS_IF([test "x$enable_mkl" == "xyes"], [AC_MSG_ERROR(["FFTW interface not found in MKL."],3)], [enable_mkl=no])
   ],[
     AC_DEFINE(HAVE_LIBFFTW3_OMP, 1, [MKL has the multi-thread fftw interface.])
   ])
@@ -324,9 +324,9 @@ AS_IF([test "x$enable_mkl" == "xyes"], [
 AS_IF([test "x$enable_mkl" != "xyes"], [
 	# fftw3, allows to specify library path with FFTW_ROOT environment variable
 	AS_IF([test "x$FFTW_ROOT" != "x"], [LDFLAGS="$LDFLAGS -L$FFTW_ROOT/lib"])
-	AC_CHECK_LIB([fftw3],[fftw_plan_many_dft],,[AC_MSG_ERROR(["FFTW3 library required. Try using the intel MKL library with --enable-mkl, or add 'LDFLAGS=-L/path/to/fftw3/lib' to ./configure command line."])])
+	AC_CHECK_LIB([fftw3],[fftw_plan_many_dft],,[AC_MSG_ERROR(["FFTW3 library required. Try using the intel MKL library with --enable-mkl, or add 'LDFLAGS=-L/path/to/fftw3/lib' to ./configure command line."],3)])
 	AS_IF([test "x$enable_openmp" = "xyes"], [
-		AC_CHECK_LIB([fftw3_omp], [fftw_init_threads],,[AC_MSG_ERROR(["FFTW3 does not support OpenMP. Did you compile it with --enable-openmp ?."])])
+		AC_CHECK_LIB([fftw3_omp], [fftw_init_threads],,[AC_MSG_ERROR(["FFTW3 does not support OpenMP. Did you compile it with --enable-openmp ?."],3)])
 	])
 ])
 

@@ -3890,7 +3890,7 @@ else case e in #(
   e) CFLAGS=$ax_check_save_flags
      { printf "%s\n" "$as_me:${as_lineno-$LINENO}: result: no" >&5
 printf "%s\n" "no" >&6; }
-     as_fn_error $? "\"Xeon Phi (KNL) not supported by $CC. Use a recent gcc or icc compiler.\"" "$LINENO" 5 ;;
+     as_fn_error 2 "\"Xeon Phi (KNL) not supported by $CC. Use a recent gcc or icc compiler.\"" "$LINENO" 5 ;;
 esac
 fi
 rm -f core conftest.err conftest.$ac_objext conftest.beam conftest.$ac_ext
@@ -4367,7 +4367,7 @@ else case e in #(
   e) CFLAGS=$ax_check_save_flags
      { printf "%s\n" "$as_me:${as_lineno-$LINENO}: result: no" >&5
 printf "%s\n" "no" >&6; }
-     as_fn_error $? "\"Xeon Phi (KNL) not supported by $CC. Use a recent gcc or icc compiler.\"" "$LINENO" 5 ;;
+     as_fn_error 2 "\"Xeon Phi (KNL) not supported by $CC. Use a recent gcc or icc compiler.\"" "$LINENO" 5 ;;
 esac
 fi
 rm -f core conftest.err conftest.$ac_objext conftest.beam conftest.$ac_ext
@@ -4820,7 +4820,7 @@ then :
   LIBS="-lm $LIBS"
 
 else case e in #(
-  e) as_fn_error $? "math library not found." "$LINENO" 5 ;;
+  e) as_fn_error 2 "math library not found." "$LINENO" 5 ;;
 esac
 fi
 
@@ -5011,7 +5011,7 @@ then :
   LIBS="-lamdhip64 $LIBS"
 
 else case e in #(
-  e) as_fn_error $? "hip library not found. Environment variable ROCM_PATH is not correctly set: \$ROCM_PATH/lib should contain the rocm libraries." "$LINENO" 5 ;;
+  e) as_fn_error 5 "hip library not found. Environment variable ROCM_PATH is not correctly set: \$ROCM_PATH/lib should contain the rocm libraries." "$LINENO" 5 ;;
 esac
 fi
 
@@ -5132,7 +5132,7 @@ then :
   LIBS="-lcudart $LIBS"
 
 else case e in #(
-  e) as_fn_error $? "cudart library not found. Environment variable CUDA_PATH is not correctly set: \$CUDA_PATH/lib64 should contain the cuda libraries." "$LINENO" 5 ;;
+  e) as_fn_error 4 "cudart library not found. Environment variable CUDA_PATH is not correctly set: \$CUDA_PATH/lib64 should contain the cuda libraries." "$LINENO" 5 ;;
 esac
 fi
 
@@ -5186,7 +5186,7 @@ then :
   LIBS="-lnvrtc $LIBS"
 
 else case e in #(
-  e) as_fn_error $? "nvrtc library not found." "$LINENO" 5 ;;
+  e) as_fn_error 4 "nvrtc library not found." "$LINENO" 5 ;;
 esac
 fi
 
@@ -5240,7 +5240,7 @@ then :
   LIBS="-lcuda $LIBS"
 
 else case e in #(
-  e) as_fn_error $? "cuda library not found." "$LINENO" 5 ;;
+  e) as_fn_error 4 "cuda library not found." "$LINENO" 5 ;;
 esac
 fi
 
@@ -5363,7 +5363,7 @@ fi
 	if test "x$nvcc_gencode_flags" == "x"
 then :
 
-	    as_fn_error $? "nvcc does not support any compatible gpu. Is nvcc available ?" "$LINENO" 5
+	    as_fn_error 4 "nvcc does not support any compatible gpu. Is nvcc available ?" "$LINENO" 5
 
 fi
 	gpu_cflags="-DSHTNS_GPU=1"  # GPU transforms, 1 for CUDA, 2 for HIP
@@ -5563,7 +5563,7 @@ then :
 
     if test "x$enable_mkl" == "xyes"
 then :
-  as_fn_error $? "\"FFTW interface not found in MKL.\"" "$LINENO" 5
+  as_fn_error 3 "\"FFTW interface not found in MKL.\"" "$LINENO" 5
 else case e in #(
   e) enable_mkl=no ;;
 esac
@@ -5639,7 +5639,7 @@ then :
   LIBS="-lfftw3 $LIBS"
 
 else case e in #(
-  e) as_fn_error $? "\"FFTW3 library required. Try using the intel MKL library with --enable-mkl, or add 'LDFLAGS=-L/path/to/fftw3/lib' to ./configure command line.\"" "$LINENO" 5 ;;
+  e) as_fn_error 3 "\"FFTW3 library required. Try using the intel MKL library with --enable-mkl, or add 'LDFLAGS=-L/path/to/fftw3/lib' to ./configure command line.\"" "$LINENO" 5 ;;
 esac
 fi
 
@@ -5696,7 +5696,7 @@ then :
   LIBS="-lfftw3_omp $LIBS"
 
 else case e in #(
-  e) as_fn_error $? "\"FFTW3 does not support OpenMP. Did you compile it with --enable-openmp ?.\"" "$LINENO" 5 ;;
+  e) as_fn_error 3 "\"FFTW3 does not support OpenMP. Did you compile it with --enable-openmp ?.\"" "$LINENO" 5 ;;
 esac
 fi
 
