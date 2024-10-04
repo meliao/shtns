@@ -400,22 +400,23 @@ static void planFFT(shtns_cfg shtns, int layout)
 	#endif
 
 	// default layout:
-	phi_inc = shtns->nlat * howmany;
+	phi_inc = shtns->nlat;
 	if (layout & SHT_ALLOW_PADDING) {	// handle padding
 		int pad = 0;
 		#ifndef SHTNS_GPU
-		if ((phi_inc % 64 == 0) && (NPHI * phi_inc > 512) && ((NPHI>1)||(howmany>1)))
+		if ((phi_inc % 64 == 0) && (NPHI * phi_inc > 512) && (NPHI>1))
 			pad = 8;			// we add some padding, to avoid cache bank conflicts.
 		#elif SHTNS_GPU==2
-		if ((phi_inc % 256 == 0) && (NPHI * phi_inc > 4096) && (NPHI>1))
-			pad = 8;			// add padding to avoid memory bank / channel conflicts on AMD GPUs.
+		if ((phi_inc % 32 == 0) && (NPHI * phi_inc > 4096) && (NPHI>1))
+			pad = 8;		// add padding to avoid memory bank / channel / whatever conflicts on AMD GPUs (large impact on performance).
 		#endif
 		const char* env_pad = getenv("SHTNS_PAD");    if (env_pad) pad = atoi(env_pad);		// override default with SHTNS_PAD environment variable
 		phi_inc += pad;
 	}
 	shtns->k_stride_a = 1;		shtns->m_stride_a = phi_inc;		// default strides
 	shtns->nlat_padded = phi_inc;		// stride between phi in spectral domain
-	shtns->nspat = NPHI * phi_inc;		// default spatial size to be allocated for a transform call
+	shtns->nspat = NPHI * phi_inc * howmany;		// default spatial size to be allocated for a transform call
+	shtns->spat_dist = NPHI * phi_inc;
 
 	if (NPHI==1) 	// no FFT needed.
 	{
@@ -503,7 +504,15 @@ static void planFFT(shtns_cfg shtns, int layout)
 		if ((NLAT & 1)==0) {
 			if (verbose) printf("(theta-contiguous layout: phi_inc=%d, theta_inc=%d)\n",phi_inc,theta_inc);
 			shtns->fft_mode = FFT_THETA_CONTIG;
-			shtns->ifftc = fftw_plan_many_dft(1, &nfft, shtns->nlat_2 * howmany, ShF, &nfft, phi_inc/2, 1, ShF, &nfft, phi_inc/2, 1, FFTW_BACKWARD, shtns->fftw_plan_mode);
+			if (howmany==1) {
+				shtns->ifftc = fftw_plan_many_dft(1, &nfft, shtns->nlat_2 * howmany, ShF, &nfft, phi_inc/2, 1, ShF, &nfft, phi_inc/2, 1, FFTW_BACKWARD, shtns->fftw_plan_mode);
+			} else {
+				fftw_iodim dim, many[2];
+				dim.n = NPHI;    		dim.os = shtns->nlat_padded/2;		dim.is = shtns->nlat_padded/2;
+				many[0].n = NLAT/2;		many[0].os = 1;				many[0].is = 1;
+				many[1].n = howmany;	many[1].os = shtns->nlat_padded/2 * NPHI;	many[1].is = shtns->nlat_padded/2 * NPHI;
+				shtns->ifftc = fftw_plan_guru_dft(1, &dim, 2, many, ShF, ShF, FFTW_BACKWARD, shtns->fftw_plan_mode);
+			}
 			shtns->fftc = shtns->ifftc;		// same thing, with m>0 and m<0 exchanged.
 
 		/*	if (shtns->nthreads > 1) {
@@ -1116,7 +1125,7 @@ shtns_cfg shtns_create(int lmax, int mmax, int mres, enum shtns_norm norm)
 		#else
 		shtns->robert_form = 0;		// no Robert form by default.
 		#endif
-		shtns->howmany = 1;		// 1 transform by default. Use shtns_set_batch() to ask for more.
+		shtns->howmany = 1;		// 1 transform by default. Use shtns_set_many() to ask for more.
 		shtns->cpu_timer = -1;		// disable timing by default
 	}
 
@@ -1542,18 +1551,19 @@ int shtns_set_grid(shtns_cfg shtns, enum shtns_type flags, double eps, int nlat,
  * Currently only theta-contiguous data is allowed.
  * This function must be called before \ref shtns_set_grid or \ref shtns_set_grid_auto, after which the spatial datat layout will be defined
  * by \c shtns->nlat_padded and \c shtns->nspat as:
- * \code data[i_phi*shtns->nlat_padded + i_batch*shtns->nlat + i_theta] \endcode
+ * \code data[(i_batch*shtns->nphi + i_phi)*shtns->nlat_padded + i_theta] \endcode
  * Note that \c shtns->nspat will be the number of spatial points in howmany fields (not in a single field).
  * \param[in] shtns = a plan created by \ref shtns_create that should handle many transforms at once.
  * \param[in] howmany = number of transforms in batch.
  * \param[in] spec_dist = distance between spectral arrays in batch. Spectral data is accessed with \code Qlm[i_batch * spec_dist + lm] \endcode
  * \returns howmany on success, or -1 on failure.
 */
-int shtns_set_batch(shtns_cfg shtns, const int howmany, long spec_dist)
+int shtns_set_many(shtns_cfg shtns, const int howmany, long spec_dist)
 {
 	if (howmany <= 0)	return -1;		// invalid
 	if (spec_dist == 0)  spec_dist = shtns->nlm;
 	if (spec_dist < shtns->nlm) return -1;	// invalid
+	if (shtns->nspat != 0) return -1;		// grid already set!!
 
 	shtns->howmany = howmany;
 	shtns->spec_dist = spec_dist;		// distance between spectral fields.

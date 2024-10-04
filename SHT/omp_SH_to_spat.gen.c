@@ -85,7 +85,7 @@ VX		BpF = BtF + nv/2;
 	{
 	    for (int b=0; b<shtns->howmany; b++) {		// inner-loop is batch. For best cache-reuse
 		long spec_ofs = b * shtns->spec_dist;
-		long spat_ofs = b * shtns->nlat_2;
+		long spat_ofs = b * shtns->spat_dist/2;
 3		GEN3(_sy3_hi,NWAY,SUFFIX)(shtns, Qlm+spec_ofs, Slm+spec_ofs, Tlm+spec_ofs, BrF+spat_ofs, BtF+spat_ofs, BpF+spat_ofs, llim, im, it0, it1);
 QX		GEN3(_sy1_hi,NWAY,SUFFIX)(shtns, Qlm+spec_ofs, BrF+spat_ofs, llim, im, it0, it1);
 	#ifndef SHT_GRAD
@@ -103,9 +103,12 @@ T		GEN3(_sy1t_hi,NWAY,SUFFIX)(shtns, Tlm+spec_ofs, BtF+spat_ofs, BpF+spat_ofs, l
 		const int m_inc = shtns->nlat_padded >> 1;
 		#pragma omp for schedule(dynamic,1) nowait
 		for (int im=imlim+1; im < NPHI-imlim; im++)  {
-Q			memset(BrF + m_inc*im, 0, sizeof(cplx)* m_inc );
-V			memset(BtF + m_inc*im, 0, sizeof(cplx)* m_inc );
-V			memset(BpF + m_inc*im, 0, sizeof(cplx)* m_inc );
+		    for (int b=0; b<shtns->howmany; b++) {
+			long spat_ofs = b * shtns->spat_dist/2;
+Q			memset(BrF + spat_ofs + m_inc*im, 0, sizeof(cplx)* m_inc );
+V			memset(BtF + spat_ofs + m_inc*im, 0, sizeof(cplx)* m_inc );
+V			memset(BpF + spat_ofs + m_inc*im, 0, sizeof(cplx)* m_inc );
+		    }
 		}
 	}
   #endif

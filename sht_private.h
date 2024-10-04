@@ -150,6 +150,7 @@ struct shtns_info {		// MUST start with "int nlm;"
 	/* batched transform */
 	int howmany;		///< number of fields to transform simultaneously
 	long spec_dist;		///< pointer distance between two spectral fields (in complex number)
+	long spat_dist;		///< pointer distance between two spatial fields
 
 	/* Legendre function generation arrays */
 	double *alm;	// coefficient list for Legendre function recurrence (size 2*NLM)

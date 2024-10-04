@@ -77,7 +77,7 @@ V			fftw_execute_split_dft(shtns->fftc, Vp+NPHI, Vp, BpF+1, BpF);
 			for (int im=0; im<=imlim; im++) {
 				for (int b=0; b<shtns->howmany; b++) {
 					long spec_ofs = b * shtns->spec_dist;
-					long spat_ofs = b * shtns->nlat;
+					long spat_ofs = b * shtns->spat_dist;
 QX					GEN3(_an1,NWAY,SUFFIX)(shtns, BrF+spat_ofs, Qlm+spec_ofs, llim, im);
 VX					GEN3(_an2,NWAY,SUFFIX)(shtns, BtF+spat_ofs, BpF+spat_ofs, Slm+spec_ofs, Tlm+spec_ofs, llim, im);
 3					GEN3(_an3,NWAY,SUFFIX)(shtns, BrF+spat_ofs, BtF+spat_ofs, BpF+spat_ofs, Qlm+spec_ofs, Slm+spec_ofs, Tlm+spec_ofs, llim, im);
@@ -88,7 +88,7 @@ VX					GEN3(_an2,NWAY,SUFFIX)(shtns, BtF+spat_ofs, BpF+spat_ofs, Slm+spec_ofs, T
 			for (int im=0; im<=imlim; im++) {
 				for (int b=0; b<shtns->howmany; b++) {
 					long spec_ofs = b * shtns->spec_dist;
-					long spat_ofs = b * shtns->nlat;
+					long spat_ofs = b * shtns->spat_dist;
 QX					GEN3(_an1_hi,NWAY,SUFFIX)(shtns, BrF+spat_ofs, Qlm+spec_ofs, llim, im);
 VX					GEN3(_an2_hi,NWAY,SUFFIX)(shtns, BtF+spat_ofs, BpF+spat_ofs, Slm+spec_ofs, Tlm+spec_ofs, llim, im);
 3					GEN3(_an3_hi,NWAY,SUFFIX)(shtns, BrF+spat_ofs, BtF+spat_ofs, BpF+spat_ofs, Qlm+spec_ofs, Slm+spec_ofs, Tlm+spec_ofs, llim, im);

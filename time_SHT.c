@@ -812,7 +812,7 @@ int main(int argc, char *argv[])
 	NLM = ((shtns->nlm + 3)/4) *4;		// align on 64 bytes (cache line)
 	if (batch == -1) {
 		batch = SHT_ITER;		SHT_ITER = 1;
-		int r = shtns_set_batch(shtns, batch, NLM);
+		int r = shtns_set_many(shtns, batch, NLM);
 		if (r<0) printf("ERROR batch\n");
 	}
 	shtns_set_grid_auto(shtns, shtmode | layout | layout_opts, polaropt, nlorder, &NLAT, &NPHI);

@@ -173,21 +173,20 @@ static int init_cuda_buffer_fft(shtns_cfg shtns, int cuda_gpu_id, int sizeof_rea
 			VkFFTConfiguration config = {};		//zero-initialize configuration
 			if (shtns->fft_mode & FFT_THETA_CONTIG) {
 				printf("!!! Use theta-contiguous FFT on GPU !!!\n");
-				long howmany = shtns->nlat_2 * shtns->howmany;		// support batched transforms
 				long dist = shtns->nlat_padded / 2;
 				config.FFTdim = 2; //FFT dimension: 1D, but we use a second dimension to get non-unit strides.
-				config.size[0] = howmany;
+				config.size[0] = shtns->nlat_2;
 				config.size[1] = nfft;
 				config.bufferStride[0] = dist;
 				config.bufferStride[1] = dist * nfft;
 				config.omitDimension[0] = 1;		// no FFT on the first dimension.
-				config.doublePrecision = sizeof_real / 8;
 				if (2*(shtns->mmax+1) <= nfft) {	// let vkFFT perform the zero-padding (saves memory bandwidth)
 					config.performZeropadding[1] = 1;
 					config.frequencyZeroPadding = 1;
 					config.fft_zeropad_left[1] = shtns->mmax + 1;			// first zero element
 					config.fft_zeropad_right[1] = nfft - shtns->mmax;		// first non-zero element
 				}
+				config.numberBatches = shtns->howmany;
 			} else if (shtns->fft_mode & FFT_PHI_CONTIG) {
 				printf("!!! Use phi-contiguous FFT on GPU (with transpose step) !!!\n");
 				long howmany = shtns->nlat * shtns->howmany;		// support batched transforms
@@ -233,7 +232,7 @@ static int init_cuda_buffer_fft(shtns_cfg shtns, int cuda_gpu_id, int sizeof_rea
 	const long nlm2 = shtns->nlm + (shtns->mmax+1);		// one more data per m
 	const long nphi = shtns->nphi;
 	const size_t nlm_stride = ((2*nlm2+WARPSZE-1)/WARPSZE) * WARPSZE;
-	const size_t spat_stride = ((shtns->nlat_padded*(nphi + (nphi/2==shtns->mmax))+WARPSZE-1)/WARPSZE) * WARPSZE;		// for odd nphi, reserve more space to store the full Fourier data
+	const size_t spat_stride = ((shtns->nlat_padded*(nphi + (nphi/2==shtns->mmax))+WARPSZE-1)/WARPSZE) * WARPSZE * howmany;		// for odd nphi, reserve more space to store the full Fourier data
 	const size_t dual_stride = (spat_stride < nlm_stride*howmany) ? nlm_stride*howmany : spat_stride;		// we need two spatial buffers to also hold spectral data.
 
 	size_t sze = nlm_stride;		// 1 spectral buffer for scalar only ...
@@ -765,8 +764,14 @@ void fourier_to_spat_gpu(shtns_cfg shtns, void* q, const int mmax, const long si
 			// THETA_CONTIGUOUS
 			// rely on vkfft to avoid reading the unused Fourier modes above shtns->mmax
 			if (mmax < shtns->mmax) {	// some zero must be added, only if more than nominal
-				const long nlat = shtns->nlat_padded;
-				cudaMemsetAsync( ((char*)q) + sizeof_real*(mmax+1)*nlat, 0, sizeof_real*(nphi-2*mmax-1)*nlat, shtns->comp_stream );		// zero out m>mmax before fft
+				const long nlat = shtns->nlat;
+				const long width = sizeof_real*nlat*(nphi-2*mmax-1);
+				char *dst = ((char*)q) + sizeof_real*nlat*(mmax+1);
+				if (shtns->howmany == 1) {
+					cudaMemsetAsync( dst, 0, width, shtns->comp_stream );		// zero out m>mmax before fft
+				} else {
+					cudaMemset2DAsync( dst, sizeof_real*shtns->spat_dist, 0, width, shtns->howmany, shtns->comp_stream );		// zero out m>mmax before fft
+				}
 			}
 			launchParams.buffer = (void**) &q;
 		}
@@ -819,7 +824,7 @@ static void legendre(shtns_cfg shtns, const int S, const void *ql, void *q, cons
 	int par_idx = (sh2ish_fuse) ? 2 : 0;
 
 	int llim_ = llim;
-	void* params[11] = {&shtns->d_clm, &shtns->d_ct, &ql, &q, &llim_, &nlat_2, &shtns->nphi, &shtns->nlat_padded, &nlm_stride, &shtns->nlat, &shtns->d_xlm};
+	void* params[11] = {&shtns->d_clm, &shtns->d_ct, &ql, &q, &llim_, &nlat_2, &shtns->nphi, &shtns->nlat_padded, &nlm_stride, &shtns->spat_dist, &shtns->d_xlm};
 	cuLaunchKernel(shtns->gpu_kernels[S], 
 			shtns->gridDim_x[par_idx], shtns->gridDim_y[0], mmax+1,		// grid dim
 			shtns->nwarp[par_idx]*WARPSZE, 1, 1,					// block dim
@@ -844,7 +849,7 @@ static void ilegendre(shtns_cfg shtns, const int S, const void *q, void* ql, con
 
 	int llim_ = llim;
 	float w_norm_1_f = shtns->wg[-1];	// convert to float
-	void* params[11] = {&shtns->d_clm, &shtns->d_ct, &q, &ql, &llim_, &nlat_2, &shtns->nphi, &shtns->nlat_padded, &shtns->nlat, &shtns->nlm_stride, &(shtns->wg[-1])};
+	void* params[11] = {&shtns->d_clm, &shtns->d_ct, &q, &ql, &llim_, &nlat_2, &shtns->nphi, &shtns->nlat_padded, &shtns->spat_dist, &shtns->nlm_stride, &(shtns->wg[-1])};
 	if (shtns->sizeof_real == 4) params[10] = &w_norm_1_f;		// weight_norm_1 as a float
 	cuLaunchKernel(shtns->gpu_kernels[2+S], 		// analysis kernels
 			shtns->gridDim_x[1], shtns->gridDim_y[1], mmax+1,		// grid dim
