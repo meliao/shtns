@@ -26,8 +26,6 @@
 
 // when possible, allows to fuse sh2ishioka into leg_m_kernel, reducing memory traffic
 #define SHT_ALLOW_SH2ISH_FUSE 1
-// use alternate ishioka conversion without shared mem, relying on cache (always faster on V100)
-#define SHT_ISH_ALT 1
 
 
 /// Macro to check for cuda error and print details
@@ -166,7 +164,7 @@ transpose_cplx_skip_R2C(cudaStream_t stream, const void* in, void* out, const in
 
 
 template<typename real> __global__ void
-sh2ishioka_kernel_alt(const int NFIELDS, const real* __restrict__ xlm, const real* __restrict__ ql, real* ql_ish,
+sh2ishioka_kernel(const int NFIELDS, const real* __restrict__ xlm, const real* __restrict__ ql, real* ql_ish,
 		const int llim, const int lmax, const int mres, const int S, const int ql_dist=0, const int ql_ish_dist=0)
 {
 	const int im = blockIdx.y;
@@ -203,7 +201,7 @@ sh2ishioka_kernel_alt(const int NFIELDS, const real* __restrict__ xlm, const rea
 }
 
 template<typename real> __global__ void
-sh2reduced_kernel_alt(const int NFIELDS, const real* __restrict__ xlm, const real* __restrict__ ql, real* ql_ish,
+sh2reduced_kernel(const int NFIELDS, const real* __restrict__ xlm, const real* __restrict__ ql, real* ql_ish,
 		const int llim, const int lmax, const int mres, const int S, const int ql_dist=0, const int ql_ish_dist=0)
 {
 	const int im = blockIdx.y;
@@ -233,51 +231,11 @@ sh2reduced_kernel_alt(const int NFIELDS, const real* __restrict__ xlm, const rea
 		}
 	}
 }
-__global__ void
-sh2ishioka_kernel(const double* __restrict__ xlm, const double* __restrict__ ql, double* ql_ish, 
-	const int llim, const int lmax, const int mres, const int S, const int ql_dist=0, const int ql_ish_dist=0)
-{
-	const int j = threadIdx.x;
-	const int im = blockIdx.y;
-	const int b = blockIdx.z;
-	const int l0 = ((blockDim.x-4) * blockIdx.x) >> 1;		// some overlap needed
-
-	const int l  = l0 + (j >> 1);
-	const int m = im*mres;
-	const int q_ofs = im*(((lmax+1+S)*2) -m+mres) + 2*l0;
-	const int x_ofs = 3*im*(2*(lmax+4) -m+mres)/4 + 3*(l0 >> 1);
-	const int llim_m = llim-m;
-
-	extern __shared__ double ql_[];			// size blockDim.x
-	double* const xl_ = ql_ + blockDim.x;	// size blockDim.x/4*3 - 3
-
-	double q = 0.0;
-	if (l <= llim_m) {
-		if (j<(blockDim.x>>2)*3-3) xl_[j] = xlm[x_ofs +j];
-		q = ql[q_ofs +j + b*ql_dist];
-	}
-	if ((l-2 <= llim_m) && ((j&2) == 0)) ql_[(j>>1)+(j&1)] = q;
-
-	__syncthreads();
-
-	if ((l<=llim_m) && (j < blockDim.x-4)) {
-		int ix = 3*(j>>2);		// 3*l/2.
-		q *= xl_[ix + (j&2)];	// ix for l-m even, ix+2 for l-m odd
-		if ((j&2)==0) {		// for l-m even
-			q += ql_[(j>>1)+(j&1)+2] * xl_[ix+1];			// contribution of l+2
-		}
-		if (im > 0) {
-			ql_ish[q_ofs +j + b*ql_ish_dist] = q;	// coalesced store
-		} else if ((j&1)==0) {
-			ql_ish[q_ofs -l0 +(j>>1) + b*ql_ish_dist] = q;	// coalesced store
-		}
-	}
-}
 
 /// performs: Ql[2*l] = qq[2*l]*xlm[3*l] + qq[2*l-2]*xlm[3*l+1];   Ql[2*l+1] = qq[2*l+1] * xlm[3*l+2];
 /// includes zero-out for unused modes.
 template<typename real> __global__ void
-ishioka2sh_kernel_alt(const int NFIELDS, const real* __restrict__ xlm, const real* __restrict__ ql_ish, real* ql,
+ishioka2sh_kernel(const int NFIELDS, const real* __restrict__ xlm, const real* __restrict__ ql_ish, real* ql,
 	const int llim, const int lmax, const int mmax, const int mres, const int S, const int ql_ish_dist=0, const int ql_dist=0)
 {
 	const int im = blockIdx.y;
@@ -324,102 +282,6 @@ ishioka2sh_kernel_alt(const int NFIELDS, const real* __restrict__ xlm, const rea
 			}
 			ql[k*ql_dist] = q;	// coalesced store
 		}
-	}
-}
-
-
-
-
-/// performs: Ql[2*l] = qq[2*l]*xlm[3*l] + qq[2*l-2]*xlm[3*l+1];   Ql[2*l+1] = qq[2*l+1] * xlm[3*l+2];
-/// includes zero-out for unused modes.
-__global__ void
-ishioka2sh_kernel(const double* __restrict__ xlm, const double* __restrict__ ql_ish, double* ql, 
-	const int llim, const int lmax, const int mmax, const int mres, const int S, const int ql_ish_dist=0, const int ql_dist=0)
-{
-	const int j = threadIdx.x;
-	const int im = blockIdx.y;
-	const int b = blockIdx.z;
-	const int l0 = ((blockDim.x-4) * blockIdx.x) >> 1;		// some overlap needed
-
-	const int l  = l0 + (j >> 1);
-	const int m = im*mres;
-	const int q_ofs = im*(((lmax+1+S)*2) -m+mres) + 2*l0;
-	const int x_ofs = 3*im*(2*(lmax+4) -m+mres)/4 + 3*(l0 >> 1);
-	const int llim_m = llim-m;
-
-	extern __shared__ double ql_[];			// size blockDim.x
-	double* const xl_ = ql_ + blockDim.x;	// size blockDim.x/4*3 - 3
-
-	double q = 0.0;
-	if ((l-2 <= llim_m) && (im <= mmax)) {
-		if ((j<(blockDim.x>>2)*3+3) && (x_ofs+j-3 >= 0)) xl_[j] = xlm[x_ofs +j-3];
-		if (l-2 >= 0) {
-			if (im>0) {
-				q = ql_ish[q_ofs +j-4 + b*ql_ish_dist];		// ql_[4] = ql_ish[0]
-			} else if ((j&1) == 0) {
-				q = ql_ish[((q_ofs +j-4)>>1) + b*ql_ish_dist];		// ql_[4] = ql_ish[0]
-			}
-		}
-		ql_[j] = q;
-	}
-
-	__syncthreads();
-
-	if (j<blockDim.x-4) {
-		q = 0.0;
-		if ((l<=llim_m) && (im <= mmax)) {
-			int ix = 3*(j>>2)+3;		// 3*l/2.
-			q = ql_[j+4] * xl_[ix + (j&2)];	// ix for l-m even, ix+2 for l-m odd
-			if ((j&2)==0) {		// for l-m even
-				q += ql_[j] * xl_[ix-2];			// contribution of l-2
-			}
-		}
-		if (l0+j == 0)  q += ql_ish[llim+1] * xl_[0];		// add the mean
-		if (l<=lmax+S-m)
-			ql[q_ofs +j + b*ql_dist] = q;	// coalesced store (including zero-out for llim<l<=lmax) AND zero-out for m>mmax
-	}
-}
-
-
-/** \internal convert from vector SH to scalar SH. slm or tlm can be null pointers.
-	Vlm =  st*d(Slm)/dtheta + I*m*Tlm
-	Wlm = -st*d(Tlm)/dtheta + I*m*Slm
-*/
-template<int BLOCKSIZE> __global__ void
-sphtor2scal_kernel(const double* __restrict__ mx, const double* __restrict__ slm, const double* __restrict__ tlm, double *vlm, double *wlm, const int llim, const int lmax, const int mres)
-{
-	// indices for overlapping blocks:
-	const int ll = (blockDim.x-4) * blockIdx.x + threadIdx.x - 2;		// = 2*l + ((imag) ? 1 : 0)
-	const int j = threadIdx.x;
-	const int im = blockIdx.y;
-
-	__shared__ double sl[BLOCKSIZE];
-	__shared__ double tl[BLOCKSIZE];
-	__shared__ double M[BLOCKSIZE];
-
-	const int m = im*mres;
-	const int ofs   = im*(((lmax+1)<<1) -m + mres) + ll;
-
-	if ( (ll >= 0) && (ll < 2*(llim+1-m)) ) {
-		M[j] = mx[ofs];
-		sl[j] = (slm) ? slm[ofs] : 0.0;
-		tl[j] = (tlm) ? tlm[ofs] : 0.0;
-	} else {
-		M[j] = 0.0;
-		sl[j] = 0.0;
-		tl[j] = 0.0;
-	}
-	const double mimag = m * (j - (j^1));
-
-	__syncthreads();
-
-	if ((j<BLOCKSIZE-4) && (ll < 2*(llim+1-m))) {
-		double ml = M[2*(j>>1)+1];
-		double mu = M[2*(j>>1)+2];
-		double v = mimag*tl[(j+2)^1]  +  (ml*sl[j] + mu*sl[j+4]);
-		double w = mimag*sl[(j+2)^1]  -  (ml*tl[j] + mu*tl[j+4]);
-		vlm[ofs+2*im+2] = v;
-		wlm[ofs+2*im+2] = w;
 	}
 }
 
@@ -500,61 +362,6 @@ sphtor2ish_kernel(const real* __restrict__ mx, const real* __restrict__ xlm,
 		} else if ((j&1)==0) {		// compress complex to real (as imaginary part is zero)
 			vlm[(ofs>>1)+1 + b*ql_ish_dist] = v;	// coalesced store
 			wlm[(ofs>>1)+1 + b*ql_ish_dist] = w;	// coalesced store
-		}
-	}
-}
-
-
-/** \internal convert from 2 scalar SH to vector SH
-	Slm = - (I*m*Wlm + MX*Vlm) / (l*(l+1))
-	Tlm = - (I*m*Vlm - MX*Wlm) / (l*(l+1))
-**/
-template<int BLOCKSIZE> __global__ void
-scal2sphtor_kernel(const double* __restrict__ mx, const double* __restrict__ vlm, const double* __restrict__ wlm, double *slm, double *tlm, const int llim, const int lmax, const int mres)
-{
-	// indices for overlapping blocks:
-	int ll = (blockDim.x-4) * blockIdx.x + threadIdx.x - 2;		// = 2*l + ((imag) ? 1 : 0)
-	const int j = threadIdx.x;
-	const int im = blockIdx.y;
-
-	__shared__ double vl[BLOCKSIZE];
-	__shared__ double wl[BLOCKSIZE];
-	__shared__ double M[BLOCKSIZE];
-
-	const int m = im * mres;
-	int ofs = im*(2*(lmax+1) -m + mres)  + ll;
-	const int llim_m_p1 = llim+1-m;
-	ll >>= 1;
-
-	if ( (ll >= 0) && (ll < llim_m_p1) ) {
-		M[j] = mx[ofs];
-	} else M[j] = 0.0;
-
-	if ( (ll >= 0) && (ll <= llim_m_p1) ) {
-		vl[j] = vlm[ofs+2*im];
-		wl[j] = wlm[ofs+2*im];
-	} else {
-		vl[j] = 0.0;
-		wl[j] = 0.0;
-	}
-
-	ll += m + 1;		// +1 because we shift below
-
-	__syncthreads();
-
-	if (j<BLOCKSIZE-4) {
-		if ((ll <= llim) && (ll>0)) {
-			const double mimag = m * ((j^1) -j);
-			double ll_1 = 1.0 / (ll*(ll+1));
-			double ml = M[2*(j>>1)];
-			double mu = M[2*(j>>1)+3];
-			double s = mimag*wl[(j+2)^1]  +  (ml*vl[j] + mu*vl[j+4]);
-			double t = mimag*vl[(j+2)^1]  -  (ml*wl[j] + mu*wl[j+4]);
-			slm[ofs+2] = s * ll_1;
-			tlm[ofs+2] = t * ll_1;
-		} else if (ll <= lmax) {	// fill with zeros up to lmax (and l=0 too).
-			slm[ofs+2] = 0.0;
-			tlm[ofs+2] = 0.0;
 		}
 	}
 }
@@ -660,14 +467,6 @@ void set_block_size_ish(int n_elem_x, int howmany_z, int& blksze_x, int& blksze_
 template<typename real=double>
 void sh2ishioka_gpu(shtns_cfg shtns, std::complex<real>* d_Qlm, std::complex<real>* d_Qlm_ish, int llim, int mmax, int S=0)
 {
-#ifndef SHT_ISH_ALT
-	int blksze = (((llim+2)*2+WARPSZE-1)/WARPSZE) * WARPSZE;
-	if (blksze > MAX_THREADS_PER_BLOCK) blksze = MAX_THREADS_PER_BLOCK;
-	dim3 blocks((2*(llim+3)+blksze-5)/(blksze-4), mmax+1, shtns->howmany);
-	dim3 threads(blksze, 1, 1);
-	sh2ishioka_kernel <<< blocks, threads,(blksze/4*7-3)*sizeof(double), shtns->comp_stream >>>
-		(shtns->d_xlm, (double*) d_Qlm, (double*) d_Qlm_ish, llim, shtns->lmax, shtns->mres, S, shtns->spec_dist*2, shtns->nlm_stride);
-#else
 	int blksze, blksze_z, nblk_z;
 	const int nelem_max = (llim+1+S)*2;
 	int nfields = shtns->howmany;
@@ -684,20 +483,19 @@ void sh2ishioka_gpu(shtns_cfg shtns, std::complex<real>* d_Qlm, std::complex<rea
 	dim3 threads(blksze, 1, blksze_z);
 	const real* xlm = (real*) shtns->d_xlm;
 	if (shtns->kernel_flags & CUSHT_NO_ISHIOKA) {	// no ishioka
-		sh2reduced_kernel_alt <<< blocks, threads, 0, shtns->comp_stream >>>
+		sh2reduced_kernel <<< blocks, threads, 0, shtns->comp_stream >>>
 			(nfields, xlm, (real*) d_Qlm, (real*) d_Qlm_ish, llim, shtns->lmax, shtns->mres, S, shtns->spec_dist*2, shtns->nlm_stride);
 	} else {
-		sh2ishioka_kernel_alt <<< blocks, threads, 0, shtns->comp_stream >>>
+		sh2ishioka_kernel <<< blocks, threads, 0, shtns->comp_stream >>>
 			(nfields, xlm, (real*) d_Qlm, (real*) d_Qlm_ish, llim, shtns->lmax, shtns->mres, S, shtns->spec_dist*2, shtns->nlm_stride);
 	}
-#endif
 	CUDA_ERROR_CHECK;
 }
 
 /// performs: Ql[2*l] = qq[2*l]*xlm[3*l] + qq[2*l-2]*xlm[3*l+1];   Ql[2*l+1] = qq[2*l+1] * xlm[3*l+2];
 /// includes zero-out for unused modes.
 template<typename real> __global__ void
-reduced2sh_kernel_alt(const int NFIELDS, const real* __restrict__ xlm, const real* __restrict__ ql_ish, real* ql,
+reduced2sh_kernel(const int NFIELDS, const real* __restrict__ xlm, const real* __restrict__ ql_ish, real* ql,
 	const int llim, const int lmax, const int mmax, const int mres, const int S, const int ql_ish_dist=0, const int ql_dist=0)
 {
 	const int im = blockIdx.y;
@@ -739,14 +537,6 @@ reduced2sh_kernel_alt(const int NFIELDS, const real* __restrict__ xlm, const rea
 template<typename real=double>
 void ishioka2sh_gpu(shtns_cfg shtns, std::complex<real>* d_Qlm_ish, std::complex<real>* d_Qlm, int llim, int mmax, int S=0)
 {
-#ifndef SHT_ISH_ALT
-	int blksze = (((shtns->lmax+3)*2+WARPSZE-1)/WARPSZE) * WARPSZE;
-	if (blksze > MAX_THREADS_PER_BLOCK) blksze = MAX_THREADS_PER_BLOCK;
-	dim3 blocks((2*(shtns->lmax+3)+blksze-5)/(blksze-4), shtns->mmax+1, shtns->howmany);
-	dim3 threads(blksze, 1, 1);
-	ishioka2sh_kernel <<< blocks, threads, (blksze/4*7+3)*sizeof(double), shtns->comp_stream >>>
-		(shtns->d_x2lm, (double*) d_Qlm_ish, (double*) d_Qlm, llim, shtns->lmax, mmax, shtns->mres, S, shtns->nlm_stride, shtns->spec_dist*2);
-#else
 	int blksze, blksze_z, nblk_z;
 	const int nelem_max = (shtns->lmax+1+S)*2;
 	int nfields = shtns->howmany;
@@ -764,13 +554,12 @@ void ishioka2sh_gpu(shtns_cfg shtns, std::complex<real>* d_Qlm_ish, std::complex
 	dim3 threads(blksze, 1, blksze_z);
 	const real* xlm = (real*) shtns->d_x2lm;
 	if (shtns->kernel_flags & CUSHT_NO_ISHIOKA) {
-		reduced2sh_kernel_alt <<< blocks, threads, 0, shtns->comp_stream >>>
+		reduced2sh_kernel <<< blocks, threads, 0, shtns->comp_stream >>>
 			(nfields, xlm, (real*) d_Qlm_ish, (real*) d_Qlm, llim, shtns->lmax, mmax, shtns->mres, S, shtns->nlm_stride, shtns->spec_dist*2);
 	} else {
-		ishioka2sh_kernel_alt <<< blocks, threads, 0, shtns->comp_stream >>>
+		ishioka2sh_kernel <<< blocks, threads, 0, shtns->comp_stream >>>
 			(nfields, xlm, (real*) d_Qlm_ish, (real*) d_Qlm, llim, shtns->lmax, mmax, shtns->mres, S, shtns->nlm_stride, shtns->spec_dist*2);
 	}
-#endif
 	CUDA_ERROR_CHECK;
 }
 
