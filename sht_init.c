@@ -401,13 +401,18 @@ static void planFFT(shtns_cfg shtns, int layout)
 
 	// default layout:
 	phi_inc = shtns->nlat * howmany;
-	#ifndef SHTNS_GPU
-	if ((layout & SHT_ALLOW_PADDING) && (phi_inc % 64 == 0) && (NPHI * phi_inc > 512) && ((NPHI>1)||(howmany>1)))
-		phi_inc += 8;		// we add some padding, to avoid cache bank conflicts.
-	#elif SHTNS_GPU==2
-	if ((layout & SHT_ALLOW_PADDING) && (phi_inc % 256 == 0) && (NPHI * phi_inc > 4096) && (NPHI>1))
-		phi_inc += 8;           // add pading to avoid memory bank / channel conflicts on AMD GPUs.
-	#endif
+	if (layout & SHT_ALLOW_PADDING) {	// handle padding
+		int pad = 0;
+		#ifndef SHTNS_GPU
+		if ((phi_inc % 64 == 0) && (NPHI * phi_inc > 512) && ((NPHI>1)||(howmany>1)))
+			pad = 8;			// we add some padding, to avoid cache bank conflicts.
+		#elif SHTNS_GPU==2
+		if ((phi_inc % 256 == 0) && (NPHI * phi_inc > 4096) && (NPHI>1))
+			pad = 8;			// add padding to avoid memory bank / channel conflicts on AMD GPUs.
+		#endif
+		const char* env_pad = getenv("SHTNS_PAD");    if (env_pad) pad = atoi(env_pad);		// override default with SHTNS_PAD environment variable
+		phi_inc += pad;
+	}
 	shtns->k_stride_a = 1;		shtns->m_stride_a = phi_inc;		// default strides
 	shtns->nlat_padded = phi_inc;		// stride between phi in spectral domain
 	shtns->nspat = NPHI * phi_inc;		// default spatial size to be allocated for a transform call
