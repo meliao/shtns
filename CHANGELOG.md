@@ -1,8 +1,18 @@
 SHTNS CHANGE LOG:
 -----------------
 
+* v3.7
+	- Python and GPU: support CuPy array in `synth()` and `analys()` methods.
+	- GPU: allow phi-contiguous layout.
+	- Batch transforms: change spatial layout so that batch is the outermost dimension;
+	  `shtns_set_batch()` is renamed to `shtns_set_many()` to mark this change.
+	- new `im_from_lm()` function to recover order from index in array.
+	- Improved accuracy of gauss nodes and weights, and `SH_Zrotate()` function.
+	- GPU: optimizations for MI200
+	- Bug fixes
+
 * v3.6.6  (29 Feb 2024)
-    - fix building of python module with cuda support
+	- fix building of python module with cuda support
 
 * v3.6.5  (28 Feb 2024)
 	- Improve accuracy of scalar transforms with large mean (l=0).

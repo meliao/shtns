@@ -17,6 +17,7 @@ function test1 {
 }
 
 echo "beginning test suite for $id" > $log
+lscpu -p=MODELNAME | tail -1 > $log
 
 # first, do a huge transform :
 test1 "2047 -mres=15 -quickinit -iter=1"

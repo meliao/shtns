@@ -5,4 +5,5 @@ include configure
 include *.in
 include fftw3/*
 include SHT/*
+include hiprec/*
 exclude *cuda* SHT/*cu
