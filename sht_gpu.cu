@@ -173,7 +173,7 @@ static int init_cuda_buffer_fft(shtns_cfg shtns, int cuda_gpu_id, int sizeof_rea
 			VkFFTConfiguration config = {};		//zero-initialize configuration
 			if (shtns->fft_mode & FFT_THETA_CONTIG) {
 				printf("!!! Use theta-contiguous FFT on GPU !!!\n");
-				long dist = shtns->nlat_padded / 2;
+				const long dist = shtns->nlat_padded / 2;
 				config.FFTdim = 2; //FFT dimension: 1D, but we use a second dimension to get non-unit strides.
 				config.size[0] = shtns->nlat_2;
 				config.size[1] = nfft;
@@ -187,6 +187,10 @@ static int init_cuda_buffer_fft(shtns_cfg shtns, int cuda_gpu_id, int sizeof_rea
 					config.fft_zeropad_right[1] = nfft - shtns->mmax;		// first non-zero element
 				}
 				config.numberBatches = shtns->howmany;
+				#if SHTNS_GPU == 2
+				if (dist*2*sizeof_real*(2*MMAX+1) > 8192*1024*1.2)   // when FFT larger than L2 cache (with a safety factor), always ensure coalescedMemory=64 on AMD GPU
+					config.coalescedMemory = 64;    // important for AMD MI100, MI200+, up to 30% better, eg lmax=1023, nlorder=1
+				#endif
 			} else if (shtns->fft_mode & FFT_PHI_CONTIG) {
 				printf("!!! Use phi-contiguous FFT on GPU (with transpose step) !!!\n");
 				long howmany = shtns->nlat * shtns->howmany;		// support batched transforms

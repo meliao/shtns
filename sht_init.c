@@ -401,14 +401,28 @@ static void planFFT(shtns_cfg shtns, int layout)
 
 	// default layout:
 	phi_inc = shtns->nlat;
-	if (layout & SHT_ALLOW_PADDING) {	// handle padding
+	if ((layout & SHT_ALLOW_PADDING) && NPHI>1) {	// handle padding
 		int pad = 0;
 		#ifndef SHTNS_GPU
-		if ((phi_inc % 64 == 0) && (NPHI * phi_inc > 512) && (NPHI>1))
+		if ((phi_inc % 64 == 0) && (NPHI * phi_inc > 512))
 			pad = 8;			// we add some padding, to avoid cache bank conflicts.
 		#elif SHTNS_GPU==2
-		if ((phi_inc % 32 == 0) && (NPHI * phi_inc > 4096) && (NPHI>1))
-			pad = 8;		// add padding to avoid memory bank / channel / whatever conflicts on AMD GPUs (large impact on performance).
+		const long stride_bytes = phi_inc * shtns->sizeof_real;
+		if (NPHI * stride_bytes > 32*1024) {	// if the full fft does not fit in 32 kb (the L1 cache size)
+			if (stride_bytes % 32)	pad = 32 - (stride_bytes % 32);		// always align on 32 bytes
+			if ((stride_bytes+pad) % 8192 == 0) {
+				pad += 64;		// avoid multiple of 8 kb
+			} else {
+				if (NPHI*(stride_bytes+pad) < 8192*1024) {		// full data (including padding) fits in L2
+					if (stride_bytes % 64)  pad = 64 - (stride_bytes % 64);		// align on 64 bytes
+					if ((stride_bytes+pad) % 128 == 0) pad += 64;		// add padding to avoid L2 cache bank / channel / whatever conflicts on AMD GPUs (large impact on performance).
+				} else
+				if ((2*MMAX+1)*stride_bytes < 8192*1024*1.2) {		// if an fft entirely fits in the L2 cache (8 Mb for AMD MI100 and MI200)
+					if ((stride_bytes+pad) % 128 == 0) pad += 32;	// add padding to avoid L2 cache bank / channel / whatever conflicts on AMD GPUs (large impact on performance).
+				}
+			}
+			pad /= shtns->sizeof_real;		// in units of real
+		}
 		#endif
 		const char* env_pad = getenv("SHTNS_PAD");    if (env_pad) pad = atoi(env_pad);		// override default with SHTNS_PAD environment variable
 		phi_inc += pad;
