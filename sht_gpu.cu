@@ -764,7 +764,7 @@ void fourier_to_spat_gpu(shtns_cfg shtns, void* q, const int mmax, const long si
 			// THETA_CONTIGUOUS
 			// rely on vkfft to avoid reading the unused Fourier modes above shtns->mmax
 			if (mmax < shtns->mmax) {	// some zero must be added, only if more than nominal
-				const long nlat = shtns->nlat;
+				const long nlat = shtns->nlat_padded;
 				const long width = sizeof_real*nlat*(nphi-2*mmax-1);
 				char *dst = ((char*)q) + sizeof_real*nlat*(mmax+1);
 				if (shtns->howmany == 1) {
