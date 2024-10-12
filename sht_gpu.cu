@@ -760,8 +760,8 @@ void fourier_to_spat_gpu(shtns_cfg shtns, void* q, const int mmax, const long si
 		VkFFTLaunchParams launchParams = {};
 		if (shtns->fft_mode & FFT_PHI_CONTIG) {
 			xfft = (char*) shtns->gpu_buf_in;
-			if (shtns->mx_stdt) xfft += shtns->nlm_stride * 2*sizeof_real;	// vector transforms: do not overwrite temporary spectral data stored in gpu_buf_in
-			transpose_cplx_zero_C2R(shtns->comp_stream, q, xfft, shtns->nlat, nphi/2+1, nphi/2, mmax, sizeof_real);		// zero out m>mmax during transpose
+			if (shtns->mx_stdt) xfft += shtns->nlm_stride * shtns->howmany * 2*sizeof_real;	// vector transforms: do not overwrite temporary spectral data stored in gpu_buf_in
+			transpose_cplx_zero_C2R(shtns->comp_stream, q, xfft, shtns->nlat, nphi/2+1, nphi/2, mmax, sizeof_real, shtns->howmany, shtns->spat_dist, shtns->nlat*2*(nphi/2+1));		// zero out m>mmax during transpose
 			launchParams.buffer = (void**) &xfft;
 			launchParams.inputBuffer = (void**) &q;
 		} else {
@@ -799,7 +799,7 @@ void spat_to_fourier_gpu(shtns_cfg shtns, void* q, const int mmax, const long si
 		VkFFTLaunchParams launchParams = {};
 		if (shtns->fft_mode & FFT_PHI_CONTIG) {
 			xfft = (char*) shtns->gpu_buf_in;
-			if (shtns->mx_stdt) xfft += shtns->nlm_stride * 2*sizeof_real;	// vector transforms: do not overwrite temporary spectral data stored in gpu_buf_in
+			if (shtns->mx_stdt) xfft += shtns->nlm_stride * shtns->howmany * 2*sizeof_real;	// vector transforms: do not overwrite temporary spectral data stored in gpu_buf_in
 			launchParams.buffer = (void**) &xfft;
 			launchParams.inputBuffer = (void**) &q;			
 		} else {
@@ -808,7 +808,7 @@ void spat_to_fourier_gpu(shtns_cfg shtns, void* q, const int mmax, const long si
 		}
 		VkFFTAppend(&shtns->vkfft_plan, -1, &launchParams);
 		if (shtns->fft_mode & FFT_PHI_CONTIG) {
-			transpose_cplx_skip_R2C(shtns->comp_stream, xfft, q, nphi/2+1, shtns->nlat, mmax, sizeof_real);		// ignore m > mmax during transpose
+			transpose_cplx_skip_R2C(shtns->comp_stream, xfft, q, nphi/2+1, shtns->nlat, mmax, sizeof_real, shtns->howmany, shtns->nlat*2*(nphi/2+1), shtns->spat_dist);		// ignore m > mmax during transpose
 		}
 	#endif
 	}

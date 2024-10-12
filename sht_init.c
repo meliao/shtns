@@ -443,14 +443,15 @@ static void planFFT(shtns_cfg shtns, int layout)
 	/* NPHI > 1 */
 	theta_inc=1;	// SHT_NATIVE_LAYOUT is the default.
 	if (layout & SHT_PHI_CONTIGUOUS) {
-		if (howmany != 1) shtns_runerr("batch transform not supported for phi-contiguous layout\n");
-		// shtns->howmany MUST be 1!
 		phi_inc=1;  theta_inc=NPHI;
 		shtns->nspat = NPHI * NLAT;		// no padding, no batching.
 		#ifdef SHTNS_GPU
 		if (shtns->mmax == NPHI/2) shtns->nspat += NLAT;		// on GPU, a little bit of extra space is needed for odd NPHI, to store the Fourier coefficients.
 		#endif
 		shtns->nlat_padded = NLAT;
+
+		shtns->spat_dist = shtns->nspat;
+		shtns->nspat *= howmany;
 	}
 
 	if (verbose) {
@@ -475,22 +476,23 @@ static void planFFT(shtns_cfg shtns, int layout)
 	if (layout & SHT_PHI_CONTIGUOUS) {		// out-of-place split dft
 		if ((NLAT & 1) == 0) {
 			if (verbose) printf("(phi-contiguous layout: phi_inc=%d, theta_inc=%d)\n",phi_inc,theta_inc);
-			fftw_iodim dim, many;
+			fftw_iodim dim, many[2];
 			shtns->fft_mode = FFT_PHI_CONTIG_SPLIT | FFT_OOP;
-			dim.n = NPHI;    	dim.os = 1;			dim.is = NLAT;		// complex transpose
-			many.n = NLAT/2;	many.os = 2*NPHI;	many.is = 2;
-			shtns->ifftc = fftw_plan_guru_split_dft(1, &dim, 1, &many, ((double*)ShF)+1, (double*)ShF, Sh+NPHI, Sh, shtns->fftw_plan_mode);
+			dim.n = NPHI;    		dim.os = 1;				dim.is = NLAT;		// complex transpose
+			many[0].n = NLAT/2;		many[0].os = 2*NPHI;	many[0].is = 2;
+			many[1].n = howmany;		many[1].os = shtns->spat_dist;	many[1].is = shtns->spat_dist;
+			shtns->ifftc = fftw_plan_guru_split_dft(1, &dim,  (howmany==1) ? 1 : 2, many, ((double*)ShF)+1, (double*)ShF, Sh+NPHI, Sh, shtns->fftw_plan_mode);
 
 			// legacy analysis fft
 			//dim.n = NPHI;    	dim.is = 1;			dim.os = NLAT;
 			//many.n = NLAT/2;	many.is = 2*NPHI;	many.os = 2;
 			// new internal
-			dim.n = NPHI;    	dim.is = 1;			dim.os = 2;		// split complex, but without global transpose (faster).
-			many.n = NLAT/2;	many.is = 2*NPHI;	many.os = 2*NPHI;
-			shtns->fftc = fftw_plan_guru_split_dft(1, &dim, 1, &many,  Sh+NPHI, Sh, ((double*)ShF)+1, (double*)ShF, shtns->fftw_plan_mode);
+			dim.n = NPHI;    		dim.is = 1;				dim.os = 2;		// split complex, but without global transpose (faster).
+			many[0].n = NLAT/2;		many[0].is = 2*NPHI;	many[0].os = 2*NPHI;
+			shtns->fftc = fftw_plan_guru_split_dft(1, &dim, (howmany==1) ? 1 : 2, many,  Sh+NPHI, Sh, ((double*)ShF)+1, (double*)ShF, shtns->fftw_plan_mode);
 			shtns->k_stride_a = NPHI;		shtns->m_stride_a = 2;
 			shtns->nlat_padded = NLAT;
-			
+
 		/*	if (shtns->nthreads > 1) {
 				fftw_plan_with_nthreads(1);
 				// FOR MKL only:
@@ -1385,7 +1387,6 @@ int shtns_set_grid_auto(shtns_cfg shtns, enum shtns_type flags, double eps, int 
 	#endif
 	if (shtns->howmany != 1) {		// more constraints apply for batched transforms:
 		if (shtns->nlat & 1) shtns_runerr("Nlat must be even for a batched transform\n");
-		if (flags & SHT_PHI_CONTIGUOUS) shtns_runerr("batch transform not supported for phi-contiguous layout\n");
 	}
 	shtns_unset_grid(shtns);		// release grid if previously allocated.
 	if (nl_order <= 0) nl_order = SHT_DEFAULT_NL_ORDER;

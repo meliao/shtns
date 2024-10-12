@@ -798,7 +798,7 @@ int main(int argc, char *argv[])
 		if (strcmp(name,"nogpu") == 0) layout_opts &= ~SHT_ALLOW_GPU;		// Disable gpu.
 		if (strcmp(name,"float") == 0) layout_opts |= SHT_FP32;		// use float instead of double
 		if (strcmp(name,"accuracy") == 0) accuracy_test = 1;			// Perform an accuracy test instead of a speed test.
-		if (strcmp(name,"batch") == 0) { batch = -1;  layout = SHT_THETA_CONTIGUOUS; }	// Perform several transforms together, this implies a specific layout.
+		if (strcmp(name,"batch") == 0) batch = -1;		// Perform several transforms together.
 		if (strcmp(name,"noltr") == 0) noltr = 1;
 	}
 

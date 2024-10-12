@@ -45,7 +45,7 @@ bool cuda_error_check(const char* fname, int l)
 /// dim0, dim1 : size in complex numbers !
 /// BLOCK_DIM_Y must be a power of 2 between 1 and 16
 template<int TILE_DIM, int BLOCK_DIM_Y, typename T=double, int MULT=2> __global__ void
-transpose_cplx_zero_C2R_kernel(const T* in, T* out, const int dim0, const int dim1, const int mmax_plan, const int mlim)
+transpose_cplx_zero_C2R_kernel(const T* in, T* out, const int dim0, const int dim1, const int mmax_plan, const int mlim,  int idist, int odist)
 {
 	__shared__ T shrdMem[TILE_DIM][TILE_DIM+1][MULT];		// avoid shared mem conflicts
 
@@ -60,6 +60,7 @@ transpose_cplx_zero_C2R_kernel(const T* in, T* out, const int dim0, const int di
 	int gx = lx + bx;
 
 	if (gx < dim0) {
+		in += blockIdx.z * idist;
 		#pragma unroll
 		for (int repeat = 0; repeat < TILE_DIM; repeat += BLOCK_DIM_Y) {
 			int gy_ = gy+repeat;
@@ -76,6 +77,7 @@ transpose_cplx_zero_C2R_kernel(const T* in, T* out, const int dim0, const int di
 	// transpose within tile:
 	if (gy > mmax_plan) return;		// the m > mmax are ignored by vkFFT and can thus be left undefined
 
+	out += blockIdx.z * odist;
 	T z = {};	// zero
 	#pragma unroll
 	for (unsigned repeat = 0; repeat < TILE_DIM; repeat += BLOCK_DIM_Y) {
@@ -89,7 +91,7 @@ transpose_cplx_zero_C2R_kernel(const T* in, T* out, const int dim0, const int di
 /// dim0, dim1 : size in complex numbers !
 /// BLOCK_DIM_Y must be a power of 2 between 1 and 16
 template<int TILE_DIM, int BLOCK_DIM_Y, typename real=double> __global__ void
-transpose_cplx_skip_R2C_kernel(const real* in, real* out, const int dim0, const int dim1, const int mmax)
+transpose_cplx_skip_R2C_kernel(const real* in, real* out, const int dim0, const int dim1, const int mmax,  int idist, int odist)
 {
 	__shared__ real shrdMem[TILE_DIM][TILE_DIM+1][2];		// avoid shared mem conflicts
 
@@ -104,6 +106,7 @@ transpose_cplx_skip_R2C_kernel(const real* in, real* out, const int dim0, const 
 	int gy = ly + by;	// ilat
 
 	if (gx <= mmax) {		// read only data if m<=mmax
+		in += blockIdx.z * idist;
 		#pragma unroll
 		for (int repeat = 0; repeat < TILE_DIM; repeat += BLOCK_DIM_Y) {
 			int gy_ = gy+repeat;
@@ -119,6 +122,7 @@ transpose_cplx_skip_R2C_kernel(const real* in, real* out, const int dim0, const 
 	__syncthreads();
 	// transpose within tile:
 	if (gx >= dim1) return;
+	out += blockIdx.z * odist;
 	#pragma unroll
 	for (unsigned repeat = 0; repeat < TILE_DIM; repeat += BLOCK_DIM_Y) {
 		int gy_ = gy+repeat;
@@ -130,35 +134,37 @@ transpose_cplx_skip_R2C_kernel(const real* in, real* out, const int dim0, const 
 
 /// dim0, dim1 must be multiple of 16.
 static void
-transpose_cplx_zero_C2R(cudaStream_t stream, const void* in, void* out, const int dim0, const int dim1, const int mmax_plan, int mlim, int sizeof_real = 8)
+transpose_cplx_zero_C2R(cudaStream_t stream, const void* in, void* out, const int dim0, const int dim1,
+		const int mmax_plan, int mlim, int sizeof_real, int nbatch, int idist, int odist)
 {
 	if (sizeof_real==8) {
 		const int tile_dim = 16;
 		const int block_dim_y = 4;		// good performance with 4 (MUST be power of 2 between 1 and 16)
-		dim3 blocks((dim0+tile_dim-1)/tile_dim, (dim1+tile_dim-1)/tile_dim);
-		dim3 threads(tile_dim*2, block_dim_y);
-		transpose_cplx_zero_C2R_kernel<tile_dim, block_dim_y> <<<blocks, threads, 0, stream>>>((double*)in, (double*)out, dim0, dim1, mmax_plan, mlim);
+		dim3 blocks((dim0+tile_dim-1)/tile_dim, (dim1+tile_dim-1)/tile_dim, nbatch);
+		dim3 threads(tile_dim*2, block_dim_y, 1);
+		transpose_cplx_zero_C2R_kernel<tile_dim, block_dim_y> <<<blocks, threads, 0, stream>>>((double*)in, (double*)out, dim0, dim1, mmax_plan, mlim, idist, odist);
 	} else {
 		const int tile_dim = 32;
 		const int block_dim_y = 8;
-		dim3 blocks((dim0+tile_dim-1)/tile_dim, (dim1+tile_dim-1)/tile_dim);
-		dim3 threads(tile_dim, block_dim_y);
-		transpose_cplx_zero_C2R_kernel<tile_dim, block_dim_y,double,1> <<<blocks, threads, 0, stream>>>((double*)in, (double*)out, dim0, dim1, mmax_plan, mlim);
+		dim3 blocks((dim0+tile_dim-1)/tile_dim, (dim1+tile_dim-1)/tile_dim, nbatch);
+		dim3 threads(tile_dim, block_dim_y, 1);
+		transpose_cplx_zero_C2R_kernel<tile_dim, block_dim_y,double,1> <<<blocks, threads, 0, stream>>>((double*)in, (double*)out, dim0, dim1, mmax_plan, mlim, idist/2, odist/2);
 	}
 }
 
 /// dim0, dim1 must be multiple of 16.
 static void
-transpose_cplx_skip_R2C(cudaStream_t stream, const void* in, void* out, const int dim0, const int dim1, const int mmax, int sizeof_real = 8)
+transpose_cplx_skip_R2C(cudaStream_t stream, const void* in, void* out, const int dim0, const int dim1,
+		const int mmax, int sizeof_real, int nbatch, int idist, int odist)
 {
 	const int tile_dim = 16;
 	const int block_dim_y = 4;		// good performance with 4 (MUST be power of 2 between 1 and 16)
-	dim3 blocks((mmax+tile_dim)/tile_dim, (dim1+tile_dim-1)/tile_dim);
-	dim3 threads(tile_dim*2, block_dim_y);
+	dim3 blocks((mmax+tile_dim)/tile_dim, (dim1+tile_dim-1)/tile_dim, nbatch);
+	dim3 threads(tile_dim*2, block_dim_y, 1);
 	if (sizeof_real==8)
-		transpose_cplx_skip_R2C_kernel<tile_dim, block_dim_y> <<<blocks, threads, 0, stream>>>((double*)in, (double*)out, dim0, dim1, mmax);
+		transpose_cplx_skip_R2C_kernel<tile_dim, block_dim_y> <<<blocks, threads, 0, stream>>>((double*)in, (double*)out, dim0, dim1, mmax, idist, odist);
 	else
-		transpose_cplx_skip_R2C_kernel<tile_dim, block_dim_y,float> <<<blocks, threads, 0, stream>>>((float*)in, (float*)out, dim0, dim1, mmax);
+		transpose_cplx_skip_R2C_kernel<tile_dim, block_dim_y,float> <<<blocks, threads, 0, stream>>>((float*)in, (float*)out, dim0, dim1, mmax, idist, odist);
 }
 
 
