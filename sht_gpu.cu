@@ -54,6 +54,8 @@ const char *src_leg =
 	#include "SHT/cuda_legendre.inc"
 ;
 
+int ncplx_align(int nphi) {	const int align=2;	return ((nphi/2+1 + (align-1))/align)*align;	}
+
 /* TOOL FUNCTIONS */
 
 extern "C"
@@ -199,7 +201,7 @@ static int init_cuda_buffer_fft(shtns_cfg shtns, int cuda_gpu_id, int sizeof_rea
 				config.isInputFormatted = 1;		// out-of-place: separate buffer for input and output
 				config.inverseReturnToInputBuffer = 1;
 				config.inputBufferStride[0] = nfft;		// spatial data
-				config.bufferStride[0] = nfft/2 + 1;	// spectral data
+				config.bufferStride[0] = ncplx_align(nfft);	// spectral data
 				if (0) {	// disable zero-padding for now, as it is broken for large nfft
 					config.performZeropadding[0] = 1;
 					config.frequencyZeroPadding = 1;
@@ -242,7 +244,8 @@ static int init_cuda_buffer_fft(shtns_cfg shtns, int cuda_gpu_id, int sizeof_rea
 	size_t sze = nlm_stride;		// 1 spectral buffer for scalar only ...
 	if (shtns->mx_stdt) sze *= 2;	// ... 2 spectral buffer for vector transforms.
 	if (shtns->fft_mode & FFT_PHI_CONTIG) {
-		size_t fft_sze = ((shtns->nlat_padded*2*(nphi/2+1)+WARPSZE-1)/WARPSZE) * WARPSZE;	// Fourier data in R2C format takes up a little more space
+		int ncplx = ncplx_align(nphi);
+		size_t fft_sze = ((shtns->nlat_padded*2*ncplx+WARPSZE-1)/WARPSZE) * WARPSZE;	// Fourier data in R2C format takes up a little more space
 		if (shtns->mx_stdt) {	// for vector transform, we need to keep 2 spectral buffers together with a Fourier buffer:
 			sze += fft_sze;
 		} else if (fft_sze > sze) sze = fft_sze;		// one spatial buffer for FFT -OR- 2 spectral buffers should fit in.
@@ -761,7 +764,8 @@ void fourier_to_spat_gpu(shtns_cfg shtns, void* q, const int mmax, const long si
 		if (shtns->fft_mode & FFT_PHI_CONTIG) {
 			xfft = (char*) shtns->gpu_buf_in;
 			if (shtns->mx_stdt) xfft += shtns->nlm_stride * shtns->howmany * 2*sizeof_real;	// vector transforms: do not overwrite temporary spectral data stored in gpu_buf_in
-			transpose_cplx_zero_C2R(shtns->comp_stream, q, xfft, shtns->nlat, nphi/2+1, nphi/2, mmax, sizeof_real, shtns->howmany, shtns->spat_dist, shtns->nlat*2*(nphi/2+1));		// zero out m>mmax during transpose
+			int ncplx = ncplx_align(nphi);
+			transpose_cplx_zero_C2R(shtns->comp_stream, q, xfft, shtns->nlat, ncplx, nphi/2, mmax, sizeof_real, shtns->howmany, shtns->spat_dist, shtns->nlat*2*ncplx);		// zero out m>mmax during transpose
 			launchParams.buffer = (void**) &xfft;
 			launchParams.inputBuffer = (void**) &q;
 		} else {
@@ -808,7 +812,8 @@ void spat_to_fourier_gpu(shtns_cfg shtns, void* q, const int mmax, const long si
 		}
 		VkFFTAppend(&shtns->vkfft_plan, -1, &launchParams);
 		if (shtns->fft_mode & FFT_PHI_CONTIG) {
-			transpose_cplx_skip_R2C(shtns->comp_stream, xfft, q, nphi/2+1, shtns->nlat, mmax, sizeof_real, shtns->howmany, shtns->nlat*2*(nphi/2+1), shtns->spat_dist);		// ignore m > mmax during transpose
+			int ncplx = ncplx_align(nphi);
+			transpose_cplx_skip_R2C(shtns->comp_stream, xfft, q, ncplx, shtns->nlat, mmax, sizeof_real, shtns->howmany, shtns->nlat*2*ncplx, shtns->spat_dist);		// ignore m > mmax during transpose
 		}
 	#endif
 	}
