@@ -359,6 +359,7 @@ int init_cuda_program(shtns_cfg shtns, const char* gpu_arch_target)
 			if (shtns->howmany % 4 == 0) 	  {	nf_a=4;		nf_s=4;	}
 			else if (shtns->howmany % 3 == 0) {	nf_s=3;	}
 		}
+		if (shtns->howmany % 4 == 0)	{ nf_a=4;	lspan_a=32; }	// good for fp32 & fp64 with new internal layout
 	} else {	// assume MI100
 		if (nwarp_target > 2  &&  !hi_llim)	nf_s=1;
 	}
