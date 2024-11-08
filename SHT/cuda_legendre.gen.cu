@@ -239,8 +239,8 @@ __device__ __forceinline__ bool polar_skip_cost(float cost, int llim, int m) {
 /// requirements : blockSize must be 1 in the y- and z-direction and BLKSZE_S in the x-direction.
 /// llim MUST BE <= 1800, unless HI_LLIM=1
 template<int S> __global__
-#if defined(__gfx90a__) && BLKSZE_S <= 64 && BLKSZE_SH2ISH <= 64
-__launch_bounds__(64, 1)	// leads to better performance for small transforms on MI250
+#if WARPSZE == 64
+__launch_bounds__((BLKSZE_S<BLKSZE_SH2ISH) ? BLKSZE_SH2ISH : BLKSZE_S, 3)	// leads to better performance for small transforms on AMD MI250
 #endif
 void leg_m_kernel(
 	const real_g* __restrict__ al, const real_g* __restrict__ ct, const real* __restrict__ ql, real *q,
