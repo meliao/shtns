@@ -109,7 +109,7 @@ class make(build_ext):
         super().run()
 
 setup(name='shtns',
-    version='3.7',
+    version='3.7.3',
     cmdclass={'build_ext': make },
         description='High performance Spherical Harmonic Transform',
         author='Nathanael Schaeffer',
