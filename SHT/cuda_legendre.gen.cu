@@ -1016,9 +1016,7 @@ void leg_m_kernel(
 #endif
 
 template<int S> __global__
-#ifdef __gfx90a__
 __launch_bounds__(BLKSZE_A,1)
-#endif
 void ileg_m_kernel(const real_g* __restrict__ al, const real_g* __restrict__ ct, const real* __restrict__ q, real *ql, const int llim, 
 	const int nlat_2, const int nphi, const int m_inc, const int q_dist, const int ql_dist, const real w_norm
 #if BLKSZE_SH2ISH > 0
@@ -1040,7 +1038,7 @@ void ileg_m_kernel(const real_g* __restrict__ al, const real_g* __restrict__ ct,
 	static_assert( ((WARPSZE >= BLOCKSIZE/LSPAN) ? (WARPSZE % (BLOCKSIZE/LSPAN)) : ((BLOCKSIZE/LSPAN) % WARPSZE)) == 0, "WARPSZE and BLOCKSIZE/LSPAN must be multiples");
 	static_assert((LSPAN % 4) == 0, "LSPAN must be a multiple of 4");
 
-	__shared__ real_g ak[LSPAN+2];	// cache
+	__shared__ real_g ak[WARPSZE];	// cache
   #ifdef ILEG_ISHIOKA
 	const int padding = WARPSZE/16;		// padding = 0 is very bad for performance (shared-memory bank conflicts).
 	const int NROWS = M0_ONLY ? ( (LSPAN>4*NFIELDS) ? LSPAN/2 : 2*NFIELDS ) : ( (LSPAN>8*NFIELDS) ? LSPAN/2 : 4*NFIELDS );
@@ -1285,7 +1283,7 @@ void ileg_m_kernel(const real_g* __restrict__ al, const real_g* __restrict__ ct,
 	  #else
 		al += im*(LMAX+3) - (m*(im-1))/2;
 	  #endif
-		if (j < LSPAN+2) ak[j] = al[j];
+		if (j < 2) ak[j] = al[j];
 		ql += 2*(l + S*im);	// allow vector transforms where llim = lmax+1
 
 		#if NLAT_2 > BLKSZE_A
@@ -1425,7 +1423,9 @@ void ileg_m_kernel(const real_g* __restrict__ al, const real_g* __restrict__ ct,
 		y1 = ak[1]*cost * y0;
 	  #endif
 
-		l=m;		al+=2+LSPAN;
+		l=m;		al+=2;		int k0 = 0;
+		if ((BLOCKSIZE==WARPSZE  ||  j<WARPSZE) && (l+j<=llim))  ak[j] = al[j];
+		al += WARPSZE;
 	  #ifdef ILEG_ISHIOKA
 	    #if WARPSZE == 32
 			const int itl = (ll>>2)*l_inc + (j % (BLOCKSIZE/NW));		// transposed work (at given l)
@@ -1456,8 +1456,8 @@ void ileg_m_kernel(const real_g* __restrict__ al, const real_g* __restrict__ ct,
 		  #ifdef ILEG_ISHIOKA
 			#pragma unroll 4
 			for (int k=0; k<LSPAN/2; k+=2) {		// compute a block of the matrix, write it in shared mem.
-				real_g c0 = ak[2*k+3]*cost + ak[2*k+2];
-				real_g c1 = ak[2*k+5]*cost + ak[2*k+4];
+				real_g c0 = ak[k0 + 2*k+1]*cost + ak[k0 + 2*k];
+				real_g c1 = ak[k0 + 2*k+3]*cost + ak[k0 + 2*k+2];
 					if (fabs(y0) > SHT_ACCURACY*SHT_SCALE_FACTOR + 1)
 					{	// rescale when value is significant
 						++ny;
@@ -1472,8 +1472,8 @@ void ileg_m_kernel(const real_g* __restrict__ al, const real_g* __restrict__ ct,
 		  #else
 			#pragma unroll 4
 			for (int k=0; k<LSPAN; k+=2) {		// compute a block of the matrix, write it in shared mem.
-				real_g c0 = ak[k+2]*cost;
-				real_g c1 = ak[k+3]*cost;
+				real_g c0 = ak[k0 + k]*cost;
+				real_g c1 = ak[k0 + k+1]*cost;
 					if (fabs(y0) > SHT_ACCURACY*SHT_SCALE_FACTOR + 1)
 					{	// rescale when value is significant
 						++ny;
@@ -1486,10 +1486,14 @@ void ileg_m_kernel(const real_g* __restrict__ al, const real_g* __restrict__ ct,
 				y1 += c1 * y0;
 			}
 		  #endif
+			k0 += LSPAN;
 
 			y_zero = _ballot(ny);	// at this point block is in sync (consistent view of shared memory).
 
-			if (j<LSPAN) ak[j+2] = al[j];
+			if (k0==WARPSZE) {
+				if ((BLOCKSIZE==WARPSZE  ||  j<WARPSZE) && (l+j+LSPAN<=llim))  ak[j] = al[j];
+				al+=WARPSZE;	k0=0;
+			}
 
 			if (y_zero + 1 != 0) {		// when all y are zero (all bits set -- independent of size), we can skip this.
 
@@ -1563,7 +1567,6 @@ void ileg_m_kernel(const real_g* __restrict__ al, const real_g* __restrict__ ct,
 			}
 
 			l+=LSPAN;
-			al += LSPAN;
 		}
 	#endif
 
@@ -1572,8 +1575,8 @@ void ileg_m_kernel(const real_g* __restrict__ al, const real_g* __restrict__ ct,
 		  #ifdef ILEG_ISHIOKA
 			#pragma unroll 4
 			for (int k=0; k<LSPAN/2; k+=2) {		// compute a block of the matrix, write it in shared mem.
-				real_g c0 = ak[2*k+3]*cost + ak[2*k+2];
-				real_g c1 = ak[2*k+5]*cost + ak[2*k+4];
+				real_g c0 = ak[k0 + 2*k+1]*cost + ak[k0 + 2*k];
+				real_g c1 = ak[k0 + 2*k+3]*cost + ak[k0 + 2*k+2];
 				yl[k*l_inc +j]     = y0;		// l and l+1
 				yl[(k+1)*l_inc +j] = y1;		// l+2 and l+3
 				y0 += c0 * y1;
@@ -1582,14 +1585,15 @@ void ileg_m_kernel(const real_g* __restrict__ al, const real_g* __restrict__ ct,
 		  #else
 			#pragma unroll 4
 			for (int k=0; k<LSPAN; k+=2) {		// compute a block of the matrix, write it in shared mem.
-				real_g c0 = ak[k+2]*cost;
-				real_g c1 = ak[k+3]*cost;
+				real_g c0 = ak[k0 + k]*cost;
+				real_g c1 = ak[k0 + k+1]*cost;
 				yl[k*l_inc +j]     = y0;		// l and l+1
 				yl[(k+1)*l_inc +j] = y1;		// l+2 and l+3
 				y0 += c0 * y1;
 				y1 += c1 * y0;
 			}
 		  #endif
+			k0 += LSPAN;
 
 			if (BLOCKSIZE > WARPSZE) {	__syncthreads(); } else { _syncwarp_fence; }
 			// at this point block is in sync (consistent view of shared memory).
@@ -1610,8 +1614,6 @@ void ileg_m_kernel(const real_g* __restrict__ al, const real_g* __restrict__ ct,
 						qlri[a]   += my_reo[k+a]   * yl[itl + (k+a)*(BLOCKSIZE/NW)];
 					}
 				}
-
-				if (j<LSPAN) ak[j+2] = al[j];	// on nvidia, loading after accumulation is more efficient
 
 				if (NACC>1) {	// reduce the NACC independent accumulators
 					#pragma unroll
@@ -1641,8 +1643,6 @@ void ileg_m_kernel(const real_g* __restrict__ al, const real_g* __restrict__ ct,
 					for (int a=0; a<NACC; a++) qlri[a] += my_reo[k+a] * y;
 				}
 
-				if (j<LSPAN) ak[j+2] = al[j];	// loading after accumulation is more efficient
-
 				const int ql_ofs = 2*l+ll + (b*NFIELDS+f0)*ql_dist;		// compute destination offset in parallel with reduce!
 				// reduce the NACC independent accumulators, which are shuffled accross lanes so that they share the same y above
 				if (NACC>1) qlri[0] += shfl_xor(qlri[1],1);
@@ -1658,6 +1658,11 @@ void ileg_m_kernel(const real_g* __restrict__ al, const real_g* __restrict__ ct,
 
 			#endif
 
+				if (k0==WARPSZE) {
+					if ((BLOCKSIZE==WARPSZE  ||  j<WARPSZE) && (l+j+LSPAN<=llim))  ak[j] = al[j];
+					al+=WARPSZE;	k0=0;
+				}
+
 					if ( write && ((l+(ll>>1))<=llim) ) {	// write result
 						#if NLAT_2 * NF_A <= 512  &&  !defined( ILEG_ISHIOKA )
 							//if (S==0)	qlri[0] *= xlm[ofs_to_be_determined + l+(ll>>1)];	// this can be done here without the need for another kernel... maybe ?
@@ -1671,7 +1676,6 @@ void ileg_m_kernel(const real_g* __restrict__ al, const real_g* __restrict__ ct,
 					}
 
 			l+=LSPAN;
-			al += LSPAN;
 		}
 
 	}
