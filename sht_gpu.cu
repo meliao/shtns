@@ -339,11 +339,16 @@ int init_cuda_program(shtns_cfg shtns, const char* gpu_arch_target)
 	int nw_s=2;		int nf_s=1;			int nf_a=1;
 	int lspan_a = 16;	// V100 and MI100: 16/nf_a works best (mmax>0)
 #if WARPSZE == 32
+	const bool h100 = (strcmp(gpu_arch_target,"_90") >= 0);         // H100
 	if (nwarp_target % 3 == 0) nw_s=3;	// if we need a multiple of 3, nw_s=3 is likely a bit better
 	// adjust values (heuristics)
 	if (shtns->howmany % 4 == 0) 	  {	nf_s=4;	nw_s=1;		nf_a=4;	}
 	else if (shtns->howmany % 2 == 0) {	nf_s=2;	nw_s=2; 	nf_a=2;	}
 	else if (shtns->howmany % 3 == 0) { nf_s=3; nw_s=1; 	nf_a=1;	}
+	if (h100) {     // tuning for H100
+		if (nf_s==1 && !sh2ish_fuse) nw_s=4;
+		if (nw_s==1) nw_s=2;
+	}
 #else
 	const bool gfx90a = (strcmp(gpu_arch_target,"gfx90a") >= 0);	// MI200 series
 	const bool gfx94x = (strcmp(gpu_arch_target,"gfx94") >= 0);		// MI300 series
@@ -365,13 +370,14 @@ int init_cuda_program(shtns_cfg shtns, const char* gpu_arch_target)
 	}
 	if (shtns->howmany % 4 == 0  &&  nwarp_target == 1)	nf_s=4;
 	if (hi_llim)	nwarp_s=1;
+	if (hi_llim  &&  nw_s > 2) nw_s=2;	// nw_s = 1 or 2 only with hi_llim
 #endif
 	//if (nf_s==4 && shtns->howmany / nf_s * nwarp_target / nw_s < 25) nf_s=2;		// ensure enough parallelism is exposed?
 	if (shtns->mmax == 0) {
 		lspan_a *= 2;
 		//sh2ish_fuse = false;	// don't fuse mmax=0
 	}
-	if (hi_llim  &&  nw_s > 2) nw_s=2;	// nw_s = 1 or 2 only with hi_llim
+	if (hi_llim  &&  nw_s > 2  &&  (nw_s % 2)) nw_s=2;	// nw_s>2 odd does not work with hi_llim
 	lspan_a /= nf_a;
 
 	if (getenv("SHTNS_GPU_CONF"))

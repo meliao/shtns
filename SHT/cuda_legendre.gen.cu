@@ -265,7 +265,11 @@ void leg_m_kernel(
 	const int k_inc = 2;
   #endif
 
+  #if defined(__CUDA_ARCH__) && __CUDA_ARCH__ >= 900
+	const int LSPAN = BLOCKSIZE;	// full block load on H100 works faster
+  #else
 	const int LSPAN = (WARPSZE==32 && BLOCKSIZE >= 2*WARPSZE) ? BLOCKSIZE/2 : WARPSZE;		// always WARPSZE for amd
+  #endif
 	static_assert(LSPAN <= BLOCKSIZE, "LSPAN must not exceed BLOCKSIZE");
 	static_assert(LSPAN % 4 == 0, "LSPAN must be a multiple of 4");
 	__shared__ real_g ak[LSPAN];

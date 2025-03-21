@@ -1353,7 +1353,7 @@ Optional Features:
   --enable-mkl            Try to link with intel MKL instead of FFTW (can be
                           slightly faster, but NOT THREAD SAFE)
   --enable-knl            Enable compilation for Xeon Phi (KNL)
-  --enable-cuda[=kepler|pascal|volta|ampere]
+  --enable-cuda[=kepler|pascal|volta|ampere|hopper]
                           Enable compilation for Nvidia gpu using cuda,
                           optionally specifying architecture
   --enable-hip[=mi100|mi200|mi250]
@@ -5313,6 +5313,24 @@ then :
 	{ printf "%s\n" "$as_me:${as_lineno-$LINENO}: result: yes" >&5
 printf "%s\n" "yes" >&6; }
 	nvcc_gencode_flags="$nvcc_gencode_flags -gencode=arch=compute_80,code=compute_80"
+
+else case e in #(
+  e)
+	{ printf "%s\n" "$as_me:${as_lineno-$LINENO}: result: no" >&5
+printf "%s\n" "no" >&6; }
+   ;;
+esac
+fi
+
+
+  { printf "%s\n" "$as_me:${as_lineno-$LINENO}: checking whether nvcc supports gpu with compute capability 90" >&5
+printf %s "checking whether nvcc supports gpu with compute capability 90... " >&6; }
+  if nvcc sht_gpu.cu -c -arch=sm_90 --dryrun > /dev/null 2>&1
+then :
+
+	{ printf "%s\n" "$as_me:${as_lineno-$LINENO}: result: yes" >&5
+printf "%s\n" "yes" >&6; }
+	nvcc_gencode_flags="$nvcc_gencode_flags -gencode=arch=compute_90,code=compute_90"
 
 else case e in #(
   e)
