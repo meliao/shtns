@@ -1096,7 +1096,7 @@ void ileg_m_kernel(const real_g* __restrict__ al, const real_g* __restrict__ ct,
 		}
 	#endif
 
-		if (j < LSPAN+2) ak[j] = al[j];
+		if (j < 2) ak[j] = al[j];
 
 		#pragma unroll
 		for (int f=0; f<NFIELDS; f++) {
@@ -1155,17 +1155,18 @@ void ileg_m_kernel(const real_g* __restrict__ al, const real_g* __restrict__ ct,
 	  #else
 		y1 = (ak[1]*cost) * y0;
 	  #endif
-		if (WARPSZE < LSPAN+2  &&  j<LSPAN+2-WARPSZE)	ak[WARPSZE+j] = al[WARPSZE+j];		// sometimes a bit more than a warp is needed
-
 		al+=2;
+		if (BLOCKSIZE > WARPSZE) {	__syncthreads(); } else { _syncwarp_fence; }	// wait for all threads to have read ak before overwriting it!
+		if (LSPAN==BLOCKSIZE || j<LSPAN) ak[j] = al[j];
+
 		int l = 0;
 		do {
 			if (BLOCKSIZE > WARPSZE) {	__syncthreads(); } else { _syncwarp_fence; }
 			#ifdef ILEG_ISHIOKA
 				#pragma unroll
 				for (int k=0; k<LSPAN/2; k+=2) {		// compute a block of the matrix, write it in shared mem.
-					real_g c0 = ak[2*k+3]*cost + ak[2*k+2];
-					real_g c1 = ak[2*k+5]*cost + ak[2*k+4];
+					real_g c0 = ak[2*k+1]*cost + ak[2*k];
+					real_g c1 = ak[2*k+3]*cost + ak[2*k+2];
 					yl[k*l_inc +j]     = y0;		// l and l+1
 					yl[(k+1)*l_inc +j] = y1;		// l+2 and l+3
 					y0 += c0 * y1;
@@ -1180,8 +1181,8 @@ void ileg_m_kernel(const real_g* __restrict__ al, const real_g* __restrict__ ct,
 			#else
 				#pragma unroll
 				for (int k=0; k<LSPAN; k+=2) {		// compute a block of the matrix, write it in shared mem.
-					real_g c0 = ak[k+2]*cost;
-					real_g c1 = ak[k+3]*cost;
+					real_g c0 = ak[k]*cost;
+					real_g c1 = ak[k+1]*cost;
 					yl[k*l_inc +j]     = y0;		// l
 					yl[(k+1)*l_inc +j] = y1;		// l+1
 					y0 += c0 * y1;
@@ -1207,7 +1208,7 @@ void ileg_m_kernel(const real_g* __restrict__ al, const real_g* __restrict__ ct,
 			}
 
 			al += LSPAN;
-			if (j<LSPAN) ak[j+2] = al[j];
+			if (LSPAN==BLOCKSIZE || j<LSPAN) ak[j] = al[j];
 
 			if (NACC > 1) {		// reduce the NACC independent accumulators
 				#pragma unroll
@@ -1243,7 +1244,7 @@ void ileg_m_kernel(const real_g* __restrict__ al, const real_g* __restrict__ ct,
 				}
 
 				al += LSPAN;
-				if (j<LSPAN) ak[j+2] = al[j];	// loading after accumulation is more efficient
+				if (LSPAN==BLOCKSIZE || j<LSPAN) ak[j] = al[j];	// loading after accumulation is more efficient
 
 				// reduce the NACC independent accumulators, which are shuffled accross lanes so that they share the same y above
 				if (NACC>1) qll[0] += shfl_xor(qll[1],1);
@@ -1428,6 +1429,7 @@ void ileg_m_kernel(const real_g* __restrict__ al, const real_g* __restrict__ ct,
 	  #endif
 
 		l=m;		al+=2;		int k0 = 0;
+		if (BLOCKSIZE > WARPSZE) {	__syncthreads(); } else { _syncwarp_fence; }	// wait for all threads to have read ak before overwriting it!
 		if ((BLOCKSIZE==WARPSZE  ||  j<WARPSZE) && (l+j<=llim))  ak[j] = al[j];
 		al += WARPSZE;
 	  #ifdef ILEG_ISHIOKA
