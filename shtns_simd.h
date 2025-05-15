@@ -62,7 +62,7 @@
 	#define vstor(mem, idx, v) ((s2d*)(mem))[idx] = v
 	#define vread2 vread
 	#define vstor2 vstor
-	#define vxor2(v,x) veorq_u64(v,x)
+	#define vxor2(v,x) vreinterpretq_f64_u64( veorq_u64 (vreinterpretq_u64_f64(v),vreinterpretq_u64_f64(x)) )
 	inline static v2d v2d_reduce(v2d a, v2d b) { return vpaddq_f64(a,b); }
 	inline static v2d vneg_even_precalc(v2d v) {		// don't use in an intensive loop.
 		v[0] = -v[0];
