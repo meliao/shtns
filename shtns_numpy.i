@@ -419,6 +419,10 @@ struct shtns_rot_ {		// describe a rotation matrix
 		if (check_spatial(2,Vr, $self->nspat) && check_spectral(1,Qlm, $self->nlm))
 			SH_to_spat($self, PyArray_Data(Qlm), PyArray_Data(Vr));
 	}
+	void adjoint_SH_to_spat(PyObject *Vr, PyObject *Qlm) {
+		if (check_spatial(1,Vr, $self->nspat) && check_spectral(2,Qlm, $self->nlm))
+			adjoint_SH_to_spat($self, PyArray_Data(Vr), PyArray_Data(Qlm));
+	}
 	/* complex transforms */
 	void spat_cplx_to_SH(PyObject *z, PyObject *alm) {
 		int n = $self->lmax + 1;
