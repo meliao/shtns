@@ -1117,8 +1117,7 @@ shtns_cfg shtns_create(int lmax, int mmax, int mres, enum shtns_norm norm)
 {
 	shtns_cfg shtns, s2;
 
-//	if (lmax < 1) shtns_runerr("lmax must be larger than 1");
-	if (lmax < 2) shtns_runerr("lmax must be at least 2");
+	if (lmax <= 0) shtns_runerr("lmax must be at least 1");
 	if (IS_TOO_LARGE(lmax, shtns->lmax)) shtns_runerr("lmax too large");
 	if (mmax*mres > lmax) shtns_runerr("MMAX*MRES should not exceed LMAX");
 	if (mres <= 0) shtns_runerr("MRES must be > 0");
