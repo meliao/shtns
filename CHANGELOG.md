@@ -1,6 +1,12 @@
 SHTNS CHANGE LOG:
 -----------------
 
+* v3.7.4  (10 Oct 2025)
+	- Add Julia example
+	- Performance tuning for H100 GPU
+	- Fix compilation on ARM with Neon intrinsics with some compilers
+	- Python: fix installation with pip in some cases
+
 * v3.7.3  (14 Nov 2024)
 	- Python and GPU: support CuPy array in `synth()` and `analys()` methods.
 	- GPU: allow phi-contiguous layout.

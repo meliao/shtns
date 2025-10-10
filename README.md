@@ -53,6 +53,9 @@ Requirements: FFTW library, and numpy for the python module.
 
     or from the source tree with `pip install .` or `python setup.py install --user`
 
+    If fftw is not found you can point to it with SHNTS_LIB_DIR=/path/to/libfftw/
+    For CuPy support, the CUDA_PATH environment variable must be correctly set.
+
 - The **Julia package** is [maintained separately](https://github.com/fgerick/SHTns.jl) and can be installed from julia with
 
         import Pkg; Pkg.add("SHTns")
