@@ -229,6 +229,13 @@
 			#endif
 		}
 		#define vdup_even4(v) ((v4d)_mm256_movedup_pd(v))
+		#ifdef __clang__
+			// Clang requires this zext intrinsic, the castpd one does not guarantee zero upper part!
+			#define v2d_to_v4d_zext(a) _mm256_zextpd128_pd256(a)
+		#else
+			// GCC < 10 does not have the zext intrinsic, and GCC >= 10 emits a useless movapd with it
+			#define v2d_to_v4d_zext(a) _mm256_castpd128_pd256(a)
+		#endif
 	#endif
 	#ifdef __AVX512F__
 		#define MIN_ALIGNMENT 64

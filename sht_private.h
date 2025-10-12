@@ -366,7 +366,7 @@ static void ishioka_to_SH(const double* xlm, const v2d* qq, const int llim_m, v2
 		v4d x = vread4(xlm+ll, 0);	x = vdup_even4(x);
 		v4d uu = vread4(qq+l, 0);	// [qq[l], qq[l+1]]
 		vstor4(Ql+l, 0, uu*x + z);
-		z = _mm256_castpd128_pd256( (v2d)_mm256_castpd256_pd128(uu) * vdup(xlm[ll+1]) );		// upper part of z is zeroed.
+		z = v2d_to_v4d_zext( (v2d)_mm256_castpd256_pd128(uu) * vdup(xlm[ll+1]) );	// upper part of z is zeroed
 		l+=2;	ll+=3;
 	}
 	if (l==llim_m) {
@@ -459,21 +459,10 @@ static void SH_to_ishioka(const double* xlm, const v2d* Ql, const int llim_m, v2
     ql[l+1] = qq;
   #else
 	v4d y = vread4(Ql+l, 0);
-/*	while (l<llim_m-4) {
-		v4d x = vread4(xlm+ll, 0);	x = vdup_even4(x);
-		v4d y2 = vread4(Ql+l+2, 0);
-		v4d z =_mm256_castpd128_pd256( vdup(xlm[ll+1]) * _mm256_castpd256_pd128( y2 ) );		// upper part of z is zeroed.
-		vstor4(ql+l, 0, x*y + z);
-		x = vread4(xlm+ll+3, 0);	x = vdup_even4(x);
-		y = vread4(Ql+l+4, 0);
-		z =_mm256_castpd128_pd256( vdup(xlm[ll+4]) * _mm256_castpd256_pd128( y ) );		// upper part of z is zeroed.
-		vstor4(ql+l+2, 0, x*y2 + z);
-		ll+=6;	l+=4;
-	}	*/
 	while (l<llim_m-1) {
 		v4d x = vread4(xlm+ll, 0);	x = vdup_even4(x);
 		v4d y = vread4(Ql+l, 0);
-		v4d z =_mm256_castpd128_pd256( vdup(xlm[ll+1]) * Ql[l+2] );		// upper part of z is zeroed with AVX
+		v4d z = v2d_to_v4d_zext( vdup(xlm[ll+1]) * Ql[l+2] );	// upper part of z is zeroed
 		vstor4(ql+l, 0, x*y + z);
 		ll+=3;	l+=2;
 	}
