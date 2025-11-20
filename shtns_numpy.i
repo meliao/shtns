@@ -246,7 +246,7 @@ struct shtns_rot_ {		// describe a rotation matrix
 		if (!(flags & SHT_THETA_CONTIGUOUS))  flags |= SHT_PHI_CONTIGUOUS;	// default to SHT_PHI_CONTIGUOUS.
 		int grd = flags & 255;
 		// avoid slow initialization (which sometimes hangs with python)
-		if ((grd == sht_auto) || (grd == sht_gauss_fly) || (grd == sht_gauss)) {
+		if ((grd == sht_auto) || (grd == sht_gauss)) {
 			grd = sht_quick_init;
 		} else if (grd == sht_reg_dct) grd = sht_reg_fast;
 		flags = (flags &~ 255) | grd;
