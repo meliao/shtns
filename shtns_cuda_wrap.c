@@ -3801,8 +3801,8 @@ SWIG_AsVal_int (PyObject * obj, int *val)
 }
 
 SWIGINTERN struct shtns_info *new_shtns_info(int lmax,int mmax,int mres,int norm,int nthreads){	// default arguments : mmax, mres and norm
-		if (lmax < 2) {
-			throw_exception(SWIG_ValueError,1,"lmax < 2 not allowed");	return NULL;
+		if (lmax < 1) {
+			throw_exception(SWIG_ValueError,1,"lmax < 1 not allowed");	return NULL;
 		}
 		if (mres <= 0) {
 			throw_exception(SWIG_ValueError,3,"mres <= 0 invalid");	return NULL;
@@ -4257,8 +4257,8 @@ SWIGINTERN void shtns_info_SHqst_to_spat_m(struct shtns_info *self,PyObject *Qlm
 		SHqst_to_spat_ml(self, im_, PyArray_Data(Qlm), PyArray_Data(Slm), PyArray_Data(Tlm), PyArray_Data(Vr), PyArray_Data(Vt), PyArray_Data(Vp), ltr);
 	}
 SWIGINTERN struct shtns_rot_ *new_shtns_rot_(int lmax,int mmax,int norm){	// default arguments : mmax, norm
-		if (lmax < 2) {
-			throw_exception(SWIG_ValueError,1,"lmax < 2 not allowed");	return NULL;
+		if (lmax < 1) {
+			throw_exception(SWIG_ValueError,1,"lmax < 1 not allowed");	return NULL;
 		}
 		if (mmax < 0) mmax = lmax;		// default mmax
 		if (mmax > lmax) {

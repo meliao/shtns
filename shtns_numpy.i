@@ -203,8 +203,8 @@ struct shtns_rot_ {		// describe a rotation matrix
 	%}
 	%feature("kwargs") shtns_info;
 	shtns_info(int lmax, int mmax=-1, int mres=1, int norm=sht_orthonormal, int nthreads=0) {	// default arguments : mmax, mres and norm
-		if (lmax < 2) {
-			throw_exception(SWIG_ValueError,1,"lmax < 2 not allowed");	return NULL;
+		if (lmax < 1) {
+			throw_exception(SWIG_ValueError,1,"lmax < 1 not allowed");	return NULL;
 		}
 		if (mres <= 0) {
 			throw_exception(SWIG_ValueError,3,"mres <= 0 invalid");	return NULL;
@@ -813,8 +813,8 @@ struct shtns_rot_ {		// describe a rotation matrix
 
 	%feature("kwargs") shtns_rot_;
 	shtns_rot_(int lmax, int mmax=-1, int norm=0) {	// default arguments : mmax, norm
-		if (lmax < 2) {
-			throw_exception(SWIG_ValueError,1,"lmax < 2 not allowed");	return NULL;
+		if (lmax < 1) {
+			throw_exception(SWIG_ValueError,1,"lmax < 1 not allowed");	return NULL;
 		}
 		if (mmax < 0) mmax = lmax;		// default mmax
 		if (mmax > lmax) {
