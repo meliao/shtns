@@ -177,7 +177,7 @@ struct shtns_rot_ {		// describe a rotation matrix
 %extend shtns_info {
 	%exception {
 		shtns_error = 0;	// clear exception
-		$function
+		$action
 		if (shtns_error) {	// test for exception
 			SWIG_exception(shtns_error, shtns_err_msg);		return NULL;
 		}
@@ -805,7 +805,7 @@ struct shtns_rot_ {		// describe a rotation matrix
 %extend shtns_rot_ {
 	%exception {
 		shtns_error = 0;	// clear exception
-		$function
+		$action
 		if (shtns_error) {	// test for exception
 			SWIG_exception(shtns_error, shtns_err_msg);		return NULL;
 		}
