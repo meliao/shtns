@@ -682,6 +682,8 @@ int cushtns_init_gpu(shtns_cfg shtns)
 
 	err_count += init_cuda_buffer_fft(shtns, device_id, sizeof_real);
 	err_count += init_cuda_program(shtns, gpu_arch_target);
+	
+	cudaEventCreateWithFlags(&shtns->sync_evt, cudaEventDisableTiming | cudaEventBlockingSync );
 
 	if (err_count != 0) {
 		cushtns_release_gpu(shtns);

@@ -218,6 +218,7 @@ struct shtns_info {		// MUST start with "int nlm;"
 	cufftHandle cufft_plan;						// the cufft Handle
 	//cufftHandle cufft_plan_float;				// the cufft Handle single precision
 	#endif
+	cudaEvent_t sync_evt;
 	cudaEvent_t gpu_timer[3];
 	#endif	/* SHTNS_GPU  ===> NOTHING ELSE  IN THE STRUCTURE BEYOND THIS LINE */
 

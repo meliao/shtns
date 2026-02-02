@@ -964,6 +964,7 @@ void shtns_print_cfg(shtns_cfg shtns)
 	if (SHT_NORM == sht_fourpi) printf("4.pi normalized]\n");
 	else if (SHT_NORM == sht_schmidt) printf("Schmidt semi-normalized]\n");
 	else printf("orthonormalized]\n");
+	printf("adress=%p (%ld)\n", shtns, shtns);
 	if (shtns->ct == NULL)	return;		// no grid is set
 
 	switch(shtns->grid) {
