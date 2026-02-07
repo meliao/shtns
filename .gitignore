@@ -1,0 +1,12 @@
+SHT/SH*
+SHT/spat*
+__pycache__/
+*.cpython*
+config.log
+config.status
+build/
+venv/
+shtns.egg-info/
+sht_config.h
+*.o
+*.so

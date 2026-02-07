@@ -12,7 +12,9 @@
 
 namespace ffi = xla::ffi;
 
-ffi::Error synth_jax_cpu(long cfg, ffi::Buffer<ffi::F64> x,
+#include <cstdint>
+
+ffi::Error synth_jax_cpu(int64_t cfg, ffi::Buffer<ffi::F64> x,
                        ffi::ResultBuffer<ffi::F64> y) {
 						   
   shtns_cfg sh = reinterpret_cast<shtns_cfg>(cfg);
@@ -32,7 +34,7 @@ ffi::Error synth_jax_cpu(long cfg, ffi::Buffer<ffi::F64> x,
 XLA_FFI_DEFINE_HANDLER_SYMBOL(
     synth_cpu, synth_jax_cpu,
     ffi::Ffi::Bind()
-        .Attr<long>("cfg")
+        .Attr<int64_t>("cfg")
         .Arg<ffi::Buffer<ffi::F64>>()  // qlm
         .Ret<ffi::Buffer<ffi::F64>>()  // q
 );
@@ -40,7 +42,7 @@ XLA_FFI_DEFINE_HANDLER_SYMBOL(
 
 #if SHTNS_GPU == 1
 
-ffi::Error synth_jax_gpu(cudaStream_t jax_strm, long cfg, ffi::Buffer<ffi::F64> x,
+ffi::Error synth_jax_gpu(cudaStream_t jax_strm, int64_t cfg, ffi::Buffer<ffi::F64> x,
                        ffi::ResultBuffer<ffi::F64> y) {
 						   
   shtns_cfg sh = reinterpret_cast<shtns_cfg>(cfg);
@@ -66,10 +68,9 @@ XLA_FFI_DEFINE_HANDLER_SYMBOL(
     synth_gpu, synth_jax_gpu,
     ffi::Ffi::Bind()
 		.Ctx<ffi::PlatformStream<cudaStream_t>>()
-        .Attr<long>("cfg")
+        .Attr<int64_t>("cfg")
         .Arg<ffi::Buffer<ffi::F64>>()  // qlm
         .Ret<ffi::Buffer<ffi::F64>>()  // q
 );
 
 #endif
-

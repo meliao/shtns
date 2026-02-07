@@ -69,6 +69,26 @@ try:
 except ImportError:
 	cupy = None
 
+##############
+# Imports & loading libraries for JAX bindings
+import jax
+jax.config.update('jax_enable_x64', True)  # support float64
+
+import jax.numpy as jnp
+import ctypes
+shtns_jax_lib = ctypes.cdll.LoadLibrary("./libshtns_jax.so")
+
+
+jax.ffi.register_ffi_target(
+    "shtns_synth", jax.ffi.pycapsule(shtns_jax_lib.synth_cpu), platform="cpu")
+try:
+    jax.ffi.register_ffi_target(
+        "shtns_synth_gpu", jax.ffi.pycapsule(shtns_jax_lib.synth_gpu), platform="cuda")
+    jax.ffi.register_ffi_target(
+        "shtns_synth_gpu_float", jax.ffi.pycapsule(shtns_jax_lib.synth_gpu_float), platform="cuda")
+except Exception as e:
+    print("Could not find GPU implementation for JAX:", e)
+
 SHTNS_INTERFACE = _shtns.SHTNS_INTERFACE
 
 sht_orthonormal = _shtns.sht_orthonormal
@@ -607,6 +627,27 @@ class sht(object):
     def SHqst_to_spat_m(self, Qlm, Slm, Tlm, Vr, Vt, Vp, im):
         r"""SHqst_to_spat_m(sht self, PyObject * Qlm, PyObject * Slm, PyObject * Tlm, PyObject * Vr, PyObject * Vt, PyObject * Vp, PyObject * im)"""
         return _shtns.sht_SHqst_to_spat_m(self, Qlm, Slm, Tlm, Vr, Vt, Vp, im)
+###########
+# Jax interface:
+    def synth_jax(self, x: jax.Array) -> jax.Array:
+        if x.dtype != jnp.float64:
+            print(x.dtype)
+            raise ValueError("Only the float64 dtype is implemented by shtns")
+        out_shape = (self.nlat, self.nphi) if len(x.shape) == 1 else (*x.shape[:-1], self.nlat, self.nphi)
+
+        #call = jax.ffi.ffi_call("shtns_synth",    # target name, same as in jax.ffi.register_ffi_target() above
+        #	jax.ShapeDtypeStruct(out_shape, jnp.float64), # shape and dtype of the output
+        #	vmap_method="broadcast_all",  #The `vmap_method` parameter controls this function's behavior under `vmap`
+        #)
+
+        def get_impl(target_name):
+            return lambda x: jax.ffi.ffi_call(target_name,    # target name, same as in jax.ffi.register_ffi_target() above
+            jax.ShapeDtypeStruct(out_shape, jnp.float64), # shape and dtype of the output
+            vmap_method="broadcast_all",
+            )(x, cfg=int(self.this))
+
+        #return call(x, cfg=int(self.this))   # int(self.this) : pass the pointer to underlying C object exposed by swig
+        return jax.lax.platform_dependent(x, cpu=get_impl("shtns_synth"), cuda=get_impl("shtns_synth_gpu"))
 
 # Register sht in _shtns:
 _shtns.sht_swigregister(sht)
@@ -672,6 +713,8 @@ class rotation(object):
     def apply_cplx(self, Qlm):
         r"""apply a rotation (previously defined by set_angles_ZYZ(), set_angles_ZXZ() or set_angle_axis()) to a spherical harmonic expansion of a complex-valued field with 'orthonormal' convention."""
         return _shtns.rotation_apply_cplx(self, Qlm)
+
+
 
 # Register rotation in _shtns:
 _shtns.rotation_swigregister(rotation)
