@@ -35,7 +35,7 @@ For using the GPU from python, see <https://bitbucket.org/nschaeff/shtns/src/mas
 See <https://bitbucket.org/nschaeff/shtns/src/master/README.md>
 ''',  content-type="text/markdown" }
 dependencies = [
-  'numpy',
+  'numpy', "jax>=0.6"
 ]
 requires-python = ">=3.2"
 classifiers = [

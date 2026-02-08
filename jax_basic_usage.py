@@ -25,11 +25,17 @@ qlm_jax = jnp.array(qlm.view(np.float64), jnp.float64)
 print(qlm_jax.shape, qlm_jax.dtype)
 
 q_jax = sh.synth_jax(qlm_jax)  # call from jax, automatic batching
-print(q_jax.shape)
+print("After first call, shape and dtype:")
+print(q_jax.shape, q_jax.dtype)
+
 q_jax = jax.vmap(sh.synth_jax)(qlm_jax)   # also automatic vmap
-print(q_jax.shape)
-q_jax = jax.jit(sh.synth_jax)(qlm_jax)   # also jit
-print(q_jax.shape)
+print("After vmap, shape and dtype:")
+print(q_jax.shape, q_jax.dtype)
+
+synth_jitted = jax.jit(sh.synth_jax)
+q_jax = synth_jitted(qlm_jax)   # also jit
+print("After JIT, shape and dtype:")
+print(q_jax.shape, q_jax.dtype)
 
 
 q_ref = np.zeros((Nbatch, sh.nlat, sh.nphi))

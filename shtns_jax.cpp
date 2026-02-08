@@ -14,8 +14,10 @@ namespace ffi = xla::ffi;
 
 #include <cstdint>
 
-ffi::Error synth_jax_cpu(int64_t cfg, ffi::Buffer<ffi::F64> x,
+ffi::Error synth_jax_cpu(int64_t cfg, ffi::Buffer<ffi::C128> x,
                        ffi::ResultBuffer<ffi::F64> y) {
+      // Inverse spherical harmonic transform. Spectral -> spatial transform.
+      // Expects complex128 inputs, returns float64 outputs.
 						   
   shtns_cfg sh = reinterpret_cast<shtns_cfg>(cfg);
   long nlm2 = (x.dimensions().size() == 0) ? 0 : x.dimensions().back();
@@ -37,6 +39,37 @@ XLA_FFI_DEFINE_HANDLER_SYMBOL(
         .Attr<int64_t>("cfg")
         .Arg<ffi::Buffer<ffi::F64>>()  // qlm
         .Ret<ffi::Buffer<ffi::F64>>()  // q
+);
+
+ffi::Error analys_jax_cpu(int64_t cfg, ffi::Buffer<ffi::F64> x,
+                       ffi::ResultBuffer<ffi::C128> y) {
+  // Forward spherical harmonic transform. Spatial -> spectral transform.
+  // Expects float64 inputs, returns complex128 outputs.
+  shtns_cfg sh = reinterpret_cast<shtns_cfg>(cfg);
+  long n_spat = sh->nlat * sh->nphi;
+  long n_elem = x.element_count();
+  if ((n_spat == 0) || (n_elem % n_spat != 0)) {
+	  return ffi::Error::InvalidArgument("shtns: analys input array has wrong size");
+  }
+
+  long n_other = n_elem / n_spat;
+  long nlm2 = 2 * sh->nlm;
+  if (y->element_count() != n_other * nlm2) {
+	  return ffi::Error::InvalidArgument("shtns: analys output array has wrong size");
+  }
+
+  for (int64_t n = 0; n < n_other; n ++) {	// loop over other dimensions
+	  spat_to_SH(sh, &(x.typed_data()[n*n_spat]), (cplx*) &(y->typed_data()[n*nlm2]));
+  }
+  return ffi::Error::Success();
+}
+
+XLA_FFI_DEFINE_HANDLER_SYMBOL(
+    analys_cpu, analys_jax_cpu,
+    ffi::Ffi::Bind()
+        .Attr<int64_t>("cfg")
+        .Arg<ffi::Buffer<ffi::F64>>()  // q
+        .Ret<ffi::Buffer<ffi::F64>>()  // qlm
 );
 
 
