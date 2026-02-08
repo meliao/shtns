@@ -3,6 +3,7 @@ include *.c *.h
 include *.md
 include configure
 include *.in
+include *.so
 include fftw3/*
 include SHT/*
 exclude *cuda* SHT/*cu

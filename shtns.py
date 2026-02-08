@@ -76,7 +76,9 @@ jax.config.update('jax_enable_x64', True)  # support float64
 
 import jax.numpy as jnp
 import ctypes
-shtns_jax_lib = ctypes.cdll.LoadLibrary("./libshtns_jax.so")
+import os
+_this_dir = os.path.dirname(__file__)
+shtns_jax_lib = ctypes.cdll.LoadLibrary(os.path.join(_this_dir, "libshtns_jax.so"))
 
 
 jax.ffi.register_ffi_target(

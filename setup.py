@@ -117,5 +117,6 @@ setup(name='shtns',
         url='https://bitbucket.org/nschaeff/shtns',
         ext_modules=shtns_ext,
         py_modules=["shtns"],
+        data_files=[("", ["libshtns_jax.so"])],
         requires=["numpy"],
         )

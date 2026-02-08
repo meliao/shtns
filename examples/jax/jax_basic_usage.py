@@ -21,7 +21,7 @@ for i in range(Nbatch):
 	qlm[i,i] = i
 print(qlm.shape, qlm.dtype)
 
-qlm_jax = jnp.array(qlm.view(np.float64), jnp.float64)
+qlm_jax = jnp.array(qlm, dtype=jnp.complex128)
 print(qlm_jax.shape, qlm_jax.dtype)
 
 q_jax = sh.synth_jax(qlm_jax)  # call from jax, automatic batching
@@ -43,4 +43,3 @@ for i in range(Nbatch):
 	q_ref[i] = sh.synth(qlm[i])
 
 print(q_ref.shape, q_jax.shape, "error:", jnp.amax(abs(q_jax-q_ref)))
-
