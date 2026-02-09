@@ -641,46 +641,75 @@ class sht(object):
         Spectral -> spatial transform.
         Requires complex128 inputs.
         """
-        if x.dtype != jnp.complex128:
-            raise ValueError(f"Only complex128 dtype is implemented by shtns for synthesis. Got {x.dtype}.")
-        # Convert complex spectrum to interleaved float64 (real, imag) expected by the FFI.
-        orig_shape = x.shape
-        x = jnp.stack((jnp.real(x), jnp.imag(x)), axis=-1)
-        x = jnp.reshape(x, (*orig_shape[:-1], orig_shape[-1] * 2))
-        out_shape = (self.nlat, self.nphi) if len(orig_shape) == 1 else (*orig_shape[:-1], self.nlat, self.nphi)
+        def _synth_impl(x_in: jax.Array) -> jax.Array:
+            if x_in.dtype != jnp.complex128:
+                raise ValueError(f"Only complex128 dtype is implemented by shtns for synthesis. Got {x_in.dtype}.")
+            orig_shape = x_in.shape
+            out_shape = (self.nlat, self.nphi) if len(orig_shape) == 1 else (*orig_shape[:-1], self.nlat, self.nphi)
 
-        def get_impl(target_name):
-            return lambda x: jax.ffi.ffi_call(target_name,    # target name, same as in jax.ffi.register_ffi_target() above
-            jax.ShapeDtypeStruct(out_shape, jnp.float64), # shape and dtype of the output
-            vmap_method="broadcast_all",
-            )(x, cfg=int(self.this))
+            def get_impl(target_name):
+                return lambda x: jax.ffi.ffi_call(target_name,    # target name, same as in jax.ffi.register_ffi_target() above
+                jax.ShapeDtypeStruct(out_shape, jnp.float64), # shape and dtype of the output
+                vmap_method="broadcast_all",
+                )(x, cfg=int(self.this))
 
-        #return call(x, cfg=int(self.this))   # int(self.this) : pass the pointer to underlying C object exposed by swig
-        return jax.lax.platform_dependent(x, cpu=get_impl("shtns_synth"), cuda=get_impl("shtns_synth_gpu"))
+            return jax.lax.platform_dependent(x_in, cpu=get_impl("shtns_synth"), cuda=get_impl("shtns_synth_gpu"))
+
+        @jax.custom_jvp
+        def _synth_custom(x_in: jax.Array) -> jax.Array:
+            return _synth_impl(x_in)
+
+        @_synth_custom.defjvp
+        def _synth_custom_jvp(primals, tangents):
+            """
+            The forward transform is linear, so the Jvp is just the 
+            forward transform of the tangent.
+            """
+            (x_in,) = primals
+            (x_tan,) = tangents
+            y = _synth_impl(x_in)
+            y_tan = _synth_impl(x_tan)
+            return y, y_tan
+
+        return _synth_custom(x)
 
     def analys_jax(self, x: jax.Array) -> jax.Array:
         """Forward spherical harmonic transform. 
         Spatial -> spectral transform.
         Requires float64 inputs, returns complex128 outputs.
         """
-        if x.dtype != jnp.float64:
-            raise ValueError(f"Only the float64 dtype is implemented by shtns. Got {x.dtype}.")
-        if len(x.shape) < 2:
-            raise ValueError("Input array must have at least 2 dimensions (nlat, nphi)")
-        if x.shape[-2:] != (self.nlat, self.nphi):
-            raise ValueError("Input array must end with (nlat, nphi)")
-        prefix_shape = x.shape[:-2]
-        out_shape = (2*self.nlm,) if len(x.shape) == 2 else (*prefix_shape, 2*self.nlm)
+        def _analys_impl(x_in: jax.Array) -> jax.Array:
+            if x_in.dtype != jnp.float64:
+                raise ValueError(f"Only the float64 dtype is implemented by shtns. Got {x_in.dtype}.")
+            if len(x_in.shape) < 2:
+                raise ValueError("Input array must have at least 2 dimensions (nlat, nphi)")
+            if x_in.shape[-2:] != (self.nlat, self.nphi):
+                raise ValueError("Input array must end with (nlat, nphi)")
+            prefix_shape = x_in.shape[:-2]
+            out_shape = (self.nlm,) if len(x_in.shape) == 2 else (*prefix_shape, self.nlm)
 
-        def get_impl(target_name):
-            return lambda x: jax.ffi.ffi_call(target_name,    # target name, same as in jax.ffi.register_ffi_target() above
-            jax.ShapeDtypeStruct(out_shape, jnp.float64), # shape and dtype of the output
-            vmap_method="broadcast_all",
-            )(x, cfg=int(self.this))
+            def get_impl(target_name):
+                return lambda x: jax.ffi.ffi_call(target_name,    # target name, same as in jax.ffi.register_ffi_target() above
+                jax.ShapeDtypeStruct(out_shape, jnp.complex128), # shape and dtype of the output
+                vmap_method="broadcast_all",
+                )(x, cfg=int(self.this))
 
-        y = get_impl("shtns_analys")(x)
-        y = jnp.reshape(y, (*prefix_shape, self.nlm, 2))
-        return y[..., 0] + 1j * y[..., 1]
+            return get_impl("shtns_analys")(x_in)
+
+
+        @jax.custom_jvp
+        def _analys_custom(x_in: jax.Array) -> jax.Array:
+            return _analys_impl(x_in)
+
+        @_analys_custom.defjvp
+        def _analys_custom_jvp(primals, tangents):
+            (x_in,) = primals
+            (x_tan,) = tangents
+            y = _analys_impl(x_in)
+            y_tan = _analys_impl(x_tan)
+            return y, y_tan
+
+        return _analys_custom(x)
 
 # Register sht in _shtns:
 _shtns.sht_swigregister(sht)

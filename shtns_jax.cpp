@@ -20,15 +20,15 @@ ffi::Error synth_jax_cpu(int64_t cfg, ffi::Buffer<ffi::C128> x,
       // Expects complex128 inputs, returns float64 outputs.
 						   
   shtns_cfg sh = reinterpret_cast<shtns_cfg>(cfg);
-  long nlm2 = (x.dimensions().size() == 0) ? 0 : x.dimensions().back();
-  if (nlm2 != 2*sh->nlm)  return ffi::Error::InvalidArgument("shtns: synth input array has wrong size");
+  long nlm = (x.dimensions().size() == 0) ? 0 : x.dimensions().back();
+  if (nlm != sh->nlm)  return ffi::Error::InvalidArgument("shtns: synth input array has wrong size");
   
-  long n_other = x.element_count() / nlm2;
+  long n_other = x.element_count() / nlm;
   long n_spat = sh->nlat * sh->nphi;
   if (y->element_count() != n_other * n_spat)  return ffi::Error::InvalidArgument("shtns: synth output array has wrong size");
 
   for (int64_t n = 0; n < n_other; n ++) {	// loop over other dimensions
-	  SH_to_spat(sh, (cplx*) &(x.typed_data()[n*nlm2]), &(y->typed_data()[n*n_spat]));
+	  SH_to_spat(sh, (cplx*) &(x.typed_data()[n*nlm]), &(y->typed_data()[n*n_spat]));
   }
   return ffi::Error::Success();
 }
@@ -37,7 +37,7 @@ XLA_FFI_DEFINE_HANDLER_SYMBOL(
     synth_cpu, synth_jax_cpu,
     ffi::Ffi::Bind()
         .Attr<int64_t>("cfg")
-        .Arg<ffi::Buffer<ffi::F64>>()  // qlm
+        .Arg<ffi::Buffer<ffi::C128>>()  // qlm
         .Ret<ffi::Buffer<ffi::F64>>()  // q
 );
 
@@ -51,15 +51,14 @@ ffi::Error analys_jax_cpu(int64_t cfg, ffi::Buffer<ffi::F64> x,
   if ((n_spat == 0) || (n_elem % n_spat != 0)) {
 	  return ffi::Error::InvalidArgument("shtns: analys input array has wrong size");
   }
-
   long n_other = n_elem / n_spat;
-  long nlm2 = 2 * sh->nlm;
-  if (y->element_count() != n_other * nlm2) {
+  long nlm = sh->nlm;
+  if (y->element_count() != n_other * nlm) {
 	  return ffi::Error::InvalidArgument("shtns: analys output array has wrong size");
   }
 
   for (int64_t n = 0; n < n_other; n ++) {	// loop over other dimensions
-	  spat_to_SH(sh, &(x.typed_data()[n*n_spat]), (cplx*) &(y->typed_data()[n*nlm2]));
+	  spat_to_SH(sh, &(x.typed_data()[n*n_spat]), (cplx*) &(y->typed_data()[n*nlm]));
   }
   return ffi::Error::Success();
 }
@@ -69,7 +68,7 @@ XLA_FFI_DEFINE_HANDLER_SYMBOL(
     ffi::Ffi::Bind()
         .Attr<int64_t>("cfg")
         .Arg<ffi::Buffer<ffi::F64>>()  // q
-        .Ret<ffi::Buffer<ffi::F64>>()  // qlm
+        .Ret<ffi::Buffer<ffi::C128>>()  // qlm
 );
 
 

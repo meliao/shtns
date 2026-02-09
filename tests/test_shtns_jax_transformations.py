@@ -82,3 +82,32 @@ def test_vmap_jit_analys_matches_numpy():
     qlm_from_jax = np.array(f(spat_jax)).reshape(batch, sh.nlm)
 
     assert np.allclose(qlm_from_jax, qlm, rtol=RTOL, atol=ATOL)
+
+
+def test_jvp_synth_equals_apply_to_tangent():
+    sh = _make_cfg(8, 8, 1)
+    qlm = _random_spectral_data(sh, 1, seed=10)[0]
+    v_qlm = _random_spectral_data(sh, 1, seed=11)[0]
+
+    qlm_jax = jnp.array(qlm, dtype=jnp.complex128)
+    v_qlm_jax = jnp.array(v_qlm, dtype=jnp.complex128)
+
+    _, jvp_out = jax.jvp(sh.synth_jax, (qlm_jax,), (v_qlm_jax,))
+    direct = sh.synth_jax(v_qlm_jax)
+
+    assert np.allclose(np.array(jvp_out), np.array(direct), rtol=RTOL, atol=ATOL)
+
+
+def test_jvp_analys_equals_apply_to_tangent():
+    sh = _make_cfg(8, 8, 1)
+    rng = np.random.default_rng(12)
+    spat = rng.standard_normal((sh.nlat, sh.nphi))
+    v_spat = rng.standard_normal((sh.nlat, sh.nphi))
+
+    spat_jax = jnp.array(spat, dtype=jnp.float64)
+    v_spat_jax = jnp.array(v_spat, dtype=jnp.float64)
+
+    _, jvp_out = jax.jvp(sh.analys_jax, (spat_jax,), (v_spat_jax,))
+    direct = sh.analys_jax(v_spat_jax)
+
+    assert np.allclose(np.array(jvp_out), np.array(direct), rtol=RTOL, atol=ATOL)
