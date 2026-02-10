@@ -1,6 +1,12 @@
 SHTNS CHANGE LOG:
 -----------------
 
+* v3.7.5 (13 Feb 2026)
+	- Python: allows transforms with lmax=1
+	- Fix compilation of python interface with Swig 4.4
+	- Fix compilation on AVX+ machines with clang that led to accuracy test failure
+	- Fix setup.py problem with quotes, mostly arising on MacOS
+
 * v3.7.4  (10 Oct 2025)
 	- Add Julia example
 	- Performance tuning for H100 GPU

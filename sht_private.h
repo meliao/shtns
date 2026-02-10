@@ -352,8 +352,8 @@ static void ishioka_to_SH(const double* xlm, const v2d* qq, const int llim_m, v2
 	while (l<llim_m) {
 		v2d uu = qq[l];
 		Ql[l] = uu * vdup(xlm[ll]) + u0;
-		Ql[l+1] = qq[l+1] * vdup(xlm[ll+2]);
 		u0 = uu * vdup(xlm[ll+1]);
+		Ql[l+1] = qq[l+1] * vdup(xlm[ll+2]);
 		l+=2;	ll+=3;
 	}
 	if (l==llim_m) {
