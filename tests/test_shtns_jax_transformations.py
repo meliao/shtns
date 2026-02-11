@@ -111,3 +111,16 @@ def test_jvp_analys_equals_apply_to_tangent():
     direct = sh.analys_jax(v_spat_jax)
 
     assert np.allclose(np.array(jvp_out), np.array(direct), rtol=RTOL, atol=ATOL)
+
+
+def test_vjp_synth_runs_without_error():
+    sh = _make_cfg(8, 8, 1)
+    qlm = _random_spectral_data(sh, 1, seed=13)[0]
+    qlm_jax = jnp.array(qlm, dtype=jnp.complex128)
+
+    out, pullback = jax.vjp(sh.synth_jax, qlm_jax)
+    cotangent = jnp.ones_like(out)
+    (cot_in,) = pullback(cotangent)
+
+    assert cot_in.shape == qlm_jax.shape
+    assert cot_in.dtype == qlm_jax.dtype

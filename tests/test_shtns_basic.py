@@ -57,3 +57,19 @@ def test_analys_jax_cpu_matches_numpy():
 
     assert qlm_from_jax.shape == (sh.nlm,)
     assert np.allclose(qlm_from_jax, qlm, rtol=RTOL, atol=ATOL)
+
+
+def test_theta_contiguous():
+    sh = shtns.sht(8, 8)
+    ntheta, nphi = sh.set_grid(flags=shtns.SHT_THETA_CONTIGUOUS)
+    thetas = np.arccos(sh.cos_theta)
+    phis = np.linspace(0, 2 * np.pi, nphi, endpoint=False)
+    phi_grid, theta_grid = np.meshgrid(phis, thetas, indexing="ij")
+    f_const = np.full(phi_grid.shape, 3.0, dtype=np.float64)
+    
+    # Check that the analys_jax and synth_jax perform as expected on this grid.
+    qlm = sh.analys_jax(f_const)
+    assert qlm.shape == (sh.nlm,)
+
+    f_const_back = sh.synth_jax(qlm)
+    assert f_const_back.shape == sh.spat_shape

@@ -72,6 +72,8 @@ except ImportError:
 ##############
 # Imports & loading libraries for JAX bindings
 import jax
+from jax import core
+from jax.custom_transpose import custom_transpose
 jax.config.update('jax_enable_x64', True)  # support float64
 
 import jax.numpy as jnp
@@ -641,11 +643,24 @@ class sht(object):
         Spectral -> spatial transform.
         Requires complex128 inputs.
         """
+        def _synth_wts_1() -> jax.Array:
+            wts = np.array(self.gauss_wts(), dtype=np.float64)
+            if wts.shape[0] * 2 == self.nlat:
+                wts = np.hstack((wts, np.flip(wts)))
+            elif wts.shape[0] != self.nlat:
+                wts = np.ones((self.nlat,), dtype=np.float64)
+            wts = wts * (2.0 * np.pi) / self.nphi
+            if self.spat_shape == (self.nlat, self.nphi):
+                wts = wts.reshape((-1, 1))
+            elif self.spat_shape == (self.nphi, self.nlat):
+                wts = wts.reshape((1, -1))
+            return jnp.asarray(1.0 / wts)
+
         def _synth_impl(x_in: jax.Array) -> jax.Array:
             if x_in.dtype != jnp.complex128:
                 raise ValueError(f"Only complex128 dtype is implemented by shtns for synthesis. Got {x_in.dtype}.")
             orig_shape = x_in.shape
-            out_shape = (self.nlat, self.nphi) if len(orig_shape) == 1 else (*orig_shape[:-1], self.nlat, self.nphi)
+            out_shape = self.spat_shape if len(orig_shape) == 1 else (*orig_shape[:-1], *self.spat_shape)
 
             def get_impl(target_name):
                 return lambda x: jax.ffi.ffi_call(target_name,    # target name, same as in jax.ffi.register_ffi_target() above
@@ -654,6 +669,18 @@ class sht(object):
                 )(x, cfg=int(self.this))
 
             return jax.lax.platform_dependent(x_in, cpu=get_impl("shtns_synth"), cuda=get_impl("shtns_synth_gpu"))
+
+        def _adjoint_impl(x_in: jax.Array) -> jax.Array:
+            wts = _synth_wts_1()
+            return self.analys_jax(x_in * wts )
+
+        @custom_transpose
+        def _synth_tangent(residuals, x_tan: jax.Array) -> jax.Array:
+            return _synth_impl(x_tan)
+
+        @_synth_tangent.def_transpose
+        def _synth_tangent_transpose(residuals, ct_out: jax.Array):
+            return (_adjoint_impl(ct_out),)
 
         @jax.custom_jvp
         def _synth_custom(x_in: jax.Array) -> jax.Array:
@@ -668,7 +695,8 @@ class sht(object):
             (x_in,) = primals
             (x_tan,) = tangents
             y = _synth_impl(x_in)
-            y_tan = _synth_impl(x_tan)
+            tan_out_types = core.get_aval(y).to_tangent_aval()
+            y_tan = _synth_tangent(tan_out_types, None, x_tan)
             return y, y_tan
 
         return _synth_custom(x)
@@ -682,9 +710,9 @@ class sht(object):
             if x_in.dtype != jnp.float64:
                 raise ValueError(f"Only the float64 dtype is implemented by shtns. Got {x_in.dtype}.")
             if len(x_in.shape) < 2:
-                raise ValueError("Input array must have at least 2 dimensions (nlat, nphi)")
-            if x_in.shape[-2:] != (self.nlat, self.nphi):
-                raise ValueError("Input array must end with (nlat, nphi)")
+                raise ValueError("Input array must have at least 2 dimensions (grid space)")
+            if x_in.shape[-2:] != self.spat_shape:
+                raise ValueError("Input array must end with the grid shape from set_grid().")
             prefix_shape = x_in.shape[:-2]
             out_shape = (self.nlm,) if len(x_in.shape) == 2 else (*prefix_shape, self.nlm)
 
