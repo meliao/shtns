@@ -3,9 +3,11 @@
 # and https://stackoverflow.com/questions/42585210/extending-setuptools-extension-to-use-cmake-in-setup-py
 
 from setuptools import setup, Extension
+from setuptools.command.build_py import build_py
 from setuptools.command.build_ext import build_ext, new_compiler, customize_compiler
 from numpy import get_include
 import os,sys
+import shutil
 
 def getver():
     with open('CHANGELOG.md') as f:
@@ -109,14 +111,21 @@ class make(build_ext):
         self.spawn(['make','--jobs=4', *shtns_o])   # make the objects required to build extension
         super().run()
 
+class build_py_with_jax_lib(build_py):
+    def run(self):
+        super().run()
+        # Ensure libshtns_jax.so ends up next to shtns.py in site-packages.
+        src = os.path.join(os.path.abspath('.'), "libshtns_jax.so")
+        if os.path.exists(src):
+            shutil.copy2(src, os.path.join(self.build_lib, "libshtns_jax.so"))
+
 setup(name='shtns',
-    cmdclass={'build_ext': make },
+    cmdclass={'build_ext': make, 'build_py': build_py_with_jax_lib },
         description='High performance Spherical Harmonic Transform',
         author='Nathanael Schaeffer',
         author_email='nathanael.schaeffer@univ-grenoble-alpes.fr',
         url='https://bitbucket.org/nschaeff/shtns',
         ext_modules=shtns_ext,
         py_modules=["shtns"],
-        data_files=[("", ["libshtns_jax.so"])],
         requires=["numpy"],
         )

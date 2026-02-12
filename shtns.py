@@ -643,19 +643,6 @@ class sht(object):
         Spectral -> spatial transform.
         Requires complex128 inputs.
         """
-        def _synth_wts_1() -> jax.Array:
-            wts = np.array(self.gauss_wts(), dtype=np.float64)
-            if wts.shape[0] * 2 == self.nlat:
-                wts = np.hstack((wts, np.flip(wts)))
-            elif wts.shape[0] != self.nlat:
-                wts = np.ones((self.nlat,), dtype=np.float64)
-            wts = wts * (2.0 * np.pi) / self.nphi
-            if self.spat_shape == (self.nlat, self.nphi):
-                wts = wts.reshape((-1, 1))
-            elif self.spat_shape == (self.nphi, self.nlat):
-                wts = wts.reshape((1, -1))
-            return jnp.asarray(1.0 / wts)
-
         def _synth_impl(x_in: jax.Array) -> jax.Array:
             if x_in.dtype != jnp.complex128:
                 raise ValueError(f"Only complex128 dtype is implemented by shtns for synthesis. Got {x_in.dtype}.")
@@ -670,9 +657,28 @@ class sht(object):
 
             return jax.lax.platform_dependent(x_in, cpu=get_impl("shtns_synth"), cuda=get_impl("shtns_synth_gpu"))
 
-        def _adjoint_impl(x_in: jax.Array) -> jax.Array:
-            wts = _synth_wts_1()
-            return self.analys_jax(x_in * wts )
+        def _analys_impl_for_adj(x_in: jax.Array) -> jax.Array:
+            if x_in.dtype != jnp.float64:
+                raise ValueError(f"Only the float64 dtype is implemented by shtns. Got {x_in.dtype}.")
+            if len(x_in.shape) < 2:
+                raise ValueError("Input array must have at least 2 dimensions (grid space)")
+            if x_in.shape[-2:] != self.spat_shape:
+                raise ValueError("Input array must end with the grid shape from set_grid().")
+            prefix_shape = x_in.shape[:-2]
+            out_shape = (self.nlm,) if len(x_in.shape) == 2 else (*prefix_shape, self.nlm)
+
+            def get_impl(target_name):
+                return lambda x: jax.ffi.ffi_call(
+                    target_name,
+                    jax.ShapeDtypeStruct(out_shape, jnp.complex128),
+                    vmap_method="broadcast_all",
+                )(x, cfg=int(self.this))
+
+            return get_impl("shtns_analys")(x_in)
+
+        def _adjoint_impl(ct_out: jax.Array) -> jax.Array:
+            scale = self.nphi / (2.0 * np.pi)
+            return _analys_impl_for_adj(ct_out) * scale
 
         @custom_transpose
         def _synth_tangent(residuals, x_tan: jax.Array) -> jax.Array:
@@ -688,10 +694,6 @@ class sht(object):
 
         @_synth_custom.defjvp
         def _synth_custom_jvp(primals, tangents):
-            """
-            The forward transform is linear, so the Jvp is just the 
-            forward transform of the tangent.
-            """
             (x_in,) = primals
             (x_tan,) = tangents
             y = _synth_impl(x_in)
@@ -724,6 +726,32 @@ class sht(object):
 
             return get_impl("shtns_analys")(x_in)
 
+        def _synth_impl_for_adj(x_in: jax.Array) -> jax.Array:
+            if x_in.dtype != jnp.complex128:
+                raise ValueError(f"Only complex128 dtype is implemented by shtns for synthesis. Got {x_in.dtype}.")
+            orig_shape = x_in.shape
+            out_shape = self.spat_shape if len(orig_shape) == 1 else (*orig_shape[:-1], *self.spat_shape)
+
+            def get_impl(target_name):
+                return lambda x: jax.ffi.ffi_call(
+                    target_name,
+                    jax.ShapeDtypeStruct(out_shape, jnp.float64),
+                    vmap_method="broadcast_all",
+                )(x, cfg=int(self.this))
+
+            return jax.lax.platform_dependent(x_in, cpu=get_impl("shtns_synth"), cuda=get_impl("shtns_synth_gpu"))
+
+        def _adjoint_impl(ct_out: jax.Array) -> jax.Array:
+            scale = (2.0 * np.pi) / self.nphi
+            return _synth_impl_for_adj(ct_out) * scale
+
+        @custom_transpose
+        def _analys_tangent(residuals, x_tan: jax.Array) -> jax.Array:
+            return _analys_impl(x_tan)
+
+        @_analys_tangent.def_transpose
+        def _analys_tangent_transpose(residuals, ct_out: jax.Array):
+            return (_adjoint_impl(ct_out),)
 
         @jax.custom_jvp
         def _analys_custom(x_in: jax.Array) -> jax.Array:
@@ -734,7 +762,8 @@ class sht(object):
             (x_in,) = primals
             (x_tan,) = tangents
             y = _analys_impl(x_in)
-            y_tan = _analys_impl(x_tan)
+            tan_out_types = core.get_aval(y).to_tangent_aval()
+            y_tan = _analys_tangent(tan_out_types, None, x_tan)
             return y, y_tan
 
         return _analys_custom(x)
