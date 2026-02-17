@@ -656,11 +656,11 @@ class sht(object):
 ###########
 # Jax interface:
     def _check_jax_gpu_grid_compat(self):
-        # GPU JAX FFI currently does not support theta-contiguous grids.
-        if CUDA_AVAILABLE and (self._grid_flags & SHT_THETA_CONTIGUOUS):
+        # GPU JAX FFI currently does not support phi-contiguous grids.
+        if CUDA_AVAILABLE and (self._grid_flags & SHT_PHI_CONTIGUOUS):
             raise ValueError(
-                "JAX GPU backend does not support SHT_THETA_CONTIGUOUS grids. "
-                "Call set_grid() without SHT_THETA_CONTIGUOUS or run with CPU backend."
+                "JAX GPU backend does not support SHT_PHI_CONTIGUOUS grids. "
+                "Call set_grid() with SHT_THETA_CONTIGUOUS or run with CPU backend."
             )
 
     def synth_jax(self, x: jax.Array) -> jax.Array:

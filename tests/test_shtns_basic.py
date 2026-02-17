@@ -15,7 +15,7 @@ GPU_AVAILABLE = len(CUDA_DEVICES) > 0
 
 def _make_cfg(lmax=8, mmax=8, mres=1):
     sh = shtns.sht(lmax, mmax, mres)
-    sh.set_grid(flags=shtns.SHT_ALLOW_GPU + shtns.SHT_PHI_CONTIGUOUS)
+    sh.set_grid(flags=shtns.SHT_ALLOW_GPU + shtns.SHT_THETA_CONTIGUOUS)
     return sh
 
 
@@ -120,19 +120,19 @@ def test_theta_contiguous_cpu():
 def test_theta_contiguous_cuda():
     # This one asserts that an error is thrown
     sh = shtns.sht(8, 8)
-    ntheta, nphi = sh.set_grid(flags=shtns.SHT_THETA_CONTIGUOUS)
+    ntheta, nphi = sh.set_grid(flags=shtns.SHT_PHI_CONTIGUOUS)
     thetas = np.arccos(sh.cos_theta)
     phis = np.linspace(0, 2 * np.pi, nphi, endpoint=False)
     phi_grid, theta_grid = np.meshgrid(phis, thetas, indexing="ij")
     f_const = np.full(phi_grid.shape, 3.0, dtype=np.float64)
     
     # Check that the analys_jax and synth_jax perform as expected on this grid.
-    with pytest.raises(ValueError, match="SHT_THETA_CONTIGUOUS"):
+    with pytest.raises(ValueError, match="SHT_PHI_CONTIGUOUS"):
         _ = sh.analys_jax(f_const)
 
     qlm_jax = jnp.zeros(sh.nlm, dtype=jnp.complex128)
 
-    with pytest.raises(ValueError, match="SHT_THETA_CONTIGUOUS"):
+    with pytest.raises(ValueError, match="SHT_PHI_CONTIGUOUS"):
         _ = sh.synth_jax(qlm_jax)
 
 

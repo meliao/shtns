@@ -9,7 +9,7 @@ ATOL = 1e-10
 
 def _make_cfg(lmax=8, mmax=8, mres=1):
     sh = shtns.sht(lmax, mmax, mres)
-    sh.set_grid(flags=shtns.SHT_ALLOW_GPU + shtns.SHT_PHI_CONTIGUOUS)
+    sh.set_grid(flags=shtns.SHT_ALLOW_GPU + shtns.SHT_THETA_CONTIGUOUS)
     return sh
 
 
@@ -27,7 +27,7 @@ def _random_spectral_data(sh: shtns.sht, batch: int, seed: int=0):
 
 def _random_spatial_data(sh: shtns.sht, batch: int, seed: int=0):
     rng = np.random.default_rng(seed)
-    spat = rng.standard_normal((batch, sh.nlat, sh.nphi))
+    spat = rng.standard_normal((batch, sh.nphi, sh.nlat))
     return spat
 
 def test_jit_vmap_synth_matches_numpy():
@@ -102,8 +102,8 @@ def test_jvp_analys_equals_apply_to_tangent(caplog):
     caplog.set_level(logging.INFO)
     sh = _make_cfg(8, 8, 1)
     rng = np.random.default_rng(12)
-    spat = rng.standard_normal((sh.nlat, sh.nphi))
-    v_spat = rng.standard_normal((sh.nlat, sh.nphi))
+    spat = rng.standard_normal(sh.spat_shape)
+    v_spat = rng.standard_normal(sh.spat_shape)
 
     spat_jax = jnp.array(spat, dtype=jnp.float64)
     v_spat_jax = jnp.array(v_spat, dtype=jnp.float64)
@@ -121,10 +121,12 @@ def test_jvp_analys_equals_apply_to_tangent(caplog):
     assert np.allclose(np.array(jvp_out), np.array(direct), rtol=RTOL, atol=ATOL)
 
 
-def test_vjp_synth_runs_without_error():
+def test_vjp_synth_runs_without_error(caplog):
+    caplog.set_level(logging.INFO)
     sh = _make_cfg(8, 8, 1)
     qlm = _random_spectral_data(sh, 1, seed=13)[0]
     qlm_jax = jnp.array(qlm, dtype=jnp.complex128)
+
 
     out, pullback = jax.vjp(sh.synth_jax, qlm_jax)
     cotangent = jnp.ones_like(out)
@@ -133,9 +135,12 @@ def test_vjp_synth_runs_without_error():
     assert cot_in.shape == qlm_jax.shape
     assert cot_in.dtype == qlm_jax.dtype
 
-def test_vjp_analys_runs_without_error():
+def test_vjp_analys_runs_without_error(caplog):
+    caplog.set_level(logging.INFO)
     sh = _make_cfg(8, 8, 1)
     spat = _random_spatial_data(sh, 1, seed=14)
+    logging.info("spat shape: %s", spat.shape)
+    logging.info("sh.spat_shape: %s", sh.spat_shape)
     spat_jax = jnp.array(spat, dtype=jnp.float64)
 
     out, pullback = jax.vjp(sh.analys_jax, spat_jax)
