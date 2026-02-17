@@ -24,11 +24,11 @@ for i in range(Nbatch):
 print(qlm.shape, qlm.dtype)
 
 qlm_jax = jnp.array(qlm, dtype=jnp.complex128)
-print(qlm_jax.shape, qlm_jax.dtype)
+print(qlm_jax.shape, qlm_jax.dtype, qlm_jax.devices())
 
 q_jax = sh.synth_jax(qlm_jax)  # call from jax, automatic batching
-print("After first call, shape and dtype:")
-print(q_jax.shape, q_jax.dtype)
+print("After first call, here are shape, dtype, devices:")
+print(q_jax.shape, q_jax.dtype, q_jax.devices())
 
 q_jax = jax.vmap(sh.synth_jax)(qlm_jax)  # also automatic vmap
 print("After vmap, shape and dtype:")

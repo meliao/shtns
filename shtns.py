@@ -80,21 +80,37 @@ import jax.numpy as jnp
 import ctypes
 import os
 _this_dir = os.path.dirname(__file__)
-shtns_jax_lib = ctypes.cdll.LoadLibrary(os.path.join(_this_dir, "libshtns_jax.so"))
+def _load_jax_lib(*names):
+    last_error = None
+    for name in names:
+        try:
+            return ctypes.cdll.LoadLibrary(os.path.join(_this_dir, name))
+        except OSError as e:
+            last_error = e
+    if last_error is not None:
+        raise last_error
+    raise OSError("No library names provided for loading.")
 
-
+# CPU FFI library is required 
+shtns_jax_lib_cpu = _load_jax_lib("libshtns_jax_cpu.so")
 jax.ffi.register_ffi_target(
-    "shtns_synth", jax.ffi.pycapsule(shtns_jax_lib.synth_cpu), platform="cpu")
+    "shtns_synth", jax.ffi.pycapsule(shtns_jax_lib_cpu.synth_cpu), platform="cpu")
+# Have to re-register the same function for "Host" platform...
+jax.ffi.register_ffi_target(
+    "shtns_synth", jax.ffi.pycapsule(shtns_jax_lib_cpu.synth_cpu), platform="Host")
+jax.ffi.register_ffi_target(
+        "shtns_analys", jax.ffi.pycapsule(shtns_jax_lib_cpu.analys_cpu), platform="cpu")
+# jax.ffi.register_ffi_target(
+#         "shtns_analys", jax.ffi.pycapsule(shtns_jax_lib_cpu.analys_cpu), platform="Host")
+DEFAULT_SYNTH_IMPL = "shtns_synth"
+# CUDA FFI library is optional.
 try:
+    shtns_jax_lib_cuda = _load_jax_lib("libshtns_jax_cuda.so")
     jax.ffi.register_ffi_target(
-        "shtns_analys", jax.ffi.pycapsule(shtns_jax_lib.analys_cpu), platform="cpu")
-except Exception as e:
-    print("Could not find CPU analys implementation for JAX:", e)
-try:
-    jax.ffi.register_ffi_target(
-        "shtns_synth_gpu", jax.ffi.pycapsule(shtns_jax_lib.synth_gpu), platform="cuda")
-    jax.ffi.register_ffi_target(
-        "shtns_synth_gpu_float", jax.ffi.pycapsule(shtns_jax_lib.synth_gpu_float), platform="cuda")
+        "shtns_synth_gpu", jax.ffi.pycapsule(shtns_jax_lib_cuda.synth_gpu), platform="CUDA")
+    # jax.ffi.register_ffi_target(
+    #     "shtns_synth_gpu", jax.ffi.pycapsule(shtns_jax_lib_cuda.synth_gpu), platform="Host")
+    DEFAULT_SYNTH_IMPL = "shtns_synth_gpu"
 except Exception as e:
     print("Could not find GPU implementation for JAX:", e)
 
@@ -648,6 +664,8 @@ class sht(object):
                 raise ValueError(f"Only complex128 dtype is implemented by shtns for synthesis. Got {x_in.dtype}.")
             orig_shape = x_in.shape
             out_shape = self.spat_shape if len(orig_shape) == 1 else (*orig_shape[:-1], *self.spat_shape)
+
+            
 
             def get_impl(target_name):
                 return lambda x: jax.ffi.ffi_call(target_name,    # target name, same as in jax.ffi.register_ffi_target() above

@@ -8,6 +8,19 @@ from setuptools.command.build_ext import build_ext, new_compiler, customize_comp
 from numpy import get_include
 import os,sys
 import shutil
+from pathlib import Path
+
+
+def get_jaxlib_include():
+    try:
+        import jaxlib
+    except Exception:
+        return None
+    try:
+        inc = Path(jaxlib.__file__).resolve().parent / "include"
+        return str(inc) if inc.exists() else None
+    except Exception:
+        return None
 
 def getver():
     with open('CHANGELOG.md') as f:
@@ -109,15 +122,49 @@ class make(build_ext):
     def run(self):
         self.spawn(config_cmd)
         self.spawn(['make','--jobs=4', *shtns_o])   # make the objects required to build extension
+        # Build JAX shared libraries for FFI bindings.
+        jax_inc = get_jaxlib_include()
+        if not jax_inc:
+            raise RuntimeError("JAX build requested but jaxlib headers were not found. "
+                               "Ensure jax/jaxlib are installed in the build environment.")
+        cxx = os.environ.get('CXX', 'g++')
+        # CPU JAX FFI library.
+        cmd_cpu = [cxx, '-O2', '-fpic', '-shared', '-std=c++17', '-I' + jax_inc]
+        if use_openmp:
+            cmd_cpu.append('-fopenmp')
+        for d in libdir:
+            cmd_cpu.append('-L' + d)
+        for lib in libs:
+            cmd_cpu.append('-l' + lib)
+        cmd_cpu += [*(shtns_o_cpu + shtns_o_com), 'shtns_jax.cpp', '-o', 'libshtns_jax_cpu.so']
+        self.spawn(cmd_cpu)
+
+        # CUDA JAX FFI library (optional).
+        if cuda_path != '':
+            cmd_gpu = [cxx, '-O2', '-fpic', '-shared', '-std=c++17', '-I' + jax_inc,
+                       '-DSHTNS_GPU', '-I' + cuda_path + '/include']
+            if use_openmp:
+                cmd_gpu.append('-fopenmp')
+            for d in libdir:
+                cmd_gpu.append('-L' + d)
+            for d in libdir_gpu:
+                cmd_gpu.append('-L' + d)
+            for lib in libs:
+                cmd_gpu.append('-l' + lib)
+            for lib in libs_gpu:
+                cmd_gpu.append('-l' + lib)
+            cmd_gpu += [*(shtns_o_gpu + shtns_o_com), 'shtns_jax.cpp', '-o', 'libshtns_jax_cuda.so']
+            self.spawn(cmd_gpu)
         super().run()
 
 class build_py_with_jax_lib(build_py):
     def run(self):
         super().run()
-        # Ensure libshtns_jax.so ends up next to shtns.py in site-packages.
-        src = os.path.join(os.path.abspath('.'), "libshtns_jax.so")
-        if os.path.exists(src):
-            shutil.copy2(src, os.path.join(self.build_lib, "libshtns_jax.so"))
+        # Ensure JAX FFI libraries end up next to shtns.py in site-packages.
+        for name in ("libshtns_jax_cpu.so", "libshtns_jax_cuda.so", "libshtns_jax.so"):
+            src = os.path.join(os.path.abspath('.'), name)
+            if os.path.exists(src):
+                shutil.copy2(src, os.path.join(self.build_lib, name))
 
 setup(name='shtns',
     cmdclass={'build_ext': make, 'build_py': build_py_with_jax_lib },

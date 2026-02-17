@@ -9,7 +9,7 @@ ATOL = 1e-10
 
 def _make_cfg(lmax=8, mmax=8, mres=1):
     sh = shtns.sht(lmax, mmax, mres)
-    sh.set_grid(nl_order=2)
+    sh.set_grid(flags=shtns.SHT_ALLOW_GPU + shtns.SHT_PHI_CONTIGUOUS)
     return sh
 
 

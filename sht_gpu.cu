@@ -840,15 +840,15 @@ static void ilegendre(shtns_cfg shtns, const int S, const void *q, void* ql, con
 
 	int llim_ = llim;
 	const float w_norm_1_f = shtns->wg[-1];	// convert to float
-	void* w_norm_ptr = &(shtns->wg[-1]);
+	const void* w_norm_ptr = &(shtns->wg[-1]);
 	if (shtns->sizeof_real == 4) w_norm_ptr = &w_norm_1_f;		// weight_norm_1 as a float
-	char* wg = ((char*)shtns->d_ct) + nlat_2*shtns->sizeof_real_g	// weights are stored after cos(theta)
+	char* wg = ((char*)shtns->d_ct) + nlat_2*shtns->sizeof_real_g;	// weights are stored after cos(theta)
 	const double zero = 0.0;
 	if (no_weights) {
 		wg += 3*nlat_2*shtns->sizeof_real_g;	// an array of 1, to "disable" the weights
 		w_norm_ptr = &zero;		// pass zero as weight_norm_1 to disable removal of mean, required for adjoint synthesis (works for both float and double)
 	}
-	void* params[12] = {&shtns->d_clm, &wg, &shtns->d_ct, &q, &ql, &llim_, &nlat_2, &shtns->nphi, &shtns->nlat_padded, &shtns->nlat, &shtns->nlm_stride, w_norm_ptr};
+	void* params[12] = {&shtns->d_clm, &wg, &shtns->d_ct, &q, &ql, &llim_, &nlat_2, &shtns->nphi, &shtns->nlat_padded, &shtns->nlat, &shtns->nlm_stride, const_cast<void*>(w_norm_ptr)};
 	cuLaunchKernel(shtns->gpu_kernels[2+S], 		// analysis kernels
 			shtns->gridDim_x[1], shtns->gridDim_y[1], mmax+1,		// grid dim
 			blksze, 1, 1,					// block dim
