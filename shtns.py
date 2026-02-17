@@ -100,17 +100,16 @@ jax.ffi.register_ffi_target(
     "shtns_synth", jax.ffi.pycapsule(shtns_jax_lib_cpu.synth_cpu), platform="Host")
 jax.ffi.register_ffi_target(
         "shtns_analys", jax.ffi.pycapsule(shtns_jax_lib_cpu.analys_cpu), platform="cpu")
-# jax.ffi.register_ffi_target(
-#         "shtns_analys", jax.ffi.pycapsule(shtns_jax_lib_cpu.analys_cpu), platform="Host")
-DEFAULT_SYNTH_IMPL = "shtns_synth"
+
+CUDA_AVAILABLE = False
 # CUDA FFI library is optional.
 try:
     shtns_jax_lib_cuda = _load_jax_lib("libshtns_jax_cuda.so")
     jax.ffi.register_ffi_target(
         "shtns_synth_gpu", jax.ffi.pycapsule(shtns_jax_lib_cuda.synth_gpu), platform="CUDA")
-    # jax.ffi.register_ffi_target(
-    #     "shtns_synth_gpu", jax.ffi.pycapsule(shtns_jax_lib_cuda.synth_gpu), platform="Host")
-    DEFAULT_SYNTH_IMPL = "shtns_synth_gpu"
+    jax.ffi.register_ffi_target(
+        "shtns_analys_gpu", jax.ffi.pycapsule(shtns_jax_lib_cuda.analys_gpu), platform="CUDA")
+    CUDA_AVAILABLE = True
 except Exception as e:
     print("Could not find GPU implementation for JAX:", e)
 
@@ -178,6 +177,7 @@ class sht(object):
     def __init__(self, lmax, mmax=-1, mres=1, norm=sht_orthonormal, nthreads=0):
         r"""__init__(sht self, int lmax, int mmax=-1, int mres=1, int norm=sht_orthonormal, int nthreads=0) -> sht"""
         _shtns.sht_swiginit(self, _shtns.new_sht(lmax, mmax, mres, norm, nthreads))
+        self._grid_flags = 0
 
         		## array giving the degree of spherical harmonic coefficients.
         self.l = np.zeros(self.nlm, dtype=np.int32)
@@ -203,6 +203,7 @@ class sht(object):
     def set_grid(self, nlat=0, nphi=0, flags=sht_quick_init, polar_opt=1.0e-10, nl_order=1):
         r"""set_grid(sht self, int nlat=0, int nphi=0, int flags=sht_quick_init, double polar_opt=1.0e-10, int nl_order=1)"""
         val = _shtns.sht_set_grid(self, nlat, nphi, flags, polar_opt, nl_order)
+        self._grid_flags = int(flags)
 
         		## array giving the cosine of the colatitude for the grid.
         self.cos_theta = self.__ct()
@@ -654,11 +655,21 @@ class sht(object):
         return _shtns.sht_SHqst_to_spat_m(self, Qlm, Slm, Tlm, Vr, Vt, Vp, im)
 ###########
 # Jax interface:
+    def _check_jax_gpu_grid_compat(self):
+        # GPU JAX FFI currently does not support theta-contiguous grids.
+        if CUDA_AVAILABLE and (self._grid_flags & SHT_THETA_CONTIGUOUS):
+            raise ValueError(
+                "JAX GPU backend does not support SHT_THETA_CONTIGUOUS grids. "
+                "Call set_grid() without SHT_THETA_CONTIGUOUS or run with CPU backend."
+            )
+
     def synth_jax(self, x: jax.Array) -> jax.Array:
         """Inverse spherical harmonic transform. 
         Spectral -> spatial transform.
         Requires complex128 inputs.
         """
+        self._check_jax_gpu_grid_compat()
+
         def _synth_impl(x_in: jax.Array) -> jax.Array:
             if x_in.dtype != jnp.complex128:
                 raise ValueError(f"Only complex128 dtype is implemented by shtns for synthesis. Got {x_in.dtype}.")
@@ -692,7 +703,7 @@ class sht(object):
                     vmap_method="broadcast_all",
                 )(x, cfg=int(self.this))
 
-            return get_impl("shtns_analys")(x_in)
+            return jax.lax.platform_dependent(x_in, cpu=get_impl("shtns_analys"), cuda=get_impl("shtns_analys_gpu"))
 
         def _adjoint_impl(ct_out: jax.Array) -> jax.Array:
             scale = self.nphi / (2.0 * np.pi)
@@ -704,7 +715,7 @@ class sht(object):
 
         @_synth_tangent.def_transpose
         def _synth_tangent_transpose(residuals, ct_out: jax.Array):
-            return (_adjoint_impl(ct_out),)
+            return _adjoint_impl(ct_out)
 
         @jax.custom_jvp
         def _synth_custom(x_in: jax.Array) -> jax.Array:
@@ -726,6 +737,7 @@ class sht(object):
         Spatial -> spectral transform.
         Requires float64 inputs, returns complex128 outputs.
         """
+        self._check_jax_gpu_grid_compat()
         def _analys_impl(x_in: jax.Array) -> jax.Array:
             if x_in.dtype != jnp.float64:
                 raise ValueError(f"Only the float64 dtype is implemented by shtns. Got {x_in.dtype}.")
@@ -742,7 +754,7 @@ class sht(object):
                 vmap_method="broadcast_all",
                 )(x, cfg=int(self.this))
 
-            return get_impl("shtns_analys")(x_in)
+            return jax.lax.platform_dependent(x_in, cpu=get_impl("shtns_analys"), cuda=get_impl("shtns_analys_gpu"))
 
         def _synth_impl_for_adj(x_in: jax.Array) -> jax.Array:
             if x_in.dtype != jnp.complex128:
@@ -769,7 +781,7 @@ class sht(object):
 
         @_analys_tangent.def_transpose
         def _analys_tangent_transpose(residuals, ct_out: jax.Array):
-            return (_adjoint_impl(ct_out),)
+            return _adjoint_impl(ct_out)
 
         @jax.custom_jvp
         def _analys_custom(x_in: jax.Array) -> jax.Array:

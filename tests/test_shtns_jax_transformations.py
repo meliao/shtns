@@ -1,7 +1,7 @@
 import numpy as np
 import jax
 import jax.numpy as jnp
-
+import logging
 import shtns
 
 RTOL = 1e-10
@@ -98,7 +98,8 @@ def test_jvp_synth_equals_apply_to_tangent():
     assert np.allclose(np.array(jvp_out), np.array(direct), rtol=RTOL, atol=ATOL)
 
 
-def test_jvp_analys_equals_apply_to_tangent():
+def test_jvp_analys_equals_apply_to_tangent(caplog):
+    caplog.set_level(logging.INFO)
     sh = _make_cfg(8, 8, 1)
     rng = np.random.default_rng(12)
     spat = rng.standard_normal((sh.nlat, sh.nphi))
@@ -107,8 +108,15 @@ def test_jvp_analys_equals_apply_to_tangent():
     spat_jax = jnp.array(spat, dtype=jnp.float64)
     v_spat_jax = jnp.array(v_spat, dtype=jnp.float64)
 
-    _, jvp_out = jax.jvp(sh.analys_jax, (spat_jax,), (v_spat_jax,))
-    direct = sh.analys_jax(v_spat_jax)
+    _, jvp_out = jax.jvp(sh.analys_jax, (jnp.copy(spat_jax),), (jnp.copy(v_spat_jax),))
+    logging.info("jvp_out: %s", jvp_out)
+    direct = sh.analys_jax(jnp.copy(v_spat_jax))
+    logging.info("direct: %s", direct)
+    np_diffs = np.abs(np.array(jvp_out) - np.array(direct))
+    logging.info("diffs: %s", np_diffs)
+
+    direct_np = sh.analys(np.array(v_spat_jax))
+    logging.info("direct_np: %s", direct_np)
 
     assert np.allclose(np.array(jvp_out), np.array(direct), rtol=RTOL, atol=ATOL)
 
@@ -124,3 +132,15 @@ def test_vjp_synth_runs_without_error():
 
     assert cot_in.shape == qlm_jax.shape
     assert cot_in.dtype == qlm_jax.dtype
+
+def test_vjp_analys_runs_without_error():
+    sh = _make_cfg(8, 8, 1)
+    spat = _random_spatial_data(sh, 1, seed=14)
+    spat_jax = jnp.array(spat, dtype=jnp.float64)
+
+    out, pullback = jax.vjp(sh.analys_jax, spat_jax)
+    cotangent = jnp.ones_like(out)
+    (cot_in,) = pullback(cotangent)
+
+    assert cot_in.shape == spat_jax.shape
+    assert cot_in.dtype == spat_jax.dtype
