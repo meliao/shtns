@@ -15,6 +15,9 @@
  * 
  */
 
+#ifndef SHTNS_H
+#define SHTNS_H
+
 /** \file shtns.h
  \brief shtns.h is the definition file for SHTns : include this file in your source code to use SHTns.
 **/
@@ -384,3 +387,5 @@ double spat_to_SH_time(shtns_cfg shtns, double *Vr, cplx *Qlm);	///< same as spa
 #ifdef __cplusplus
 }
 #endif /* __cplusplus */
+
+#endif //SHTNS_H
