@@ -40,6 +40,8 @@
 
 #ifdef SHTNS_GPU
 #if SHTNS_GPU == 1
+	#include <cuda.h>
+	#include <nvrtc.h>
 	#ifdef HAVE_LIBCUFFT
 	#include <cufft.h>
 	#endif

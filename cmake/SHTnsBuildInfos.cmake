@@ -1,0 +1,36 @@
+###########################################################
+# Print a summary status to help ensuring everything
+# is correct
+function(shtns_print_status)
+	# Prepare some vars for printing
+	string(TOUPPER "${CMAKE_BUILD_TYPE}" CMAKE_BUILD_TYPE_UPPER)
+	if (CMAKE_BUILD_TYPE STREQUAL "")
+		list(JOIN CMAKE_C_FLAGS " " CMAKE_BUILD_TYPE_FLAGS)
+	else()
+		list(JOIN CMAKE_C_FLAGS_${CMAKE_BUILD_TYPE_UPPER} " " CMAKE_BUILD_TYPE_FLAGS)
+	endif()
+
+	# Print summary
+	message(STATUS "========================= SHTns ==============================")
+	message(STATUS "|  OS               : ${CMAKE_HOST_SYSTEM_NAME}")
+	message(STATUS "|  Compiler familly : ${CMAKE_C_COMPILER_ID}")
+	message(STATUS "|  Compiler         : ${CMAKE_C_COMPILER}")
+	message(STATUS "+-------------------------------------------------------------")
+	message(STATUS "|  march CPU bin    : ${SHTNS_CPU_MARCH}")
+	message(STATUS "|  march GPU bin    : ${SHTNS_GPU_MARCH}")
+	message(STATUS "|  CUDA Arch        : ${CMAKE_CUDA_ARCHITECTURES}")
+	message(STATUS "|  HIP Arch         : ${CMAKE_HIP_ARCHITECTURES}")
+	message(STATUS "+-------------------------------------------------------------")
+	message(STATUS "|  fftw             : ${FFTW_LIBRARIES}")
+	message(STATUS "|  fftw-omp         : ${FFTW_OMP_LIBRARIES}")
+	message(STATUS "|  openmp           : ${OpenMP_C_FLAGS}")
+	message(STATUS "|  python           : ${Python3_EXECUTABLE}")
+	message(STATUS "|  numpy            : ${NUMPY_INCLUDE_DIR}")
+	message(STATUS "+-------------------------------------------------------------")
+	message(STATUS "|  CMake build type : ${CMAKE_BUILD_TYPE}")
+	message(STATUS "|  CMake cflags     : ${CMAKE_BUILD_TYPE_FLAGS}")
+	message(STATUS "|  shtns cflags     : ${SHT_C_FLAGS}")
+	message(STATUS "|  User cflags      : ${CMAKE_C_FLAGS}")
+	message(STATUS "|  All cflags       : ${CMAKE_BUILD_TYPE_FLAGS} ${CMAKE_C_FLAGS}")
+	message(STATUS "==============================================================")
+endfunction()

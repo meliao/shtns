@@ -33,6 +33,9 @@
 #include <time.h>		// for the clock() function
 // cycle counter from FFTW
 #include "fftw3/cycle.h"
+#ifdef SHTNS_CMAKE
+	#include "sht_version.h"
+#endif
 
 // chained list of sht_setup : start with NULL
 shtns_cfg sht_data = NULL;

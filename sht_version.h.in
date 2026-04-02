@@ -1,0 +1,6 @@
+#ifndef SHT_VERSION_H
+#define SHT_VERSION_H
+
+#define _HGID_ "@SHTNS_VERSION@"
+
+#endif //SHT_VERSION_H
