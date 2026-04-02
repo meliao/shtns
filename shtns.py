@@ -427,8 +427,10 @@ class sht(object):
     		self._gpu_analys_list[n-1](*v_ptr, *out_ptr)
     		cupy.cuda.runtime.deviceSynchronize()
     	else:
+    		# Use private working copies so the backend cannot mutate user inputs.
+    		v_work = [vi.copy(order="C") for vi in v]
     		out = [np.empty(self.nlm, dtype=complex) for i in range(n)]
-    		self._cpu_analys_list[n-1](*v, *out)
+    		self._cpu_analys_list[n-1](*v_work, *out)
     	return out[0] if n==1 else tuple(out)
 
     def synth_grad(self,slm):

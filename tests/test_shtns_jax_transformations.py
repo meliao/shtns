@@ -106,9 +106,9 @@ def test_jvp_analys_equals_apply_to_tangent():
 
     spat_jax = jnp.array(spat, dtype=jnp.float64)
     v_spat_jax = jnp.array(v_spat, dtype=jnp.float64)
+    direct = sh.analys_jax(v_spat_jax)
 
     _, jvp_out = jax.jvp(sh.analys_jax, (spat_jax,), (v_spat_jax,))
-    direct = sh.analys_jax(v_spat_jax)
 
     assert np.allclose(np.array(jvp_out), np.array(direct), rtol=RTOL, atol=ATOL)
 
@@ -124,3 +124,17 @@ def test_vjp_synth_runs_without_error():
 
     assert cot_in.shape == qlm_jax.shape
     assert cot_in.dtype == qlm_jax.dtype
+
+
+def test_vjp_analys_runs_without_error():
+    sh = _make_cfg(8, 8, 1)
+    rng = np.random.default_rng(14)
+    spat = rng.standard_normal((sh.nlat, sh.nphi))
+    spat_jax = jnp.array(spat, dtype=jnp.float64)
+
+    out, pullback = jax.vjp(sh.analys_jax, spat_jax)
+    cotangent = jnp.ones_like(out)
+    (cot_in,) = pullback(cotangent)
+
+    assert cot_in.shape == spat_jax.shape
+    assert cot_in.dtype == spat_jax.dtype
