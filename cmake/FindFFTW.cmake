@@ -50,8 +50,10 @@
 set(CACHE FFTW_ROOT TYPE PATH HELP "Prefix installation path for the FFTW library." $ENV{FFTW_ROOT})
 
 # search it via pkg-config as last ressort
-find_package(PkgConfig QUIET REQUIRED)
-pkg_check_modules(FFTW_PKG_CONFIG QUIET fftw3)
+find_package(PkgConfig QUIET)
+if (PkgConfig_FOUND)
+	pkg_check_modules(FFTW_PKG_CONFIG QUIET fftw3)
+endif()
 
 # Note:
 # - /.libs & /api are to use fftw in source build directory
