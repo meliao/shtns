@@ -10,7 +10,10 @@ import jax.numpy as jnp
 
 RTOL = 1e-10
 ATOL = 1e-10
-CUDA_DEVICES =  jax.devices("cuda")
+try:
+    CUDA_DEVICES = jax.devices("cuda")
+except RuntimeError:
+    CUDA_DEVICES = []
 GPU_AVAILABLE = len(CUDA_DEVICES) > 0
 
 def _make_cfg(lmax=8, mmax=8, mres=1):
