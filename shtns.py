@@ -184,7 +184,7 @@ class sht(object):
     def __init__(self, lmax, mmax=-1, mres=1, norm=sht_orthonormal, nthreads=0):
         r"""__init__(sht self, int lmax, int mmax=-1, int mres=1, int norm=sht_orthonormal, int nthreads=0) -> sht"""
         _shtns.sht_swiginit(self, _shtns.new_sht(lmax, mmax, mres, norm, nthreads))
-        self.orthonormal = (norm == sht_orthonormal)
+
 
         		## array giving the degree of spherical harmonic coefficients.
         self.l = np.zeros(self.nlm, dtype=np.int32)
@@ -202,6 +202,14 @@ class sht(object):
         if cupy is not None:
         	self._gpu_synth_list = [self.cu_SH_to_spat, self.cu_SHsphtor_to_spat, self.cu_SHqst_to_spat]
         	self._gpu_analys_list = [self.cu_spat_to_SH, self.cu_spat_to_SHsphtor, self.cu_spat_to_SHqst]
+
+        # These attrs are used for implementing VJP and JVP rules for the 
+        # jax implementation
+        self.orthonormal = (norm == sht_orthonormal)
+        # zl, zm are indices for the complex SHT. Logic copied from self.zlm()
+        idx_vals = np.arange(self.nlm_cplx)
+        self.zl = np.sqrt(idx_vals).astype(int)
+        self.zm = idx_vals - self.zl * (self.zl + 1)
 
 
 
@@ -733,6 +741,7 @@ class sht(object):
         """
         @jax.custom_jvp
         def _analys_impl(x_in: jax.Array) -> jax.Array:
+            """Implementation of the forward SHT."""
             if x_in.dtype != jnp.float64:
                 raise ValueError(f"Only the float64 dtype is implemented by shtns. Got {x_in.dtype}.")
             if len(x_in.shape) < 2:
@@ -756,6 +765,7 @@ class sht(object):
             """Defines the VJP"""
             orig_shape = ct_out.shape
             out_shape = self.spat_shape if len(orig_shape) == 1 else (*orig_shape[:-1], *self.spat_shape)
+
             def get_impl(target_name):
                 return lambda x: jax.ffi.ffi_call(
                     target_name,
@@ -794,7 +804,8 @@ class sht(object):
                 "shtns_synth_cplx",
                 jax.ShapeDtypeStruct(out_shape, jnp.complex128),
                 vmap_method="broadcast_all",
-            )(x_in, cfg=int(self.this))
+            )(x_in , cfg=int(self.this))
+
 
         @custom_transpose
         def _tangent(residuals, x_tan: jax.Array) -> jax.Array:
@@ -802,17 +813,24 @@ class sht(object):
 
         @_tangent.def_transpose
         def _tangent_transpose(residuals, ct_out: jax.Array):
+            """This is the VJP implementation"""
+
             prefix_shape = ct_out.shape[:-2]
             out_shape = (self.nlm_cplx,) if len(ct_out.shape) == 2 else (*prefix_shape, self.nlm_cplx)
+            weights = self._grid_weights()
+
             result = jax.ffi.ffi_call(
                 "shtns_analys_cplx",
                 jax.ShapeDtypeStruct(out_shape, jnp.complex128),
                 vmap_method="broadcast_all",
-            )(ct_out, cfg=int(self.this))
-            return (result * (self.nphi / (2.0 * np.pi)),)
+            )(ct_out / weights, cfg=int(self.this))
+            if self.orthonormal:
+                result = result.at[self.zm != 0].multiply(2.0)
+            return result
 
         @_synth_cplx_impl.defjvp
         def _synth_cplx_impl_jvp(primals, tangents):
+            """JVP implementation"""
             (x_in,) = primals
             (x_tan,) = tangents
             y = _synth_cplx_impl(x_in)
@@ -823,12 +841,12 @@ class sht(object):
         return _synth_cplx_impl(x)
 
     def analys_cplx_jax(self, x: jax.Array) -> jax.Array:
-        """Complex forward SHT (scalar): C128 spatial (spat_shape) → C128 spectral (nlm_cplx,)."""
-        if self.lmax != self.mmax:
-            raise RuntimeError("analys_cplx_jax requires lmax==mmax and mres==1.")
+        """Complex forward SHT (scalar): C128 spatial (spat_shape) -> C128 
+        spectral (nlm_cplx,)."""
 
         @jax.custom_jvp
         def _analys_cplx_impl(x_in: jax.Array) -> jax.Array:
+            """Implementation of the analys_cplx_jax function."""
             prefix_shape = x_in.shape[:-2]
             out_shape = (self.nlm_cplx,) if len(x_in.shape) == 2 else (*prefix_shape, self.nlm_cplx)
             return jax.ffi.ffi_call(
@@ -843,17 +861,23 @@ class sht(object):
 
         @_tangent.def_transpose
         def _tangent_transpose(residuals, ct_out: jax.Array):
+            """Implementation of the VJP"""
             orig_shape = ct_out.shape
             out_shape = self.spat_shape if len(orig_shape) == 1 else (*orig_shape[:-1], *self.spat_shape)
+            if self.orthonormal:
+                ct_out = ct_out.at[self.zm != 0].multiply(0.5)
             result = jax.ffi.ffi_call(
                 "shtns_synth_cplx",
                 jax.ShapeDtypeStruct(out_shape, jnp.complex128),
                 vmap_method="broadcast_all",
             )(ct_out, cfg=int(self.this))
-            return (result * ((2.0 * np.pi) / self.nphi),)
+            weights = self._grid_weights()
+            result = result * weights
+            return result
 
         @_analys_cplx_impl.defjvp
         def _analys_cplx_impl_jvp(primals, tangents):
+            """JVP implementation"""
             (x_in,) = primals
             (x_tan,) = tangents
             y = _analys_cplx_impl(x_in)
