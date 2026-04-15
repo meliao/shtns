@@ -14,6 +14,7 @@ try:
 except RuntimeError:
     CUDA_DEVICES = []
 GPU_AVAILABLE = len(CUDA_DEVICES) > 0
+CPU_DEVICES = jax.devices("cpu")
 
 def _make_cfg(lmax=8, mmax=8, mres=1):
     sh = shtns.sht(lmax, mmax, mres)
@@ -119,12 +120,23 @@ def test_no_input_modification(fn_name, make_input):
 @pytest.mark.skipif(not GPU_AVAILABLE, reason="GPU-only test")
 @pytest.mark.parametrize("fn_name,make_input", TRANSFORMS)
 def test_cuda_implementation(fn_name, make_input):
+    """Make sure the CUDA implementation works when CUDA is available"""
     sh = _make_cfg()
     fn = getattr(sh, fn_name)
     x = make_input(sh, seed=0)
     x_cuda = jax.device_put(x, device=CUDA_DEVICES[0])
     y_cuda = fn(x_cuda)
 
+
+@pytest.mark.skipif(not GPU_AVAILABLE, reason="GPU-only test")
+@pytest.mark.parametrize("fn_name,make_input", TRANSFORMS)
+def test_cpu_implementation(fn_name, make_input):
+    """Make sure the CPU implementation works when CUDA is available"""
+    sh = _make_cfg()
+    fn = getattr(sh, fn_name)
+    x = make_input(sh, seed=0)
+    x_cpu = jax.device_put(x, device=CPU_DEVICES[0])
+    y_cpu = fn(x_cpu)
 
 @pytest.mark.skipif(not GPU_AVAILABLE, reason="GPU-only test")
 def test_theta_contiguous_cuda():
