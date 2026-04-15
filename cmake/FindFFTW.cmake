@@ -109,17 +109,15 @@ mark_as_advanced( FFTW_OMP_LIBRARIES )
 # handle
 include( FindPackageHandleStandardArgs )
 FIND_PACKAGE_HANDLE_STANDARD_ARGS(FFTW DEFAULT_MSG
-	FFTW_SINGLE_PRECISION_LIBRARIES
 	FFTW_DOUBLE_PRECISION_LIBRARIES
-	FFTW_SINGLE_PRECISION_OMP_LIBRARIES
 	FFTW_DOUBLE_PRECISION_OMP_LIBRARIES
 	FFTW_INCLUDE_DIRS
 )
 
 # error message if not found
 if( NOT FFTW_FOUND )
-	message( STATUS "FindFFTW looked for single precision libraries named: fftw3f or libfftw3f-3" )
+	message( STATUS "FindFFTW looked for single precision libraries named: fftw3f or libfftw3f-3 (optional)" )
 	message( STATUS "FindFFTW looked for double precision libraries named: fftw3 or libfftw3-3" )
-	message( STATUS "FindFFTW looked for single precision libraries named: fftw3f_omp or libfftw3f-3_omp" )
+	message( STATUS "FindFFTW looked for single precision libraries named: fftw3f_omp or libfftw3f-3_omp (optional)" )
 	message( STATUS "FindFFTW looked for double precision libraries named: fftw3_omp or libfftw3-3_omp" )
 endif()
