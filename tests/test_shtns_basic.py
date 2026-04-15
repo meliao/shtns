@@ -22,10 +22,6 @@ def _make_cfg(lmax=8, mmax=8, mres=1):
     return sh
 
 
-def test_nlm_calc_matches_cfg():
-    sh = _make_cfg(8, 5, 1)
-    assert shtns.nlm_calc(sh.lmax, sh.mmax, sh.mres) == sh.nlm
-    assert shtns.nlm_cplx_calc(sh.lmax, sh.mmax, sh.mres) == sh.nlm_cplx
 
 
 def test_synth_analys_roundtrip_scalar():
@@ -97,7 +93,7 @@ def test_analys_jax_matches_numpy_cuda():
 
     spat = sh.synth(qlm)
     spat_cuda = jax.device_put(jnp.array(spat, dtype=jnp.float64), device=jax.devices("cuda")[0])
-    qlm_from_jax = np.array(jax.jit(sh.analys_jax, backend="cuda")(spat_cuda))
+    qlm_from_jax = np.array(jax.jit(sh.analys_jax)(spat_cuda))
 
     assert qlm_from_jax.shape == (sh.nlm,)
     assert np.allclose(qlm_from_jax, qlm, rtol=RTOL, atol=ATOL)

@@ -72,7 +72,6 @@ except ImportError:
 ##############
 # Imports & loading libraries for JAX bindings
 import jax
-from jax import core
 from jax.custom_transpose import custom_transpose
 jax.config.update('jax_enable_x64', True)  # support float64
 
@@ -114,6 +113,9 @@ try:
     shtns_jax_lib_cuda = _load_jax_lib("libshtns_jax_cuda.so")
     jax.ffi.register_ffi_target(
         "shtns_synth_gpu", jax.ffi.pycapsule(shtns_jax_lib_cuda.synth_gpu), platform="CUDA")
+    jax.ffi.register_ffi_target(
+         "shtns_analys_gpu", jax.ffi.pycapsule(shtns_jax_lib_cuda.analys_gpu), platform="CUDA"
+    )
     # jax.ffi.register_ffi_target(
     #     "shtns_synth_gpu", jax.ffi.pycapsule(shtns_jax_lib_cuda.synth_gpu), platform="Host")
     DEFAULT_SYNTH_IMPL = "shtns_synth_gpu"
@@ -750,11 +752,14 @@ class sht(object):
                 raise ValueError("Input array must end with the grid shape from set_grid().")
             prefix_shape = x_in.shape[:-2]
             out_shape = (self.nlm,) if len(x_in.shape) == 2 else (*prefix_shape, self.nlm)
-            return jax.ffi.ffi_call(
-                "shtns_analys",
-                jax.ShapeDtypeStruct(out_shape, jnp.complex128),
+
+            def get_impl(target_name):
+                return lambda x: jax.ffi.ffi_call(target_name,
+                jax.ShapeDtypeStruct(out_shape, jnp.float64),
                 vmap_method="broadcast_all",
-            )(x_in, cfg=int(self.this))
+                )(x, cfg=int(self.this))
+            
+            return jax.lax.platform_dependent(x_in, cpu=get_impl("shtns_analys"), cuda=get_impl("shtns_analys_gpu"))
 
         @custom_transpose
         def _analys_tangent(residuals, x_tan: jax.Array) -> jax.Array:
