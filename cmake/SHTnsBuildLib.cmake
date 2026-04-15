@@ -57,6 +57,7 @@ function(shtns_build_library)
 			$<$<BOOL:${arg_CUDA}>:CUDA::cufft>
 			$<$<BOOL:${arg_CUDA}>:CUDA::cudart>
 			$<$<BOOL:${arg_CUDA}>:CUDA::nvrtc>
+			$<$<BOOL:${arg_CUDA}>:CUDA::cuda_driver>
 			$<$<BOOL:${arg_HIPFFTW}>:hip::hipfft>
 			$<$<BOOL:${arg_HIP}>:hip::amdhip64>
 			$<$<BOOL:${arg_HIP}>:hiprtc::hiprtc>
