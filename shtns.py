@@ -92,34 +92,24 @@ def _load_jax_lib(*names):
 
 # CPU FFI library is required 
 shtns_jax_lib_cpu = _load_jax_lib("libshtns_jax_cpu.so")
-jax.ffi.register_ffi_target(
-    "shtns_synth", jax.ffi.pycapsule(shtns_jax_lib_cpu.synth_cpu), platform="cpu")
-# Have to re-register the same function for "Host" platform...
-jax.ffi.register_ffi_target(
-    "shtns_synth", jax.ffi.pycapsule(shtns_jax_lib_cpu.synth_cpu), platform="Host")
-jax.ffi.register_ffi_target(
-        "shtns_analys", jax.ffi.pycapsule(shtns_jax_lib_cpu.analys_cpu), platform="cpu")
-# jax.ffi.register_ffi_target(
-#         "shtns_analys", jax.ffi.pycapsule(shtns_jax_lib_cpu.analys_cpu), platform="Host")
-jax.ffi.register_ffi_target(
-    "shtns_synth_cplx", jax.ffi.pycapsule(shtns_jax_lib_cpu.synth_cplx_cpu), platform="cpu")
-jax.ffi.register_ffi_target(
-    "shtns_synth_cplx", jax.ffi.pycapsule(shtns_jax_lib_cpu.synth_cplx_cpu), platform="Host")
-jax.ffi.register_ffi_target(
-    "shtns_analys_cplx", jax.ffi.pycapsule(shtns_jax_lib_cpu.analys_cplx_cpu), platform="cpu")
-DEFAULT_SYNTH_IMPL = "shtns_synth"
+cpu_lib_members = [("shtns_synth", shtns_jax_lib_cpu.synth_cpu), 
+               ("shtns_analys", shtns_jax_lib_cpu.analys_cpu), 
+               ("shtns_synth_cplx", shtns_jax_lib_cpu.synth_cplx_cpu), 
+               ("shtns_analys_cplx", shtns_jax_lib_cpu.analys_cplx_cpu)]
+for name, func in cpu_lib_members:
+     jax.ffi.register_ffi_target(name, jax.ffi.pycapsule(func), platform="cpu")
+     jax.ffi.register_ffi_target(name, jax.ffi.pycapsule(func), platform="Host")
 # CUDA FFI library is optional.
 try:
     shtns_jax_lib_cuda = _load_jax_lib("libshtns_jax_cuda.so")
-    jax.ffi.register_ffi_target(
-        "shtns_synth_gpu", jax.ffi.pycapsule(shtns_jax_lib_cuda.synth_gpu), platform="CUDA")
-    jax.ffi.register_ffi_target(
-         "shtns_analys_gpu", jax.ffi.pycapsule(shtns_jax_lib_cuda.analys_gpu), platform="CUDA"
-    )
-    # jax.ffi.register_ffi_target(
-    #     "shtns_synth_gpu", jax.ffi.pycapsule(shtns_jax_lib_cuda.synth_gpu), platform="Host")
+    gpu_lib_members = [("shtns_synth_gpu", shtns_jax_lib_cuda.synth_gpu),
+                       ("shtns_analys_gpu", shtns_jax_lib_cuda.analys_gpu)]
+    for name, func in gpu_lib_members:
+         jax.ffi.register_ffi_target(name, jax.ffi.pycapsule(func), platform="CUDA")
+    CUDA_AVAILABLE = True
     DEFAULT_SYNTH_IMPL = "shtns_synth_gpu"
 except Exception as e:
+    CUDA_AVAILABLE = False
     print("Could not find GPU implementation for JAX:", e)
 
 SHTNS_INTERFACE = _shtns.SHTNS_INTERFACE
@@ -186,6 +176,7 @@ class sht(object):
     def __init__(self, lmax, mmax=-1, mres=1, norm=sht_orthonormal, nthreads=0):
         r"""__init__(sht self, int lmax, int mmax=-1, int mres=1, int norm=sht_orthonormal, int nthreads=0) -> sht"""
         _shtns.sht_swiginit(self, _shtns.new_sht(lmax, mmax, mres, norm, nthreads))
+        self._grid_flags = 0
 
 
         		## array giving the degree of spherical harmonic coefficients.
@@ -220,6 +211,7 @@ class sht(object):
     def set_grid(self, nlat=0, nphi=0, flags=sht_quick_init, polar_opt=1.0e-10, nl_order=1):
         r"""set_grid(sht self, int nlat=0, int nphi=0, int flags=sht_quick_init, double polar_opt=1.0e-10, int nl_order=1)"""
         val = _shtns.sht_set_grid(self, nlat, nphi, flags, polar_opt, nl_order)
+        self._grid_flags = int(flags)
 
         		## array giving the cosine of the colatitude for the grid.
         self.cos_theta = self.__ct()
@@ -673,17 +665,27 @@ class sht(object):
         return _shtns.sht_SHqst_to_spat_m(self, Qlm, Slm, Tlm, Vr, Vt, Vp, im)
 ###########
 # Jax interface:
+    def _check_jax_gpu_grid_compat(self):
+        # GPU JAX FFI currently does not support phi-contiguous grids.
+        if CUDA_AVAILABLE and (self._grid_flags & SHT_PHI_CONTIGUOUS):
+            raise ValueError(
+                "JAX GPU backend does not support SHT_PHI_CONTIGUOUS grids. "
+                "Call set_grid() with SHT_THETA_CONTIGUOUS or run with CPU backend."
+            )
 
     def _grid_weights(self) -> jax.Array:
         """Return the quadrature weights for the current grid as a JAX array."""
         w = self.gauss_wts()  # shape (nlat/2,)
         full_w = jnp.concatenate([w, w[::-1]])  # shape (nlat,)
         return full_w.reshape(-1, 1) * 2 * jnp.pi / self.nphi
+        
     def synth_jax(self, x: jax.Array) -> jax.Array:
         """Inverse spherical harmonic transform. 
         Spectral -> spatial transform.
         Requires complex128 inputs.
         """
+        self._check_jax_gpu_grid_compat()
+
         @jax.custom_jvp
         def _synth_impl(x_in: jax.Array) -> jax.Array:
             if x_in.dtype != jnp.complex128:
@@ -741,6 +743,7 @@ class sht(object):
         Spatial -> spectral transform.
         Requires float64 inputs, returns complex128 outputs.
         """
+        self._check_jax_gpu_grid_compat()
         @jax.custom_jvp
         def _analys_impl(x_in: jax.Array) -> jax.Array:
             """Implementation of the forward SHT."""
@@ -755,10 +758,10 @@ class sht(object):
 
             def get_impl(target_name):
                 return lambda x: jax.ffi.ffi_call(target_name,
-                jax.ShapeDtypeStruct(out_shape, jnp.float64),
+                jax.ShapeDtypeStruct(out_shape, jnp.complex128),
                 vmap_method="broadcast_all",
                 )(x, cfg=int(self.this))
-            
+
             return jax.lax.platform_dependent(x_in, cpu=get_impl("shtns_analys"), cuda=get_impl("shtns_analys_gpu"))
 
         @custom_transpose

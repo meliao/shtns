@@ -10,7 +10,7 @@ jax.config.update("jax_enable_x64", True)
 
 def main():
     sh = shtns.sht(8, 8, 1)
-    sh.set_grid()
+    sh.set_grid(flags=shtns.SHT_ALLOW_GPU + shtns.SHT_THETA_CONTIGUOUS)
 
     rng = np.random.default_rng(0)
     qlm = rng.standard_normal(sh.nlm) + 1j * rng.standard_normal(sh.nlm)
@@ -47,7 +47,7 @@ def main():
 
     # New sht object with new Lmax, should trigger recompilation
     sh2 = shtns.sht(10, 10, 1)
-    sh2.set_grid()
+    sh2.set_grid(flags=shtns.SHT_ALLOW_GPU + shtns.SHT_THETA_CONTIGUOUS)
 
     qlm_2 = rng.standard_normal(sh2.nlm) + 1j * rng.standard_normal(sh2.nlm)
     qlm_2_jax = jnp.array(qlm_2, dtype=jnp.complex128)
