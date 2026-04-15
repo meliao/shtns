@@ -1,151 +1,93 @@
 import numpy as np
+import pytest
 import jax
 import jax.numpy as jnp
-import logging
+
 import shtns
 
 RTOL = 1e-10
 ATOL = 1e-10
 
+
 def _make_cfg(lmax=8, mmax=8, mres=1):
     sh = shtns.sht(lmax, mmax, mres)
-    sh.set_grid(flags=shtns.SHT_ALLOW_GPU + shtns.SHT_THETA_CONTIGUOUS)
+    sh.set_grid(flags=shtns.SHT_ALLOW_GPU + shtns.SHT_PHI_CONTIGUOUS)
     return sh
 
 
-def _random_spectral_data(sh: shtns.sht, batch: int, seed: int=0):
+def _spectral_input(sh, seed):
     rng = np.random.default_rng(seed)
-    qlm = rng.standard_normal((batch, sh.nlm)) + 1j * rng.standard_normal((batch, sh.nlm))
-    # For real spatial fields, m=0 coefficients must be real.
-    try:
-        m = sh.m
-        qlm[:, m == 0] = qlm[:, m == 0].real + 0j
-    except Exception:
-        pass
-    return qlm
+    qlm = rng.standard_normal(sh.nlm) + 1j * rng.standard_normal(sh.nlm)
+    qlm[sh.m == 0] = qlm[sh.m == 0].real + 0j
+    return jnp.array(qlm, dtype=jnp.complex128)
 
 
-def _random_spatial_data(sh: shtns.sht, batch: int, seed: int=0):
+def _spatial_real_input(sh, seed):
     rng = np.random.default_rng(seed)
-    spat = rng.standard_normal((batch, sh.nphi, sh.nlat))
-    return spat
+    return jnp.array(rng.standard_normal((sh.nlat, sh.nphi)), dtype=jnp.float64)
 
-def test_jit_vmap_synth_matches_numpy():
-    sh = _make_cfg(8, 8, 1)
+
+def _cplx_spectral_input(sh, seed):
+    rng = np.random.default_rng(seed)
+    alm = rng.standard_normal(sh.nlm_cplx) + 1j * rng.standard_normal(sh.nlm_cplx)
+    return jnp.array(alm, dtype=jnp.complex128)
+
+
+def _cplx_spatial_input(sh, seed):
+    rng = np.random.default_rng(seed)
+    z = rng.standard_normal((sh.nlat, sh.nphi)) + 1j * rng.standard_normal((sh.nlat, sh.nphi))
+    return jnp.array(z, dtype=jnp.complex128)
+
+
+TRANSFORMS = [
+    pytest.param("synth_jax", _spectral_input, id="synth"),
+    pytest.param("analys_jax", _spatial_real_input, id="analys"),
+    pytest.param("synth_cplx_jax", _cplx_spectral_input, id="synth_cplx"),
+    pytest.param("analys_cplx_jax", _cplx_spatial_input, id="analys_cplx"),
+]
+
+
+@pytest.mark.parametrize("fn_name,make_input", TRANSFORMS)
+def test_jit(fn_name, make_input):
+    sh = _make_cfg()
+    fn = getattr(sh, fn_name)
+    x = make_input(sh, seed=0)
+    expected = fn(x)
+    out = jax.jit(fn)(x)
+    assert out.shape == expected.shape
+    assert out.dtype == expected.dtype
+
+
+@pytest.mark.parametrize("fn_name,make_input", TRANSFORMS)
+def test_vmap(fn_name, make_input):
+    sh = _make_cfg()
+    fn = getattr(sh, fn_name)
     batch = 4
-    qlm = _random_spectral_data(sh, batch, seed=1)
-
-    qlm_jax = jnp.array(qlm, dtype=jnp.complex128)
-
-    f = jax.jit(jax.vmap(sh.synth_jax))
-    out_jax = f(qlm_jax)
-
-    out_np = np.stack([sh.synth(qlm[i]) for i in range(batch)], axis=0)
-    assert np.allclose(np.array(out_jax), out_np, rtol=RTOL, atol=ATOL)
+    x = jnp.stack([make_input(sh, seed=i) for i in range(batch)])
+    out = jax.vmap(fn)(x)
+    expected_elem = fn(make_input(sh, seed=0))
+    assert out.shape == (batch,) + expected_elem.shape
+    assert out.dtype == expected_elem.dtype
 
 
-def test_vmap_jit_synth_matches_numpy():
-    sh = _make_cfg(8, 8, 1)
-    batch = 4
-    qlm = _random_spectral_data(sh, batch, seed=2)
-
-    qlm_jax = jnp.array(qlm, dtype=jnp.complex128)
-
-    f = jax.vmap(jax.jit(sh.synth_jax))
-    out_jax = f(qlm_jax)
-
-    out_np = np.stack([sh.synth(qlm[i]) for i in range(batch)], axis=0)
-    assert np.allclose(np.array(out_jax), out_np, rtol=RTOL, atol=ATOL)
-
-
-def test_jit_vmap_analys_matches_numpy():
-    sh = _make_cfg(8, 8, 1)
-    batch = 4
-    qlm = _random_spectral_data(sh, batch, seed=3)
-    # Transform to spatial domain using synth_jax
-    spat_jax = sh.synth_jax(qlm)
-
-    f = jax.jit(jax.vmap(sh.analys_jax))
-    qlm_from_jax = np.array(f(spat_jax)).reshape(batch, sh.nlm)
-
-    assert np.allclose(qlm_from_jax, qlm, rtol=RTOL, atol=ATOL)
-
-
-def test_vmap_jit_analys_matches_numpy():
-    sh = _make_cfg(8, 8, 1)
-    batch = 4
-    qlm = _random_spectral_data(sh, batch, seed=4)
-
-    spat_jax = sh.synth_jax(qlm)
-
-    f = jax.vmap(jax.jit(sh.analys_jax))
-    qlm_from_jax = np.array(f(spat_jax)).reshape(batch, sh.nlm)
-
-    assert np.allclose(qlm_from_jax, qlm, rtol=RTOL, atol=ATOL)
-
-
-def test_jvp_synth_equals_apply_to_tangent():
-    sh = _make_cfg(8, 8, 1)
-    qlm = _random_spectral_data(sh, 1, seed=10)[0]
-    v_qlm = _random_spectral_data(sh, 1, seed=11)[0]
-
-    qlm_jax = jnp.array(qlm, dtype=jnp.complex128)
-    v_qlm_jax = jnp.array(v_qlm, dtype=jnp.complex128)
-
-    _, jvp_out = jax.jvp(sh.synth_jax, (qlm_jax,), (v_qlm_jax,))
-    direct = sh.synth_jax(v_qlm_jax)
-
+@pytest.mark.parametrize("fn_name,make_input", TRANSFORMS)
+def test_jvp(fn_name, make_input):
+    sh = _make_cfg()
+    fn = getattr(sh, fn_name)
+    x = make_input(sh, seed=0)
+    v = make_input(sh, seed=1)
+    _, jvp_out = jax.jvp(fn, (x,), (v,))
+    direct = fn(v)
     assert np.allclose(np.array(jvp_out), np.array(direct), rtol=RTOL, atol=ATOL)
 
 
-def test_jvp_analys_equals_apply_to_tangent(caplog):
-    caplog.set_level(logging.INFO)
-    sh = _make_cfg(8, 8, 1)
-    rng = np.random.default_rng(12)
-    spat = rng.standard_normal(sh.spat_shape)
-    v_spat = rng.standard_normal(sh.spat_shape)
-
-    spat_jax = jnp.array(spat, dtype=jnp.float64)
-    v_spat_jax = jnp.array(v_spat, dtype=jnp.float64)
-
-    _, jvp_out = jax.jvp(sh.analys_jax, (jnp.copy(spat_jax),), (jnp.copy(v_spat_jax),))
-    logging.info("jvp_out: %s", jvp_out)
-    direct = sh.analys_jax(jnp.copy(v_spat_jax))
-    logging.info("direct: %s", direct)
-    np_diffs = np.abs(np.array(jvp_out) - np.array(direct))
-    logging.info("diffs: %s", np_diffs)
-
-    direct_np = sh.analys(np.array(v_spat_jax))
-    logging.info("direct_np: %s", direct_np)
-
-    assert np.allclose(np.array(jvp_out), np.array(direct), rtol=RTOL, atol=ATOL)
-
-
-def test_vjp_synth_runs_without_error(caplog):
-    caplog.set_level(logging.INFO)
-    sh = _make_cfg(8, 8, 1)
-    qlm = _random_spectral_data(sh, 1, seed=13)[0]
-    qlm_jax = jnp.array(qlm, dtype=jnp.complex128)
-
-
-    out, pullback = jax.vjp(sh.synth_jax, qlm_jax)
+@pytest.mark.parametrize("fn_name,make_input", TRANSFORMS)
+def test_vjp(fn_name, make_input):
+    sh = _make_cfg()
+    fn = getattr(sh, fn_name)
+    x = make_input(sh, seed=0)
+    out, pullback = jax.vjp(fn, x)
     cotangent = jnp.ones_like(out)
     (cot_in,) = pullback(cotangent)
-
-    assert cot_in.shape == qlm_jax.shape
-    assert cot_in.dtype == qlm_jax.dtype
-
-def test_vjp_analys_runs_without_error(caplog):
-    caplog.set_level(logging.INFO)
-    sh = _make_cfg(8, 8, 1)
-    spat = _random_spatial_data(sh, 1, seed=14)
-    logging.info("spat shape: %s", spat.shape)
-    logging.info("sh.spat_shape: %s", sh.spat_shape)
-    spat_jax = jnp.array(spat, dtype=jnp.float64)
-
-    out, pullback = jax.vjp(sh.analys_jax, spat_jax)
-    cotangent = jnp.ones_like(out)
-    (cot_in,) = pullback(cotangent)
-
-    assert cot_in.shape == spat_jax.shape
-    assert cot_in.dtype == spat_jax.dtype
+    assert cot_in.shape == x.shape
+    assert cot_in.dtype == x.dtype

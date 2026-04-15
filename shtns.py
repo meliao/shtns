@@ -72,7 +72,6 @@ except ImportError:
 ##############
 # Imports & loading libraries for JAX bindings
 import jax
-from jax import core
 from jax.custom_transpose import custom_transpose
 jax.config.update('jax_enable_x64', True)  # support float64
 
@@ -93,24 +92,24 @@ def _load_jax_lib(*names):
 
 # CPU FFI library is required 
 shtns_jax_lib_cpu = _load_jax_lib("libshtns_jax_cpu.so")
-jax.ffi.register_ffi_target(
-    "shtns_synth", jax.ffi.pycapsule(shtns_jax_lib_cpu.synth_cpu), platform="cpu")
-# Have to re-register the same function for "Host" platform...
-jax.ffi.register_ffi_target(
-    "shtns_synth", jax.ffi.pycapsule(shtns_jax_lib_cpu.synth_cpu), platform="Host")
-jax.ffi.register_ffi_target(
-        "shtns_analys", jax.ffi.pycapsule(shtns_jax_lib_cpu.analys_cpu), platform="cpu")
-
-CUDA_AVAILABLE = False
+cpu_lib_members = [("shtns_synth", shtns_jax_lib_cpu.synth_cpu), 
+               ("shtns_analys", shtns_jax_lib_cpu.analys_cpu), 
+               ("shtns_synth_cplx", shtns_jax_lib_cpu.synth_cplx_cpu), 
+               ("shtns_analys_cplx", shtns_jax_lib_cpu.analys_cplx_cpu)]
+for name, func in cpu_lib_members:
+     jax.ffi.register_ffi_target(name, jax.ffi.pycapsule(func), platform="cpu")
+     jax.ffi.register_ffi_target(name, jax.ffi.pycapsule(func), platform="Host")
 # CUDA FFI library is optional.
 try:
     shtns_jax_lib_cuda = _load_jax_lib("libshtns_jax_cuda.so")
-    jax.ffi.register_ffi_target(
-        "shtns_synth_gpu", jax.ffi.pycapsule(shtns_jax_lib_cuda.synth_gpu), platform="CUDA")
-    jax.ffi.register_ffi_target(
-        "shtns_analys_gpu", jax.ffi.pycapsule(shtns_jax_lib_cuda.analys_gpu), platform="CUDA")
+    gpu_lib_members = [("shtns_synth_gpu", shtns_jax_lib_cuda.synth_gpu),
+                       ("shtns_analys_gpu", shtns_jax_lib_cuda.analys_gpu)]
+    for name, func in gpu_lib_members:
+         jax.ffi.register_ffi_target(name, jax.ffi.pycapsule(func), platform="CUDA")
     CUDA_AVAILABLE = True
+    DEFAULT_SYNTH_IMPL = "shtns_synth_gpu"
 except Exception as e:
+    CUDA_AVAILABLE = False
     print("Could not find GPU implementation for JAX:", e)
 
 SHTNS_INTERFACE = _shtns.SHTNS_INTERFACE
@@ -179,6 +178,7 @@ class sht(object):
         _shtns.sht_swiginit(self, _shtns.new_sht(lmax, mmax, mres, norm, nthreads))
         self._grid_flags = 0
 
+
         		## array giving the degree of spherical harmonic coefficients.
         self.l = np.zeros(self.nlm, dtype=np.int32)
         ## array giving the order of spherical harmonic coefficients.
@@ -195,6 +195,14 @@ class sht(object):
         if cupy is not None:
         	self._gpu_synth_list = [self.cu_SH_to_spat, self.cu_SHsphtor_to_spat, self.cu_SHqst_to_spat]
         	self._gpu_analys_list = [self.cu_spat_to_SH, self.cu_spat_to_SHsphtor, self.cu_spat_to_SHqst]
+
+        # These attrs are used for implementing VJP and JVP rules for the 
+        # jax implementation
+        self.orthonormal = (norm == sht_orthonormal)
+        # zl, zm are indices for the complex SHT. Logic copied from self.zlm()
+        idx_vals = np.arange(self.nlm_cplx)
+        self.zl = np.sqrt(idx_vals).astype(int)
+        self.zm = idx_vals - self.zl * (self.zl + 1)
 
 
 
@@ -428,8 +436,10 @@ class sht(object):
     		self._gpu_analys_list[n-1](*v_ptr, *out_ptr)
     		cupy.cuda.runtime.deviceSynchronize()
     	else:
+    		# Use private working copies so the backend cannot mutate user inputs.
+    		v_work = [vi.copy(order="C") for vi in v]
     		out = [np.empty(self.nlm, dtype=complex) for i in range(n)]
-    		self._cpu_analys_list[n-1](*v, *out)
+    		self._cpu_analys_list[n-1](*v_work, *out)
     	return out[0] if n==1 else tuple(out)
 
     def synth_grad(self,slm):
@@ -663,6 +673,12 @@ class sht(object):
                 "Call set_grid() with SHT_THETA_CONTIGUOUS or run with CPU backend."
             )
 
+    def _grid_weights(self) -> jax.Array:
+        """Return the quadrature weights for the current grid as a JAX array."""
+        w = self.gauss_wts()  # shape (nlat/2,)
+        full_w = jnp.concatenate([w, w[::-1]])  # shape (nlat,)
+        return full_w.reshape(-1, 1) * 2 * jnp.pi / self.nphi
+        
     def synth_jax(self, x: jax.Array) -> jax.Array:
         """Inverse spherical harmonic transform. 
         Spectral -> spatial transform.
@@ -670,44 +686,20 @@ class sht(object):
         """
         self._check_jax_gpu_grid_compat()
 
+        @jax.custom_jvp
         def _synth_impl(x_in: jax.Array) -> jax.Array:
             if x_in.dtype != jnp.complex128:
                 raise ValueError(f"Only complex128 dtype is implemented by shtns for synthesis. Got {x_in.dtype}.")
             orig_shape = x_in.shape
             out_shape = self.spat_shape if len(orig_shape) == 1 else (*orig_shape[:-1], *self.spat_shape)
 
-            
-
             def get_impl(target_name):
-                return lambda x: jax.ffi.ffi_call(target_name,    # target name, same as in jax.ffi.register_ffi_target() above
-                jax.ShapeDtypeStruct(out_shape, jnp.float64), # shape and dtype of the output
+                return lambda x: jax.ffi.ffi_call(target_name,
+                jax.ShapeDtypeStruct(out_shape, jnp.float64),
                 vmap_method="broadcast_all",
                 )(x, cfg=int(self.this))
 
             return jax.lax.platform_dependent(x_in, cpu=get_impl("shtns_synth"), cuda=get_impl("shtns_synth_gpu"))
-
-        def _analys_impl_for_adj(x_in: jax.Array) -> jax.Array:
-            if x_in.dtype != jnp.float64:
-                raise ValueError(f"Only the float64 dtype is implemented by shtns. Got {x_in.dtype}.")
-            if len(x_in.shape) < 2:
-                raise ValueError("Input array must have at least 2 dimensions (grid space)")
-            if x_in.shape[-2:] != self.spat_shape:
-                raise ValueError("Input array must end with the grid shape from set_grid().")
-            prefix_shape = x_in.shape[:-2]
-            out_shape = (self.nlm,) if len(x_in.shape) == 2 else (*prefix_shape, self.nlm)
-
-            def get_impl(target_name):
-                return lambda x: jax.ffi.ffi_call(
-                    target_name,
-                    jax.ShapeDtypeStruct(out_shape, jnp.complex128),
-                    vmap_method="broadcast_all",
-                )(x, cfg=int(self.this))
-
-            return jax.lax.platform_dependent(x_in, cpu=get_impl("shtns_analys"), cuda=get_impl("shtns_analys_gpu"))
-
-        def _adjoint_impl(ct_out: jax.Array) -> jax.Array:
-            scale = self.nphi / (2.0 * np.pi)
-            return _analys_impl_for_adj(ct_out) * scale
 
         @custom_transpose
         def _synth_tangent(residuals, x_tan: jax.Array) -> jax.Array:
@@ -715,22 +707,36 @@ class sht(object):
 
         @_synth_tangent.def_transpose
         def _synth_tangent_transpose(residuals, ct_out: jax.Array):
-            return _adjoint_impl(ct_out)
+            """This defines the VJP, which is the backward-mode autodiff.
+            The adjoint of synthesis is analysis with input divided by
+            quadrature weights."""
+            prefix_shape = ct_out.shape[:-2]
+            out_shape = (self.nlm,) if len(ct_out.shape) == 2 else (*prefix_shape, self.nlm)
 
-        @jax.custom_jvp
-        def _synth_custom(x_in: jax.Array) -> jax.Array:
-            return _synth_impl(x_in)
+            weights = self._grid_weights()
+            result = jax.ffi.ffi_call(
+                "shtns_analys",
+                jax.ShapeDtypeStruct(out_shape, jnp.complex128),
+                vmap_method="broadcast_all",
+            )(ct_out / weights, cfg=int(self.this))
+            if self.orthonormal:
+                result = result.at[self.lmax + 1:].multiply(2.0)
+            return (result,)
 
-        @_synth_custom.defjvp
-        def _synth_custom_jvp(primals, tangents):
+        @_synth_impl.defjvp
+        def _synth_impl_jvp(primals, tangents):
+            """This defines the Jvp, which is the forward-mode autodiff. 
+            synth is linear, so this is boilerplate to apply the 
+            same transform to the tangent as to the primal.
+            """
             (x_in,) = primals
             (x_tan,) = tangents
             y = _synth_impl(x_in)
-            tan_out_types = core.get_aval(y).to_tangent_aval()
+            tan_out_types = jax.typeof(y).to_tangent_aval()
             y_tan = _synth_tangent(tan_out_types, None, x_tan)
             return y, y_tan
 
-        return _synth_custom(x)
+        return _synth_impl(x)
 
     def analys_jax(self, x: jax.Array) -> jax.Array:
         """Forward spherical harmonic transform. 
@@ -738,7 +744,9 @@ class sht(object):
         Requires float64 inputs, returns complex128 outputs.
         """
         self._check_jax_gpu_grid_compat()
+        @jax.custom_jvp
         def _analys_impl(x_in: jax.Array) -> jax.Array:
+            """Implementation of the forward SHT."""
             if x_in.dtype != jnp.float64:
                 raise ValueError(f"Only the float64 dtype is implemented by shtns. Got {x_in.dtype}.")
             if len(x_in.shape) < 2:
@@ -749,17 +757,21 @@ class sht(object):
             out_shape = (self.nlm,) if len(x_in.shape) == 2 else (*prefix_shape, self.nlm)
 
             def get_impl(target_name):
-                return lambda x: jax.ffi.ffi_call(target_name,    # target name, same as in jax.ffi.register_ffi_target() above
-                jax.ShapeDtypeStruct(out_shape, jnp.complex128), # shape and dtype of the output
+                return lambda x: jax.ffi.ffi_call(target_name,
+                jax.ShapeDtypeStruct(out_shape, jnp.complex128),
                 vmap_method="broadcast_all",
                 )(x, cfg=int(self.this))
 
             return jax.lax.platform_dependent(x_in, cpu=get_impl("shtns_analys"), cuda=get_impl("shtns_analys_gpu"))
 
-        def _synth_impl_for_adj(x_in: jax.Array) -> jax.Array:
-            if x_in.dtype != jnp.complex128:
-                raise ValueError(f"Only complex128 dtype is implemented by shtns for synthesis. Got {x_in.dtype}.")
-            orig_shape = x_in.shape
+        @custom_transpose
+        def _analys_tangent(residuals, x_tan: jax.Array) -> jax.Array:
+            return _analys_impl(x_tan)
+
+        @_analys_tangent.def_transpose
+        def _analys_tangent_transpose(residuals, ct_out: jax.Array):
+            """Defines the VJP"""
+            orig_shape = ct_out.shape
             out_shape = self.spat_shape if len(orig_shape) == 1 else (*orig_shape[:-1], *self.spat_shape)
 
             def get_impl(target_name):
@@ -768,35 +780,120 @@ class sht(object):
                     jax.ShapeDtypeStruct(out_shape, jnp.float64),
                     vmap_method="broadcast_all",
                 )(x, cfg=int(self.this))
+            if self.orthonormal:
+                ct_out = ct_out.at[self.lmax + 1:].multiply(0.5)
+            result = jax.lax.platform_dependent(ct_out, cpu=get_impl("shtns_synth"), cuda=get_impl("shtns_synth_gpu"))
+            weights = self._grid_weights()
+            result = result * weights
+            return result
 
-            return jax.lax.platform_dependent(x_in, cpu=get_impl("shtns_synth"), cuda=get_impl("shtns_synth_gpu"))
-
-        def _adjoint_impl(ct_out: jax.Array) -> jax.Array:
-            scale = (2.0 * np.pi) / self.nphi
-            return _synth_impl_for_adj(ct_out) * scale
-
-        @custom_transpose
-        def _analys_tangent(residuals, x_tan: jax.Array) -> jax.Array:
-            return _analys_impl(x_tan)
-
-        @_analys_tangent.def_transpose
-        def _analys_tangent_transpose(residuals, ct_out: jax.Array):
-            return _adjoint_impl(ct_out)
-
-        @jax.custom_jvp
-        def _analys_custom(x_in: jax.Array) -> jax.Array:
-            return _analys_impl(x_in)
-
-        @_analys_custom.defjvp
-        def _analys_custom_jvp(primals, tangents):
+        @_analys_impl.defjvp
+        def _analys_impl_jvp(primals, tangents):
+            """Boilerplate to define the JVP"""
             (x_in,) = primals
             (x_tan,) = tangents
             y = _analys_impl(x_in)
-            tan_out_types = core.get_aval(y).to_tangent_aval()
+            tan_out_types = jax.typeof(y).to_tangent_aval()
             y_tan = _analys_tangent(tan_out_types, None, x_tan)
             return y, y_tan
 
-        return _analys_custom(x)
+        return _analys_impl(x)
+
+    def synth_cplx_jax(self, x: jax.Array) -> jax.Array:
+        """Complex inverse SHT (scalar): C128 spectral (nlm_cplx,) -> C128 spatial (spat_shape)."""
+        if self.lmax != self.mmax:
+            raise RuntimeError("synth_cplx_jax requires lmax==mmax and mres==1.")
+
+        @jax.custom_jvp
+        def _synth_cplx_impl(x_in: jax.Array) -> jax.Array:
+            orig_shape = x_in.shape
+            out_shape = self.spat_shape if len(orig_shape) == 1 else (*orig_shape[:-1], *self.spat_shape)
+            return jax.ffi.ffi_call(
+                "shtns_synth_cplx",
+                jax.ShapeDtypeStruct(out_shape, jnp.complex128),
+                vmap_method="broadcast_all",
+            )(x_in , cfg=int(self.this))
+
+
+        @custom_transpose
+        def _tangent(residuals, x_tan: jax.Array) -> jax.Array:
+            return _synth_cplx_impl(x_tan)
+
+        @_tangent.def_transpose
+        def _tangent_transpose(residuals, ct_out: jax.Array):
+            """This is the VJP implementation"""
+
+            prefix_shape = ct_out.shape[:-2]
+            out_shape = (self.nlm_cplx,) if len(ct_out.shape) == 2 else (*prefix_shape, self.nlm_cplx)
+            weights = self._grid_weights()
+
+            result = jax.ffi.ffi_call(
+                "shtns_analys_cplx",
+                jax.ShapeDtypeStruct(out_shape, jnp.complex128),
+                vmap_method="broadcast_all",
+            )(ct_out / weights, cfg=int(self.this))
+            if self.orthonormal:
+                result = result.at[self.zm != 0].multiply(2.0)
+            return result
+
+        @_synth_cplx_impl.defjvp
+        def _synth_cplx_impl_jvp(primals, tangents):
+            """JVP implementation"""
+            (x_in,) = primals
+            (x_tan,) = tangents
+            y = _synth_cplx_impl(x_in)
+            tan_out_types = jax.typeof(y).to_tangent_aval()
+            y_tan = _tangent(tan_out_types, None, x_tan)
+            return y, y_tan
+
+        return _synth_cplx_impl(x)
+
+    def analys_cplx_jax(self, x: jax.Array) -> jax.Array:
+        """Complex forward SHT (scalar): C128 spatial (spat_shape) -> C128 
+        spectral (nlm_cplx,)."""
+
+        @jax.custom_jvp
+        def _analys_cplx_impl(x_in: jax.Array) -> jax.Array:
+            """Implementation of the analys_cplx_jax function."""
+            prefix_shape = x_in.shape[:-2]
+            out_shape = (self.nlm_cplx,) if len(x_in.shape) == 2 else (*prefix_shape, self.nlm_cplx)
+            return jax.ffi.ffi_call(
+                "shtns_analys_cplx",
+                jax.ShapeDtypeStruct(out_shape, jnp.complex128),
+                vmap_method="broadcast_all",
+            )(x_in, cfg=int(self.this))
+
+        @custom_transpose
+        def _tangent(residuals, x_tan: jax.Array) -> jax.Array:
+            return _analys_cplx_impl(x_tan)
+
+        @_tangent.def_transpose
+        def _tangent_transpose(residuals, ct_out: jax.Array):
+            """Implementation of the VJP"""
+            orig_shape = ct_out.shape
+            out_shape = self.spat_shape if len(orig_shape) == 1 else (*orig_shape[:-1], *self.spat_shape)
+            if self.orthonormal:
+                ct_out = ct_out.at[self.zm != 0].multiply(0.5)
+            result = jax.ffi.ffi_call(
+                "shtns_synth_cplx",
+                jax.ShapeDtypeStruct(out_shape, jnp.complex128),
+                vmap_method="broadcast_all",
+            )(ct_out, cfg=int(self.this))
+            weights = self._grid_weights()
+            result = result * weights
+            return result
+
+        @_analys_cplx_impl.defjvp
+        def _analys_cplx_impl_jvp(primals, tangents):
+            """JVP implementation"""
+            (x_in,) = primals
+            (x_tan,) = tangents
+            y = _analys_cplx_impl(x_in)
+            tan_out_types = jax.typeof(y).to_tangent_aval()
+            y_tan = _tangent(tan_out_types, None, x_tan)
+            return y, y_tan
+
+        return _analys_cplx_impl(x)
 
 # Register sht in _shtns:
 _shtns.sht_swigregister(sht)
