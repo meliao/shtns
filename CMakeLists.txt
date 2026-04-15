@@ -38,6 +38,7 @@ option(USE_SHARED "Enable building shared libraries" OFF)
 set(USE_HIP_ARCH "AUTO" CACHE STRING "Select the architecture to build for (mi100, mi200, mi250, gfx908, gfx90a...).")
 set(USE_CUDA "AUTO" CACHE STRING "Enable CUDA support (ON/OFF/AUTO)")
 set(USE_MARCH "AUTO" CACHE STRING "Select the -march value to apply, can use AUTO to autoselect depending on ARM or x86 familly.")
+set(USE_GPU_MARCH "AUTO" CACHE STRING "Select the -march value to apply on GPU binary, can use AUTO to autoselect depending on ARM or x86 familly.")
 set(USE_CUDA_ARCH "AUTO" CACHE STRING "Select the architecture to build for (nativ, all, all-major, kepler, pascal, volta, ampere, 70, 80, ...).")
 set(SHT_VERBOSE 1 CACHE STRING "0:no output, 1:output info to stdout, 2:more output (debug info), 3:also print fftw plans.]")
 
@@ -75,6 +76,11 @@ include(GNUInstallDirs)
 shtns_config_cpu_gpu_march()
 shtns_config_gpu_cuda_arch()
 shtns_config_gpu_hip_arch()
+
+###########################################################
+if (EXISTS ${CMAKE_CURRENT_SOURCE_DIR}/sht_config.h)
+	message(FATAL_ERROR "Caution, you have previously run SHTNS 'configure' script in the sources, this is not compatible with cmake. Please run 'make clean' in the sources.")
+endif()
 
 ###########################################################
 # standards to use
