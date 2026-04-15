@@ -57,9 +57,13 @@ ffi::Error analys_jax_cpu(int64_t cfg, ffi::Buffer<ffi::F64> x,
 	  return ffi::Error::InvalidArgument("shtns: analys output array has wrong size");
   }
 
-  for (int64_t n = 0; n < n_other; n ++) {	// loop over other dimensions
-	  spat_to_SH(sh, &(x.typed_data()[n*n_spat]), (cplx*) &(y->typed_data()[n*nlm]));
+  std::vector<double> x_copy(x.typed_data(), x.typed_data() + n_elem);
+  for (int64_t n = 0; n < n_other; n++) {
+      spat_to_SH(sh, &x_copy[n * n_spat], (cplx*) &(y->typed_data()[n * nlm]));
   }
+  // for (int64_t n = 0; n < n_other; n ++) {	// loop over other dimensions
+	//   spat_to_SH(sh, &(x.typed_data()[n*n_spat]), (cplx*) &(y->typed_data()[n*nlm]));
+  // }
   return ffi::Error::Success();
 }
 
@@ -108,8 +112,9 @@ ffi::Error analys_cplx_jax_cpu(int64_t cfg, ffi::Buffer<ffi::C128> x,
   long nlm_cplx = sh->nlm_cplx;
   if (y->element_count() != n_other * nlm_cplx)
     return ffi::Error::InvalidArgument("shtns: analys_cplx output array has wrong size");
+  std::vector<cplx> x_copy(x.typed_data(), x.typed_data() + n_elem);
   for (int64_t n = 0; n < n_other; n++)
-    spat_cplx_to_SH(sh, (cplx*) &(x.typed_data()[n*n_spat]),
+    spat_cplx_to_SH(sh, (cplx*) &(x_copy[n*n_spat]),
                         (cplx*) &(y->typed_data()[n*nlm_cplx]));
   return ffi::Error::Success();
 }
@@ -173,9 +178,16 @@ ffi::Error analys_jax_gpu(cudaStream_t jax_strm, int64_t cfg, ffi::Buffer<ffi::F
 
   cudaEventRecord( sh->sync_evt, jax_strm );		// record an event on the JAX stream
   cudaStreamWaitEvent( sh->comp_stream, sh->sync_evt, 0 );	// make the SHTns stream wait for the JAX stream
-  for (int64_t n = 0; n < n_other; n ++) {	// loop over other dimensions
-	  cu_spat_to_SH(sh, &(x.typed_data()[n*n_spat]), (cplx*) &(y->typed_data()[n*nlm]), sh->lmax);
-  }
+
+  // Copy input to a scratch buffer: cu_spat_to_SH modifies its input in-place.
+  double* x_copy;
+  cudaMallocAsync(&x_copy, n_elem * sizeof(double), sh->comp_stream);
+  cudaMemcpyAsync(x_copy, x.typed_data(), n_elem * sizeof(double),
+                  cudaMemcpyDeviceToDevice, sh->comp_stream);
+  for (int64_t n = 0; n < n_other; n++)
+    cu_spat_to_SH(sh, &x_copy[n * n_spat], (cplx*) &(y->typed_data()[n * nlm]), sh->lmax);
+  cudaFreeAsync(x_copy, sh->comp_stream);
+
   cudaEventRecord( sh->sync_evt, sh->comp_stream );		// record an event on the SHTns stream
   cudaStreamWaitEvent( jax_strm, sh->sync_evt, 0 );	// make the JAX stream wait for the SHTns stream
 

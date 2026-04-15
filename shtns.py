@@ -672,12 +672,20 @@ class sht(object):
                 "JAX GPU backend does not support SHT_PHI_CONTIGUOUS grids. "
                 "Call set_grid() with SHT_THETA_CONTIGUOUS or run with CPU backend."
             )
+    def _check_shape_dtype(self, x: jax.Array, shape: tuple[int], dtype) -> None:
+         
+        # Want the final n dims to match the expected shape
+        n = len(shape)
+        if x.shape[-n:] != shape:
+            raise ValueError(f"Input array must end with shape {shape}. Got {x.shape}.")
+        if x.dtype != dtype:
+            raise ValueError(f"Input array must have dtype {dtype}. Got {x.dtype}.")
 
     def _grid_weights(self) -> jax.Array:
         """Return the quadrature weights for the current grid as a JAX array."""
         w = self.gauss_wts()  # shape (nlat/2,)
         full_w = jnp.concatenate([w, w[::-1]])  # shape (nlat,)
-        return full_w.reshape(-1, 1) * 2 * jnp.pi / self.nphi
+        return full_w.reshape(1, -1) * 2 * jnp.pi / self.nphi
         
     def synth_jax(self, x: jax.Array) -> jax.Array:
         """Inverse spherical harmonic transform. 
@@ -685,11 +693,10 @@ class sht(object):
         Requires complex128 inputs.
         """
         self._check_jax_gpu_grid_compat()
+        self._check_shape_dtype(x, (self.nlm,), jnp.complex128)
 
         @jax.custom_jvp
         def _synth_impl(x_in: jax.Array) -> jax.Array:
-            if x_in.dtype != jnp.complex128:
-                raise ValueError(f"Only complex128 dtype is implemented by shtns for synthesis. Got {x_in.dtype}.")
             orig_shape = x_in.shape
             out_shape = self.spat_shape if len(orig_shape) == 1 else (*orig_shape[:-1], *self.spat_shape)
 
@@ -714,11 +721,20 @@ class sht(object):
             out_shape = (self.nlm,) if len(ct_out.shape) == 2 else (*prefix_shape, self.nlm)
 
             weights = self._grid_weights()
-            result = jax.ffi.ffi_call(
-                "shtns_analys",
-                jax.ShapeDtypeStruct(out_shape, jnp.complex128),
+
+            def get_impl(target_name):
+                return lambda x: jax.ffi.ffi_call(target_name,
+                jax.ShapeDtypeStruct(out_shape, jnp.float64),
                 vmap_method="broadcast_all",
-            )(ct_out / weights, cfg=int(self.this))
+                )(x, cfg=int(self.this))
+
+            result = jax.lax.platform_dependent(ct_out / weights, cpu=get_impl("shtns_analys"), cuda=get_impl("shtns_analys_gpu"))
+
+            # result = jax.ffi.ffi_call(
+            #     "shtns_analys",
+            #     jax.ShapeDtypeStruct(out_shape, jnp.complex128),
+            #     vmap_method="broadcast_all",
+            # )(ct_out / weights, cfg=int(self.this))
             if self.orthonormal:
                 result = result.at[self.lmax + 1:].multiply(2.0)
             return (result,)
@@ -744,15 +760,10 @@ class sht(object):
         Requires float64 inputs, returns complex128 outputs.
         """
         self._check_jax_gpu_grid_compat()
+        self._check_shape_dtype(x, self.spat_shape, jnp.float64)
         @jax.custom_jvp
         def _analys_impl(x_in: jax.Array) -> jax.Array:
             """Implementation of the forward SHT."""
-            if x_in.dtype != jnp.float64:
-                raise ValueError(f"Only the float64 dtype is implemented by shtns. Got {x_in.dtype}.")
-            if len(x_in.shape) < 2:
-                raise ValueError("Input array must have at least 2 dimensions (grid space)")
-            if x_in.shape[-2:] != self.spat_shape:
-                raise ValueError("Input array must end with the grid shape from set_grid().")
             prefix_shape = x_in.shape[:-2]
             out_shape = (self.nlm,) if len(x_in.shape) == 2 else (*prefix_shape, self.nlm)
 
@@ -801,8 +812,8 @@ class sht(object):
 
     def synth_cplx_jax(self, x: jax.Array) -> jax.Array:
         """Complex inverse SHT (scalar): C128 spectral (nlm_cplx,) -> C128 spatial (spat_shape)."""
-        if self.lmax != self.mmax:
-            raise RuntimeError("synth_cplx_jax requires lmax==mmax and mres==1.")
+        self._check_jax_gpu_grid_compat()
+        self._check_shape_dtype(x, (self.nlm_cplx,), jnp.complex128)
 
         @jax.custom_jvp
         def _synth_cplx_impl(x_in: jax.Array) -> jax.Array:
@@ -851,6 +862,8 @@ class sht(object):
     def analys_cplx_jax(self, x: jax.Array) -> jax.Array:
         """Complex forward SHT (scalar): C128 spatial (spat_shape) -> C128 
         spectral (nlm_cplx,)."""
+        self._check_jax_gpu_grid_compat()
+        self._check_shape_dtype(x, self.spat_shape, jnp.complex128)
 
         @jax.custom_jvp
         def _analys_cplx_impl(x_in: jax.Array) -> jax.Array:
