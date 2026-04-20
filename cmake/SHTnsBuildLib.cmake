@@ -12,6 +12,18 @@ function(shtns_build_library)
 	set(multiValueArgs "")
 	cmake_parse_arguments(PARSE_ARGV 0 arg "${options}" "${oneValueArgs}" "${multiValueArgs}")
 
+	# switch
+	if (USE_MKL)
+		set(arg_FFTW OFF)
+	else()
+		set(arg_FFTW ON)
+	endif()
+	if (arg_FFTW AND arg_OPENMP)
+		set(arg_FFTW_OPENMP ON)
+	else()
+		set(arg_FFTW_OPENMP OFF)
+	endif()
+
 	# select mode
 	set(build_mode STATIC)
 	if (USE_SHARED)
@@ -44,15 +56,15 @@ function(shtns_build_library)
 			${CMAKE_CURRENT_SOURCE_DIR}
 			${CMAKE_CURRENT_BINARY_DIR}
 		PUBLIC
-			${FFTW_INCLUDE_DIRS}
+			$<$<BOOL:${arg_FFTW}>:${FFTW_INCLUDE_DIRS}>
 			$<$<BOOL:${arg_CUDA}>:${CUDAToolkit_INCLUDE_DIRS}>
 			$<$<BOOL:${arg_HIP}>:${HIP_HOST_INCLUDE_DIRS}>
 	)
 
 	target_link_libraries(${arg_LIBNAME}
 		PUBLIC
-			${FFTW_LIBRARIES}
-			$<$<BOOL:${arg_OPENMP}>:${FFTW_OMP_LIBRARIES}>
+			$<$<BOOL:${arg_FFTW}>:${FFTW_LIBRARIES}>
+			$<$<BOOL:${arg_FFTW_OPENMP}>:${FFTW_OMP_LIBRARIES}>
 			$<$<BOOL:${arg_OPENMP}>:OpenMP::OpenMP_C>
 			$<$<BOOL:${arg_CUDA}>:CUDA::cufft>
 			$<$<BOOL:${arg_CUDA}>:CUDA::cudart>
@@ -61,6 +73,7 @@ function(shtns_build_library)
 			$<$<BOOL:${arg_HIPFFTW}>:hip::hipfft>
 			$<$<BOOL:${arg_HIP}>:hip::amdhip64>
 			$<$<BOOL:${arg_HIP}>:hiprtc::hiprtc>
+			$<$<BOOL:${USE_MKL}>:MKL::MKL>
 	)
 
 	target_compile_definitions(${arg_LIBNAME}

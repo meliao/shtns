@@ -34,6 +34,7 @@ option(USE_OPENMP "Enable OpenMP support" ON)
 option(USE_MAGIC "I need the transforms compatible with the MagIC code, to speed it up!" OFF)
 option(USE_ISHIOKA "Enable the new recurrence proposed by Ishioka (2018) see https://doi.org/10.2151/jmsj.2018-019 (faster)" ON)
 option(USE_SHARED "Enable building shared libraries" OFF)
+option(USE_MKL "Enable usage of the MKL library" OFF)
 # options with values
 set(USE_HIP_ARCH "AUTO" CACHE STRING "Select the architecture to build for (mi100, mi200, mi250, gfx908, gfx90a...).")
 set(USE_CUDA "AUTO" CACHE STRING "Enable CUDA support (ON/OFF/AUTO)")
@@ -41,6 +42,7 @@ set(USE_MARCH "AUTO" CACHE STRING "Select the -march value to apply, can use AUT
 set(USE_GPU_MARCH "AUTO" CACHE STRING "Select the -march value to apply on GPU binary, can use AUTO to autoselect depending on ARM or x86 familly.")
 set(USE_CUDA_ARCH "AUTO" CACHE STRING "Select the architecture to build for (nativ, all, all-major, kepler, pascal, volta, ampere, 70, 80, ...).")
 set(SHT_VERBOSE 1 CACHE STRING "0:no output, 1:output info to stdout, 2:more output (debug info), 3:also print fftw plans.]")
+set(MKL_ROOT "{CMAKE_INSTALL_PREFIX}" CACHE PATH "Path to search the MKL library.")
 
 ###########################################################
 # TODO
@@ -59,7 +61,11 @@ endif()
 ###########################################################
 # Dependencies
 list(APPEND CMAKE_MODULE_PATH ${CMAKE_CURRENT_LIST_DIR}/cmake)
-find_package(FFTW REQUIRED)
+if (USE_MKL AND MKL_ROOT)
+	find_package(MKL REQUIRED)
+else()
+	find_package(FFTW REQUIRED)
+endif()
 
 ###########################################################
 # include some custom scripts
