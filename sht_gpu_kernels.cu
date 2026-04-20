@@ -177,7 +177,6 @@ transpose_cplx_skip_R2C(cudaStream_t stream, const void* in, void* out, const in
 		const int block_dim_y = 8;		// good performance with 8 on nvidia A30 (MUST be power of 2 between 1 and 16)
 	#endif
 	dim3 blocks((mmax+tile_dim)/tile_dim, (dim1+tile_dim-1)/tile_dim, nbatch);
-	dim3 threads(tile_dim*2, block_dim_y, 1);
 	if (sizeof_real==8) {
 		dim3 threads(tile_dim*2, block_dim_y, 1);
 		transpose_cplx_skip_R2C_kernel<tile_dim, block_dim_y,double, 2> <<<blocks, threads, 0, stream>>>((double*)in, (double*)out, dim0, dim1, mmax, idist, odist);
