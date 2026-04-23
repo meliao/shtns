@@ -60,7 +60,7 @@ T	void GEN3(_sy1t,NWAY,_m0l)(shtns_cfg shtns, cplx *Tlm, v2d *BtF, v2d *BpF, con
 
 
 3	static void GEN3(SHqst_to_spat_fly,NWAY,SUFFIX)(shtns_cfg shtns, cplx *Qlm, cplx *Slm, cplx *Tlm, double *Vr, double *Vt, double *Vp, const long int llim) {
-QX	static void GEN3(SH_to_spat_fly,NWAY,SUFFIX)(shtns_cfg shtns, cplx *Qlm, double *Vr, const long int llim) {
+QX	static void GEN3(SH_to_spat_fly,NWAY,SUFFIX)(shtns_cfg shtns, cplx *Qlm, double *Vr, long int llim) {
   #ifndef SHT_GRAD
 VX	static void GEN3(SHsphtor_to_spat_fly,NWAY,SUFFIX)(shtns_cfg shtns, cplx *Slm, cplx *Tlm, double *Vt, double *Vp, const long int llim) {
   #else
@@ -71,6 +71,9 @@ T	static void GEN3(SHtor_to_spat_fly,NWAY,SUFFIX)(shtns_cfg shtns, cplx *Tlm, do
 	unsigned imlim = 0;
 Q	v2d* BrF = (v2d*) Vr;
 V	v2d* BtF = (v2d*) Vt;	v2d* BpF = (v2d*) Vp;
+
+	const int adjoint = (llim & SHTNS_ADJOINT);
+QX	llim &= SHTNS_ADJOINT-1;	// clear flag to recover true llim
 
   #ifndef SHT_AXISYM
 	imlim = MTR;
@@ -97,13 +100,13 @@ VX		BpF = BtF + nv/2;
 			for (int b=0; b<shtns->howmany; b++) {		// inner-loop is batch. For best cache-reuse
 				long spec_ofs = b * shtns->spec_dist;
 				long spat_ofs = b * shtns->nlat_2;
-3				GEN3(_sy3,NWAY,_l)(shtns, Qlm+spec_ofs, Slm+spec_ofs, Tlm+spec_ofs, BrF+spat_ofs, BtF+spat_ofs, BpF+spat_ofs, llim, im, it0, it1);
-QX				GEN3(_sy1,NWAY,_l)(shtns, Qlm+spec_ofs, BrF+spat_ofs, llim, im, it0, it1);
+3				GEN3(_sy3,NWAY,_l)(shtns, Qlm+spec_ofs, Slm+spec_ofs, Tlm+spec_ofs, BrF+spat_ofs, BtF+spat_ofs, BpF+spat_ofs, llim | adjoint, im, it0, it1);
+QX				GEN3(_sy1,NWAY,_l)(shtns, Qlm+spec_ofs, BrF+spat_ofs, llim | adjoint, im, it0, it1);
 	#ifndef SHT_GRAD
-VX				GEN3(_sy2,NWAY,_l)(shtns, Slm+spec_ofs, Tlm+spec_ofs, BtF+spat_ofs, BpF+spat_ofs, llim, im, it0, it1);
+VX				GEN3(_sy2,NWAY,_l)(shtns, Slm+spec_ofs, Tlm+spec_ofs, BtF+spat_ofs, BpF+spat_ofs, llim | adjoint, im, it0, it1);
 	#else
-S				GEN3(_sy1s,NWAY,_l)(shtns, Slm+spec_ofs, BtF+spat_ofs, BpF+spat_ofs, llim, im, it0, it1);
-T				GEN3(_sy1t,NWAY,_l)(shtns, Tlm+spec_ofs, BtF+spat_ofs, BpF+spat_ofs, llim, im, it0, it1);
+S				GEN3(_sy1s,NWAY,_l)(shtns, Slm+spec_ofs, BtF+spat_ofs, BpF+spat_ofs, llim | adjoint, im, it0, it1);
+T				GEN3(_sy1t,NWAY,_l)(shtns, Tlm+spec_ofs, BtF+spat_ofs, BpF+spat_ofs, llim | adjoint, im, it0, it1);
 	#endif
 			}
 		}
@@ -115,15 +118,25 @@ T				GEN3(_sy1t,NWAY,_l)(shtns, Tlm+spec_ofs, BtF+spat_ofs, BpF+spat_ofs, llim, 
 			for (int b=0; b<shtns->howmany; b++) {		// inner-loop is batch. For best cache-reuse
 				long spec_ofs = b * shtns->spec_dist;
 				long spat_ofs = b * shtns->nlat_2;
-3				GEN3(_sy3_hi,NWAY,_l)(shtns, Qlm+spec_ofs, Slm+spec_ofs, Tlm+spec_ofs, BrF+spat_ofs, BtF+spat_ofs, BpF+spat_ofs, llim, im, it0, it1);
-QX				GEN3(_sy1_hi,NWAY,_l)(shtns, Qlm+spec_ofs, BrF+spat_ofs, llim, im, it0, it1);
+3				GEN3(_sy3_hi,NWAY,_l)(shtns, Qlm+spec_ofs, Slm+spec_ofs, Tlm+spec_ofs, BrF+spat_ofs, BtF+spat_ofs, BpF+spat_ofs, llim | adjoint, im, it0, it1);
+QX				GEN3(_sy1_hi,NWAY,_l)(shtns, Qlm+spec_ofs, BrF+spat_ofs, llim | adjoint, im, it0, it1);
 	#ifndef SHT_GRAD
-VX				GEN3(_sy2_hi,NWAY,_l)(shtns, Slm+spec_ofs, Tlm+spec_ofs, BtF+spat_ofs, BpF+spat_ofs, llim, im, it0, it1);
+VX				GEN3(_sy2_hi,NWAY,_l)(shtns, Slm+spec_ofs, Tlm+spec_ofs, BtF+spat_ofs, BpF+spat_ofs, llim | adjoint, im, it0, it1);
 	#else
-S				GEN3(_sy1s_hi,NWAY,_l)(shtns, Slm+spec_ofs, BtF+spat_ofs, BpF+spat_ofs, llim, im, it0, it1);
-T				GEN3(_sy1t_hi,NWAY,_l)(shtns, Tlm+spec_ofs, BtF+spat_ofs, BpF+spat_ofs, llim, im, it0, it1);
+S				GEN3(_sy1s_hi,NWAY,_l)(shtns, Slm+spec_ofs, BtF+spat_ofs, BpF+spat_ofs, llim | adjoint, im, it0, it1);
+T				GEN3(_sy1t_hi,NWAY,_l)(shtns, Tlm+spec_ofs, BtF+spat_ofs, BpF+spat_ofs, llim | adjoint, im, it0, it1);
 	#endif
 			}
+		}
+	}
+
+	if UNLIKELY(adjoint && shtns->wg[-2] != 1.0) {	// scale m=0 for adjoint
+		double scale = 1.0/shtns->wg[-2];
+		for (int b=0; b<shtns->howmany; b++) {
+			long spat_ofs = b * shtns->nlat_2;
+Q			for (int it=0; it<shtns->nlat_2; it++) BrF[spat_ofs + it] *= scale;
+V			for (int it=0; it<shtns->nlat_2; it++) BtF[spat_ofs + it] *= scale;
+V			for (int it=0; it<shtns->nlat_2; it++) BpF[spat_ofs + it] *= scale;
 		}
 	}
 

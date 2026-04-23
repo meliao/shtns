@@ -392,6 +392,14 @@ void adjoint_SHqst_to_spat_l(shtns_cfg, double *Vr, double *Vt, double *Vp, cplx
 void adjoint_SHqst_to_spat_ml(shtns_cfg, int im, cplx *Vr, cplx *Vt, cplx *Vp, cplx *Qlm, cplx *Slm, cplx *Tlm, int ltr);
 ///@}
 
+/// \name Adjoint analysis
+///@{
+void adjoint_spat_to_SH(shtns_cfg, cplx *Qlm, double *Vr);
+void adjoint_spat_to_SHsphtor(shtns_cfg, cplx *Slm, cplx *Tlm, double *Vt, double *Vp);
+void adjoint_spat_to_SHqst(shtns_cfg, cplx *Qlm, cplx *Slm, cplx *Tlm, double *Vr, double *Vt, double *Vp);
+///@}
+
+
 #endif
 
 #ifdef __cplusplus

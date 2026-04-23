@@ -1093,25 +1093,43 @@ int main(int argc, char *argv[])
 	}
 
 	if (adjoint) {		// test adjoint
+		double*	Th = (double *) shtns_malloc( shtns->nspat * sizeof(double));
+
 		srand( time(0) );
 		make_random(Slm);		make_random(Tlm);
-		double*	Th = (double *) shtns_malloc( shtns->nspat * sizeof(double));
+		double dot1_ref_spec = 0.0;		// reference dot product in spectral space
+		for (long lm=0; lm<shtns->nlm; lm++) {
+			dot1_ref_spec += creal(Tlm[lm])*creal(Slm[lm]) + cimag(Tlm[lm])*cimag(Slm[lm]);
+		}
 
 		SH_to_spat(shtns, Slm, Sh);
 		SH_to_spat(shtns, Tlm, Th);
-		double dot_ref = 0.0;		// reference dot product
+
+		double dot_ref_spat = 0.0;		// reference dot product in spatial space
 		for (long ip=0; ip<shtns->nphi; ip++) for (long it=0; it<shtns->nlat; it++) {
-			dot_ref += Sh[ip*shtns->nlat_padded + it] * Th[ip*shtns->nlat_padded + it];
+			dot_ref_spat += Sh[ip*shtns->nlat_padded + it] * Th[ip*shtns->nlat_padded + it];
 		}
+
+		// adjoint: in spatial space
+		adjoint_spat_to_SH(shtns, Tlm, Th);
+		double dot1_spat = 0.0;
+		for (long ip=0; ip<shtns->nphi; ip++) for (long it=0; it<shtns->nlat; it++) {
+			dot1_spat += Sh[ip*shtns->nlat_padded + it] * Th[ip*shtns->nlat_padded + it];
+		}
+		double relerr1 = (dot1_spat-dot1_ref_spec)/dot1_ref_spec;
+		printf("** [ADJOINT ANALYSIS] dot product = %g,  adjoint dot product = %g,  relative error = %g   ", dot1_ref_spec, dot1_spat, relerr1);
+		if (fabs(relerr1) > 1e-13*LMAX) printf(COLOR_ERR "**** ERROR ****" COLOR_END "\n"); else printf(COLOR_OK "OK" COLOR_END "\n");
+
 		// adjoint: in spectral space
-		adjoint_SH_to_spat(shtns, Th, Tlm);
+		SH_to_spat(shtns, Tlm, Th);
+		adjoint_SH_to_spat(shtns, Th, Tlm);		// potentially destroys input Th
 		double dot_spec = 0.0;
 		for (long lm=0; lm<shtns->nlm; lm++) {
 			dot_spec += creal(Tlm[lm])*creal(Slm[lm]) + cimag(Tlm[lm])*cimag(Slm[lm]);
 		}
-		double relerr = (dot_spec-dot_ref)/dot_ref;
-		printf("** [ADJOINT SYNTHESIS] dot product = %g,  adjoint dot product = %g,  relative error = %g   ", dot_ref, dot_spec, relerr);
-		if (fabs(relerr) > 1e-14*LMAX) printf(COLOR_ERR "**** ERROR ****" COLOR_END "\n"); else printf(COLOR_OK "OK" COLOR_END "\n");
+		double relerr = (dot_spec-dot_ref_spat)/dot_ref_spat;
+		printf("** [ADJOINT SYNTHESIS] dot product = %g,  adjoint dot product = %g,  relative error = %g   ", dot_ref_spat, dot_spec, relerr);
+		if (fabs(relerr) > 1e-13*LMAX) printf(COLOR_ERR "**** ERROR ****" COLOR_END "\n"); else printf(COLOR_OK "OK" COLOR_END "\n");
 
 		if (vector) {
 			cplx* Xlm = (cplx *) shtns_malloc( NLM*batch * sizeof(cplx) );
@@ -1119,27 +1137,45 @@ int main(int argc, char *argv[])
 			double*	Xh = (double *) shtns_malloc( shtns->nspat * sizeof(double));
 			double*	Yh = (double *) shtns_malloc( shtns->nspat * sizeof(double));
 			make_random(Xlm);		make_random(Ylm);
+			Xlm[0] = 0;		Ylm[0] = 0;		// vectors have zeros here
+			Slm[0] = 0;		Tlm[0] = 0;
+			double dot1_ref_spec = 0.0;		// reference dot product in spectral space
+			for (long lm=1; lm<shtns->nlm; lm++) {		// skip l=0
+				dot1_ref_spec += creal(Xlm[lm])*creal(Slm[lm]) + cimag(Xlm[lm])*cimag(Slm[lm]);
+				dot1_ref_spec += creal(Ylm[lm])*creal(Tlm[lm]) + cimag(Ylm[lm])*cimag(Tlm[lm]);
+			}
 
 			SHsphtor_to_spat(shtns, Slm, Tlm, Sh, Th);
 			SHsphtor_to_spat(shtns, Xlm, Ylm, Xh, Yh);
-			double dot_ref = 0.0;		// reference dot product
+			double dot_ref_spat = 0.0;		// reference dot product in spatial space
 			for (long ip=0; ip<shtns->nphi; ip++) for (long it=0; it<shtns->nlat; it++) {
-				dot_ref += Sh[ip*shtns->nlat_padded + it] * Xh[ip*shtns->nlat_padded + it];
-				dot_ref += Th[ip*shtns->nlat_padded + it] * Yh[ip*shtns->nlat_padded + it];
+				dot_ref_spat += Sh[ip*shtns->nlat_padded + it] * Xh[ip*shtns->nlat_padded + it];
+				dot_ref_spat += Th[ip*shtns->nlat_padded + it] * Yh[ip*shtns->nlat_padded + it];
 			}
 
+			// adjoint: in spatial space
+			adjoint_spat_to_SHsphtor(shtns, Slm, Tlm, Sh, Th);
+			double dot1_spat = 0.0;
+			for (long ip=0; ip<shtns->nphi; ip++) for (long it=0; it<shtns->nlat; it++) {
+				dot1_spat += Sh[ip*shtns->nlat_padded + it] * Xh[ip*shtns->nlat_padded + it];
+				dot1_spat += Th[ip*shtns->nlat_padded + it] * Yh[ip*shtns->nlat_padded + it];
+			}
+			double relerr1 = (dot1_spat-dot1_ref_spec)/dot1_ref_spec;
+			printf("** [ADJOINT VECTOR ANALYSIS] dot product = %g,  adjoint dot product = %g,  relative error = %g   ", dot1_ref_spec, dot1_spat, relerr1);
+			if (fabs(relerr1) > 1e-13*LMAX) printf(COLOR_ERR "**** ERROR ****" COLOR_END "\n"); else printf(COLOR_OK "OK" COLOR_END "\n");
+
 			// adjoint: in spectral space
+			SHsphtor_to_spat(shtns, Slm, Tlm, Sh, Th);
 			adjoint_SHsphtor_to_spat(shtns, Sh, Th, Slm, Tlm);
 			double dot_spec = 0.0;
 			for (long lm=0; lm<shtns->nlm; lm++) {
 				dot_spec += creal(Xlm[lm])*creal(Slm[lm]) + cimag(Xlm[lm])*cimag(Slm[lm]);
 				dot_spec += creal(Ylm[lm])*creal(Tlm[lm]) + cimag(Ylm[lm])*cimag(Tlm[lm]);
 			}
-			double relerr = (dot_spec-dot_ref)/dot_ref;
-			printf("** [ADJOINT VECTOR SYNTHESIS] dot product = %g,  adjoint dot product = %g,  relative error = %g   ", dot_ref, dot_spec, relerr);
-			if (fabs(relerr) > 1e-14*LMAX) printf(COLOR_ERR "**** ERROR ****" COLOR_END "\n"); else printf(COLOR_OK "OK" COLOR_END "\n");
+			double relerr = (dot_spec-dot_ref_spat)/dot_ref_spat;
+			printf("** [ADJOINT VECTOR SYNTHESIS] dot product = %g,  adjoint dot product = %g,  relative error = %g   ", dot_ref_spat, dot_spec, relerr);
+			if (fabs(relerr) > 1e-13*LMAX) printf(COLOR_ERR "**** ERROR ****" COLOR_END "\n"); else printf(COLOR_OK "OK" COLOR_END "\n");
 		}
-
 	}
 
 	shtns_create(LMAX, MMAX, MRES, shtnorm);		// test memory allocation and management.
