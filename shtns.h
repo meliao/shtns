@@ -74,6 +74,7 @@ enum shtns_type {
 #define SHT_ALLOW_PADDING (256*256)	///< allows SHTns to add extra space between lines of the spatial array to avoid cache bank conflicts.
 #define SHT_ROBERT_FORM (256*512)	///< use Robert form for vector transforms. See also \ref shtns_robert_form
 #define SHT_FP32 (256*1024)			///< float support. Currently only on GPU, where it then replaces double (fp64) support which is likely to segfault.
+#define SHT_DESTROY_SPAT (256*4096)		///< spatial input data can be destroyed by spat_to_SH* transforms.
 
 
 #ifndef SHTNS_PRIVATE

@@ -449,7 +449,7 @@ static void planFFT(shtns_cfg shtns, int layout)
 		shtns->fft_mode = FFT_OOP | ((phi_inc==1) ? FFT_PHI_CONTIG_ODD : FFT_THETA_CONTIG_ODD);
 		const int ncplx = NPHI/2 +1;
 		shtns->fftc = fftw_plan_many_dft_r2c(1, &nfft, NLAT, Sh, &nfft, phi_inc, theta_inc, ShF, &ncplx, NLAT, 1, FFTW_ESTIMATE);
-		shtns->ifftc = fftw_plan_many_dft_c2r(1, &nfft, NLAT, ShF, &ncplx, NLAT, 1, Sh, &nfft, phi_inc, theta_inc, FFTW_ESTIMATE);
+		shtns->ifftc = fftw_plan_many_dft_c2r(1, &nfft, NLAT, ShF, &ncplx, NLAT, 1, Sh, &nfft, phi_inc, theta_inc, FFTW_ESTIMATE | FFTW_DESTROY_INPUT);
 	}
 // complex fft for fly transform is a bit different.
 	if (layout & SHT_PHI_CONTIGUOUS) {		// out-of-place split dft
@@ -459,7 +459,7 @@ static void planFFT(shtns_cfg shtns, int layout)
 			shtns->fft_mode = FFT_PHI_CONTIG_SPLIT | FFT_OOP;
 			dim.n = NPHI;    	dim.os = 1;			dim.is = NLAT;		// complex transpose
 			many.n = NLAT/2;	many.os = 2*NPHI;	many.is = 2;
-			shtns->ifftc = fftw_plan_guru_split_dft(1, &dim, 1, &many, ((double*)ShF)+1, (double*)ShF, Sh+NPHI, Sh, shtns->fftw_plan_mode);
+			shtns->ifftc = fftw_plan_guru_split_dft(1, &dim, 1, &many, ((double*)ShF)+1, (double*)ShF, Sh+NPHI, Sh, shtns->fftw_plan_mode | FFTW_DESTROY_INPUT);
 
 			// legacy analysis fft
 			//dim.n = NPHI;    	dim.is = 1;			dim.os = NLAT;
@@ -500,6 +500,10 @@ static void planFFT(shtns_cfg shtns, int layout)
 			shtns->fft_mode = FFT_THETA_CONTIG;
 			shtns->ifftc = fftw_plan_many_dft(1, &nfft, shtns->nlat_2 * howmany, ShF, &nfft, phi_inc/2, 1, ShF, &nfft, phi_inc/2, 1, FFTW_BACKWARD, shtns->fftw_plan_mode);
 			shtns->fftc = shtns->ifftc;		// same thing, with m>0 and m<0 exchanged.
+			if ((layout & SHT_DESTROY_SPAT) == 0) {		// to preserve spatial input data, use an out-of-place transform:
+				shtns->fftc = fftw_plan_many_dft(1, &nfft, shtns->nlat_2 * howmany, ShF, &nfft, phi_inc/2, 1, (cplx*)Sh, &nfft, phi_inc/2, 1, FFTW_BACKWARD, shtns->fftw_plan_mode);
+				shtns->fft_mode |= FFT_OOP_ANALYS;	// out-of-place only for analysis
+			}
 
 		/*	if (shtns->nthreads > 1) {
 				fftw_plan_with_nthreads(1);

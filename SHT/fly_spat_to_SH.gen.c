@@ -55,7 +55,7 @@ V	BtF = Vt;	BpF = Vp;
 		if (imlim*MRES > (unsigned) llim) imlim = ((unsigned) llim)/MRES;		// 32bit mul and div should be faster
 	#endif
 	if (shtns->fft_mode != FFT_NONE) {
-		if (shtns->fft_mode & FFT_OOP) {		// alloc memory for out-of-place FFT
+		if (shtns->fft_mode & (FFT_OOP|FFT_OOP_ANALYS)) {		// alloc memory for out-of-place FFT
 			unsigned long nv = shtns->nspat;
 QX			BrF = (double*) VMALLOC( nv * sizeof(double) );
 VX			BtF = (double*) VMALLOC( 2*nv * sizeof(double) );
@@ -110,7 +110,7 @@ V			memset(Slm+l+spec_ofs, 0, (shtns->nlm - l)*sizeof(cplx));
 V			memset(Tlm+l+spec_ofs, 0, (shtns->nlm - l)*sizeof(cplx));
 		}
 	}
-  	if (shtns->fft_mode & FFT_OOP) {		// free memory
+  	if (shtns->fft_mode & (FFT_OOP|FFT_OOP_ANALYS)) {		// free memory
 Q	    VFREE(BrF);
 VX	    VFREE(BtF);	// this frees also BpF.
 	}

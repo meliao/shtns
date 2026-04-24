@@ -761,7 +761,7 @@ int main(int argc, char *argv[])
 	enum shtns_type shtmode = sht_auto;		// default to "auto" (fastest) mode.
 	enum shtns_norm shtnorm = sht_orthonormal;		// default to "orthonormal" SH.
 	int layout = SHT_NATIVE_LAYOUT;
-	int layout_opts = SHT_ALLOW_PADDING | SHT_ALLOW_GPU;		// allow padding and GPU by default
+	int layout_opts = SHT_ALLOW_PADDING | SHT_ALLOW_GPU | SHT_DESTROY_SPAT;		// allow padding and GPU and destroy spatial input by default
 	int noltr = 0;
 	int nlorder = 0;
 	int point = 0;
@@ -800,7 +800,7 @@ int main(int argc, char *argv[])
 		if (strcmp(name,"quickinit") == 0) shtmode = sht_quick_init;	// Gauss grid and fast initialization time, but suboptimal fourier transforms.
 		if (strcmp(name,"schmidt") == 0) shtnorm = sht_schmidt | SHT_NO_CS_PHASE;
 		if (strcmp(name,"4pi") == 0) shtnorm = sht_fourpi | SHT_REAL_NORM;
-		if (strcmp(name,"oop") == 0) layout = SHT_THETA_CONTIGUOUS;
+		if (strcmp(name,"oop") == 0) layout_opts &= ~SHT_DESTROY_SPAT;
 		if (strcmp(name,"transpose") == 0) layout = SHT_PHI_CONTIGUOUS;
 		if (strcmp(name,"nlorder") == 0) nlorder = t;
 		if (strcmp(name,"vector") == 0) vector = 1;

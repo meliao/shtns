@@ -101,7 +101,7 @@ enum sht_types { SHT_TYP_SSY, SHT_TYP_SAN, SHT_TYP_VSY, SHT_TYP_VAN,
 enum sht_grids { GRID_NONE, GRID_GAUSS, GRID_REGULAR, GRID_POLES };
 
 // fft modes
-enum sht_fft { FFT_NONE=0, FFT_THETA_CONTIG=1, FFT_PHI_CONTIG_SPLIT=2, FFT_OOP=8, FFT_REAL=16, FFT_FP32=32, FFT_PHI_CONTIG_ODD=64, FFT_THETA_CONTIG_ODD=128 };
+enum sht_fft { FFT_NONE=0, FFT_THETA_CONTIG=1, FFT_PHI_CONTIG_SPLIT=2, FFT_OOP_ANALYS=4, FFT_OOP=8, FFT_REAL=16, FFT_FP32=32, FFT_PHI_CONTIG_ODD=64, FFT_THETA_CONTIG_ODD=128 };
 
 // pointer to various function types
 typedef void (*pf2l)(shtns_cfg, void*, void*, long int);
