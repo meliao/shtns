@@ -42,8 +42,8 @@ V	double *BtF, *BpF;	// contains the Fourier transformed data
 	unsigned imlim=0;
 
 	const double* wg = shtns->wg;
-	if UNLIKELY(llim & SHTNS_NO_WEIGHTS) wg = shtns->wg_one;		// for adjoint synthesis
-	llim &= ~SHTNS_NO_WEIGHTS;	// clear flag to recover true llim
+	if UNLIKELY(llim & SHTNS_ADJOINT) wg = shtns->wg_adjoint;		// for adjoint synthesis
+	llim &= ~SHTNS_ADJOINT;	// clear flag to recover true llim
 
 Q	BrF = Vr;
 V	BtF = Vt;	BpF = Vp;
@@ -132,8 +132,8 @@ V	double *BtF, *BpF;	// contains the Fourier transformed data
 	unsigned imlim=0;
 
 	const double* wg = shtns->wg;
-	if UNLIKELY(llim & SHTNS_NO_WEIGHTS) wg = shtns->wg_one;		// for adjoint synthesis
-	llim &= ~SHTNS_NO_WEIGHTS;	// clear flag to recover true llim
+	if UNLIKELY(llim & SHTNS_ADJOINT) wg = shtns->wg_adjoint;		// for adjoint synthesis
+	llim &= ~SHTNS_ADJOINT;	// clear flag to recover true llim
 
 Q	BrF = Vr;
 V	BtF = Vt;	BpF = Vp;

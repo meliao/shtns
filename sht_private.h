@@ -139,7 +139,6 @@ struct shtns_info {		// MUST start with "int nlm;"
 	int m_stride_a;				///< stride in phi direction in intermediate spectral space (m)
 	double *wg;					///< Weights for quadrature rule (Gauss-Legendre or Fejer/Clenshaw-Curtis)
 	double *st_1;				///< 1/sin(theta);
-	double mpos_scale_analys;	///< scale factor for analysis, handles real-norm (0.5 or 1.0);
 
 	fftw_plan ifftc, fftc;
 	fftw_plan ifft_cplx, fft_cplx;		// for complex-valued spatial fields.
@@ -169,7 +168,7 @@ struct shtns_info {		// MUST start with "int nlm;"
 
 	void* ftable[SHT_NVAR][SHT_NTYP];		// pointers to transform functions.
 
-	double* wg_one;		// array of all ones that can replace wg for adjoint synthesis.
+	double* wg_adjoint;		// array of all ones that can replace wg for adjoint synthesis.
 
 	/* rotation stuff (pseudo-spectral) */
 	unsigned npts_rot;		// number of physical points needed
@@ -189,6 +188,7 @@ struct shtns_info {		// MUST start with "int nlm;"
 	unsigned fftw_plan_mode;
 	unsigned layout;		// requested data layout
 	double Y00_1, Y10_ct, Y11_st;
+	double mpos_scale_analys;	///< scale factor for analysis, handles real-norm (0.5 or 1.0);
 	shtns_cfg next;		// pointer to next sht_setup or NULL (records a chained list of SHT setup).
 
 	#ifdef SHTNS_GPU
@@ -270,7 +270,7 @@ struct shtns_rot_ {		// describe a rotation matrix
 //#define SHT_SCALE_FACTOR 2.0370359763344860863e+90
 
 // a large constant that can be combined to lmax (which is restricted to 65535) to mark we don't use weights -- for adjoint synthesis
-#define SHTNS_NO_WEIGHTS 0x40000000
+#define SHTNS_ADJOINT 0x40000000
 
 #ifdef __NVCC__
 		// disable vector extensions when compiling cuda code.
@@ -319,8 +319,12 @@ static void SH_2scal_to_vect(const double *mx, const double* l_2, int llim, int 
 		wl = vw[2*l+3];
 		sl += mxu*vl;
 		tl -= mxu*wl;
-		Sl[l] = sl * vdup(l_2[l+m]);
-		Tl[l] = tl * vdup(l_2[l+m]);
+		if LIKELY(l_2) {
+			sl *= vdup(l_2[l+m]);
+			tl *= vdup(l_2[l+m]);
+		}
+		Sl[l] = sl;
+		Tl[l] = tl;
 	}
   #else
 	v4d em = _mm256_setr_pd(-m,m, m,-m);
@@ -333,7 +337,7 @@ static void SH_2scal_to_vect(const double *mx, const double* l_2, int llim, int 
 		v4d vwu = vread4(vw+2*l+2, 0);		// kept for next iteration
 		v4d mxu = vall4( mx[2*l+1] );
 		stl -= mxu * vwu;
-		stl *= vall4(l_2[l+m]);
+		if LIKELY(l_2) stl *= vall4(l_2[l+m]);
 		Sl[l] = - (v2d) _mm256_castpd256_pd128(stl);
 		Tl[l] = _mm256_extractf128_pd(stl, 1);
 		stl = em * vreverse4(vwu) - vwl * vall4( mx[2*l] );

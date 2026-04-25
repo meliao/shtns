@@ -80,7 +80,7 @@ V	double peori[NLAT_2*2 + (VSIZE2-1)*2] SSE;
 	#endif
 	ct = shtns->ct;		st = shtns->st;
 V	robert_form = shtns->robert_form;
-V	l_2 = shtns->l_2;
+V	l_2 = (wg == shtns->wg) ? shtns->l_2 : 0;		// adjoint mode has no scaling by l_2. TODO: find a better way, maybe without the comparison?
 
 	// ACCESS PATTERN
 	const int k_inc = shtns->k_stride_a;
@@ -187,7 +187,8 @@ Q		Qlm[0] *= al[0];
 		for (l=1; l<=llim; ++l) {
 			double a = al[l];
 Q			Qlm[l] = q_[l-1] * a;
-V			a *= l_2[l];		Slm[l] = v_[2*l-2]*a;		Tlm[l] = -v_[2*l-1]*a;
+V			if LIKELY(l_2) a *= l_2[l];
+V			Slm[l] = v_[2*l-2]*a;		Tlm[l] = -v_[2*l-1]*a;
 		}
 		#ifdef SHT_VAR_LTR
 			for (l=llim+1; l<= LMAX; ++l) {
@@ -199,7 +200,6 @@ V				((v2d*)Slm)[l] = vdup(0.0);		((v2d*)Tlm)[l] = vdup(0.0);
   #ifndef SHT_AXISYM
 	else
 	{
-		const double mpos_scale = shtns->mpos_scale_analys;		// handles real-norm
 		m = im*MRES;
 		int k0 = shtns->tm[im] / VSIZE2;
 		#if VSIZE2 == 1
@@ -215,6 +215,7 @@ Q		split_north_south_real_imag(BrF + im*m_inc, BrF + (NPHI-im)*m_inc, reori, k0,
 V		split_north_south_real_imag(BtF + im*m_inc, BtF + (NPHI-im)*m_inc, teori, k0, NLAT, k_inc);
 V		split_north_south_real_imag(BpF + im*m_inc, BpF + (NPHI-im)*m_inc, peori, k0, NLAT, k_inc);
 
+		const double mpos_scale = wg[-2];	//formerly stored in shtns->mpos_scale_analys, now depends on adjoint mode;		// handles real-norm
 		for (int l=0; l<=llim-m+1; l++) {
 Q			qq[l] = vdup(0.0);
 V			vw[2*l] = vdup(0.0);		vw[2*l+1] = vdup(0.0);
