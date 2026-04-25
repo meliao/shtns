@@ -430,7 +430,6 @@ int init_cuda_program(shtns_cfg shtns, const char* gpu_arch_target)
 	s += sprintf(s, "#define NF_A %d\n", nf_a);
 	s += sprintf(s, "#define LSPAN_A %d\n", lspan_a);
 	s += sprintf(s, "#define NW_S %d\n", nw_s);
-	s += sprintf(s, "#define MPOS_SCALE %g\n", shtns->mpos_scale_analys * ((shtns->fft_mode & FFT_PHI_CONTIG) ? 2 : 1));
 	s += sprintf(s, "#define NLAT_2 %d\n", shtns->nlat_2);
 	s += sprintf(s, "typedef %s real;\n", (shtns->sizeof_real == 4) ? "float" : "double");	// single or double-precision data
 	if (shtns->sizeof_real_g == 4) {
@@ -839,7 +838,7 @@ static void ilegendre(shtns_cfg shtns, const int S, const void *q, void* ql, con
 	int llim_ = llim;
 	float w_norm_1_f = shtns->wg[-1];	// convert to float
 	void* w_norm_ptr = &(shtns->wg[-1]);
-	if (shtns->sizeof_real == 4) w_norm_ptr = &w_norm_1_f;		// weight_norm_1 as a float
+	if (shtns->sizeof_real == 4) w_norm_ptr = (void*) &w_norm_1_f;		// weight_norm_1 as a float
 	char* wg = ((char*)shtns->d_ct) + nlat_2*shtns->sizeof_real_g;	// weights are stored after cos(theta)
 	double zero = 0.0;
 	if (no_weights) {
@@ -893,7 +892,7 @@ void cuda_spat_to_SH(shtns_cfg shtns, real *d_Vr, std::complex<real>* d_Qlm, int
 	if (S==0) {
 		std::complex<real>* d_Qlm_ish = (std::complex<real>*) shtns->gpu_buf_in;
 		ilegendre(shtns, S, d_Vr, d_Qlm_ish, llim, no_weights);
-		ishioka2sh_gpu(shtns, d_Qlm_ish, d_Qlm, llim, mmax, S);
+		ishioka2sh_gpu(shtns, d_Qlm_ish, d_Qlm, llim, mmax, S, no_weights);
 	} else {
 		if (d_Vr == (real*) d_Qlm) { printf("ERROR: cuda_spat_to_SH must have distinct in and out fields");	exit(1); }
 		ilegendre(shtns, S, d_Vr, d_Qlm, llim, no_weights);
@@ -1396,9 +1395,9 @@ void spat_to_SHsphtor_gpu(shtns_cfg shtns, double *Vt, double *Vp, cplx *Slm, cp
 	cuda_spat_to_SH<1>(shtns, d_vtp + spat_stride, (cplx*) (d_vwlm + nlm_stride), llim+1);
 	CUDA_ERROR_CHECK;
 
-	llim &= ~SHTNS_ADJOINT;
 	scal2sphtor_gpu(shtns, (cplx*) d_vwlm, (cplx*) (d_vwlm+nlm_stride), (cplx*) d_vtp, (cplx*) (d_vtp+nlm_stride), llim);
 
+	llim &= ~SHTNS_ADJOINT;
 	int mmax = shtns->mmax;
 	int mres = shtns->mres;
 	long nlm_pad = (howmany==1) ? shtns->nlm : shtns->spec_dist*howmany;

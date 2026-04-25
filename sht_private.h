@@ -188,7 +188,6 @@ struct shtns_info {		// MUST start with "int nlm;"
 	unsigned fftw_plan_mode;
 	unsigned layout;		// requested data layout
 	double Y00_1, Y10_ct, Y11_st;
-	double mpos_scale_analys;	///< scale factor for analysis, handles real-norm (0.5 or 1.0);
 	shtns_cfg next;		// pointer to next sht_setup or NULL (records a chained list of SHT setup).
 
 	#ifdef SHTNS_GPU

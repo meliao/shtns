@@ -644,7 +644,7 @@ static void grid_weights(shtns_cfg shtns, double latdir)
 
 	shtns->wg[-1] = 1.0/iylm_fft_norm;		// store the inverse of the norm included in gauss weights
 	shtns->wg_adjoint[-1] = 0.0;			// for wg_adjoint, store zero here, to disable mean removal
-	shtns->wg[-2] = shtns->mpos_scale_analys;
+	shtns->wg[-2] = (shtns->norm & SHT_REAL_NORM) ? 1.0 : 0.5;		// renormalization of m>0 for analysis step, formerly stored in shtns->mpos_scale_analys
 	shtns->wg_adjoint[-2] = 1.0;
 	for (it=0; it<NLAT_2; it++)
 		shtns->wg[it] = wg[it]*iylm_fft_norm;		// faster double-precision computations.
@@ -1205,7 +1205,6 @@ shtns_cfg shtns_create(int lmax, int mmax, int mres, enum shtns_norm norm)
 			shtns->Y00_1 = sqrt(4.*M_PI);		shtns->Y10_ct = sqrt(4.*M_PI/3.);
 //			Y11_st = sqrt(2.*M_PI/3.);		// orthonormal :  \f$ \sin\theta\cos\phi/(Y_1^1 + Y_1^{-1}) = -\sqrt{2 \pi /3} \f$
 	}
-	shtns->mpos_scale_analys = 0.5/mpos_renorm;
 	shtns->Y11_st = shtns->Y10_ct * sqrt(0.5/mpos_renorm);
 	if (with_cs_phase)	shtns->Y11_st *= -1.0;		// correct Condon-Shortley phase
 

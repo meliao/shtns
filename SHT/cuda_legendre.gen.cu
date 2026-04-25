@@ -30,7 +30,6 @@
 // NF_A : number of fields treated together for analysis
 // LSPAN_A : number of SH degrees treated together (analysis)
 // NW_S : number of spatial points per thread (synthesis)
-// MPOS_SCALE : scale factor for analysis (used once)
 // NLAT_2 : half the number of latidunal points, should be equal to the nlat_2 kernel parameter
 
 // TODO: some parameters can be made compile-time constants!
@@ -1163,14 +1162,14 @@ void ileg_m_kernel(const real_g* __restrict__ al, const real_g* __restrict__ wg,
 		int ny = 0;
 		#endif
 		{	// compute sin(theta)^(m-S)
-			y0 = MPOS_SCALE;	// y0
+			y0 = 1.0;	// y0
 			l = m - S;		// exponent of sin(theta)
 			if (ROBERT_FORM && S==1) {
 				if (MRES==1 && l==0) {
-					y0 *= rsqrt(y1);	// division by sin(theta) only for m=1 in Robert form
+					y0 = rsqrt(y1);	// division by sin(theta) only for m=1 in Robert form
 				} else --l;		// otherwise we just reduce the exponent of sin(theta)^l
 			}
-			if (l&1) y0 *= sqrt(y1);	// sqrt only computed when needed
+			if (l&1) y0 = sqrt(y1);	// sqrt only computed when needed
 			l>>=1;
 			#if HI_LLIM==1
 			int nsint = 0;
