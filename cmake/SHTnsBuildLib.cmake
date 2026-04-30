@@ -50,7 +50,7 @@ function(shtns_build_library)
 	)
 
 	target_link_libraries(${arg_LIBNAME}
-		INTERFACE
+		PUBLIC
 			${FFTW_LIBRARIES}
 			$<$<BOOL:${arg_OPENMP}>:${FFTW_OMP_LIBRARIES}>
 			$<$<BOOL:${arg_OPENMP}>:OpenMP::OpenMP_C>
