@@ -44,13 +44,13 @@ T	#define BASE _sy1t
 	#endif
 	#endif
 
-3	void GEN3(BASE,NWAY,SUFFIX)(shtns_cfg shtns, cplx *Qlm, cplx *Slm, cplx *Tlm, v2d *BrF, v2d *BtF, v2d *BpF, const long int llim, const unsigned im, int it0, int it1) {
+3	void GEN3(BASE,NWAY,SUFFIX)(shtns_cfg shtns, cplx *Qlm, cplx *Slm, cplx *Tlm, v2d *BrF, v2d *BtF, v2d *BpF, long int llim, const unsigned im, int it0, int it1) {
 QX	void GEN3(BASE,NWAY,SUFFIX)(shtns_cfg shtns, cplx *Qlm, v2d *BrF, long int llim, const unsigned im, int it0, int it1) {
   #ifndef SHT_GRAD
-VX	void GEN3(BASE,NWAY,SUFFIX)(shtns_cfg shtns, cplx *Slm, cplx *Tlm, v2d *BtF, v2d *BpF, const long int llim, const unsigned im, int it0, int it1) {
+VX	void GEN3(BASE,NWAY,SUFFIX)(shtns_cfg shtns, cplx *Slm, cplx *Tlm, v2d *BtF, v2d *BpF, long int llim, const unsigned im, int it0, int it1) {
   #else
-S	void GEN3(BASE,NWAY,SUFFIX)(shtns_cfg shtns, cplx *Slm, v2d *BtF, v2d *BpF, const long int llim, const unsigned im, int it0, int it1) {
-T	void GEN3(BASE,NWAY,SUFFIX)(shtns_cfg shtns, cplx *Tlm, v2d *BtF, v2d *BpF, const long int llim, const unsigned im, int it0, int it1) {
+S	void GEN3(BASE,NWAY,SUFFIX)(shtns_cfg shtns, cplx *Slm, v2d *BtF, v2d *BpF, long int llim, const unsigned im, int it0, int it1) {
+T	void GEN3(BASE,NWAY,SUFFIX)(shtns_cfg shtns, cplx *Tlm, v2d *BtF, v2d *BpF, long int llim, const unsigned im, int it0, int it1) {
   #endif
 
 	#if !defined( _GCC_VEC_ ) && (NWAY & 1)
@@ -71,6 +71,8 @@ V	#define wi(l) vall( ((double*) VWl)[4*(l)+3] )
 	long int nk,k,l,m;
 	double *alm, *al;
 	double *ct, *st;
+V	const double* adjoint_l_2 = (llim & SHTNS_ADJOINT) ? shtns->l_2 : 0;
+	llim &= SHTNS_ADJOINT-1;
 QX	double Ql0[llim+2];
 V	v2d VWl[llim*2+4] SSE;		// SSE aligns for avx reads if appropriate
 Q	v2d QQl[llim+2];
@@ -99,6 +101,7 @@ Q		Ql0[0] = alm[0] * (double) Qlm[0];		// l=0
 		do {		// for m=0, compress the complex Q,S,T to double
 			double a = alm[l];
 Q			Ql0[l] = creal( Qlm[l] ) * a;	//	Ql[l+1] = (double) Qlm[l+1];
+V			if UNLIKELY(adjoint_l_2) 	a *= adjoint_l_2[l];
 S			Sl0[l-1] = creal( Slm[l] ) * a;	//	Sl[l] = (double) Slm[l+1];
 T			Tl0[l-1] = creal( Tlm[l] ) * a;	//	Tl[l] = (double) Tlm[l+1];
 			++l;
@@ -215,10 +218,10 @@ V		BpF += im*(shtns->nlat_padded >>1);
 		#endif
 
   #ifndef SHT_GRAD
-V		SH_vect_to_2scal(shtns->mx_stdt + 2*l, llim, m, &Slm[l], &Tlm[l], (cplx*) VWl);
+V		SH_vect_to_2scal(shtns->mx_stdt + 2*l, llim, m, &Slm[l], &Tlm[l], (cplx*) VWl, adjoint_l_2);
   #else
-S		SHsph_to_2scal(shtns->mx_stdt + 2*l, llim, m, &Slm[l], (cplx*) VWl);
-T		SHtor_to_2scal(shtns->mx_stdt + 2*l, llim, m, &Tlm[l], (cplx*) VWl);
+S		SHsph_to_2scal(shtns->mx_stdt + 2*l, llim, m, &Slm[l], (cplx*) VWl, adjoint_l_2);
+T		SHtor_to_2scal(shtns->mx_stdt + 2*l, llim, m, &Tlm[l], (cplx*) VWl, adjoint_l_2);
   #endif
 
 	#ifndef SHTNS_ISHIOKA

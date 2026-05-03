@@ -178,42 +178,126 @@ void spat_to_SHqst_2ml(shtns_cfg shtns, int im, cplx *Vr, cplx *Vt, cplx *Vp, cp
 /* adjoint synthesis */
 
 void adjoint_SH_to_spat(shtns_cfg shtns, double *Vr, cplx *Qlm) {
-	((pf2l)shtns->ftable[SHT_STD][SHT_TYP_SAN])(shtns, Vr, Qlm, (int)shtns->lmax | SHTNS_NO_WEIGHTS);
+	((pf2l)shtns->ftable[SHT_STD][SHT_TYP_SAN])(shtns, Vr, Qlm, (int)shtns->lmax | SHTNS_ADJOINT);
 }
 
 void adjoint_SHsphtor_to_spat(shtns_cfg shtns, double *Vt, double *Vp, cplx *Slm, cplx *Tlm) {
-	((pf4l)shtns->ftable[SHT_STD][SHT_TYP_VAN])(shtns, Vt, Vp, Slm, Tlm, (int)shtns->lmax | SHTNS_NO_WEIGHTS);
+	((pf4l)shtns->ftable[SHT_STD][SHT_TYP_VAN])(shtns, Vt, Vp, Slm, Tlm, (int)shtns->lmax | SHTNS_ADJOINT);
 }
 
 void adjoint_SHqst_to_spat(shtns_cfg shtns, double *Vr, double *Vt, double *Vp, cplx *Qlm, cplx *Slm, cplx *Tlm) {
-	((pf6l)shtns->ftable[SHT_STD][SHT_TYP_3AN])(shtns, Vr, Vt, Vp, Qlm, Slm, Tlm, (int)shtns->lmax | SHTNS_NO_WEIGHTS);
+	((pf6l)shtns->ftable[SHT_STD][SHT_TYP_3AN])(shtns, Vr, Vt, Vp, Qlm, Slm, Tlm, (int)shtns->lmax | SHTNS_ADJOINT);
 }
 
 
 void adjoint_SH_to_spat_l(shtns_cfg shtns, double *Vr, cplx *Qlm, int ltr) {
-	((pf2l)shtns->ftable[SHT_STD][SHT_TYP_SAN])(shtns, Vr, Qlm, ltr | SHTNS_NO_WEIGHTS);
+	((pf2l)shtns->ftable[SHT_STD][SHT_TYP_SAN])(shtns, Vr, Qlm, ltr | SHTNS_ADJOINT);
 }
 
 void adjoint_SHsphtor_to_spat_l(shtns_cfg shtns, double *Vt, double *Vp, cplx *Slm, cplx *Tlm, int ltr) {
-	((pf4l)shtns->ftable[SHT_STD][SHT_TYP_VAN])(shtns, Vt, Vp, Slm, Tlm, ltr | SHTNS_NO_WEIGHTS);
+	((pf4l)shtns->ftable[SHT_STD][SHT_TYP_VAN])(shtns, Vt, Vp, Slm, Tlm, ltr | SHTNS_ADJOINT);
 }
 
 void adjoint_SHqst_to_spat_l(shtns_cfg shtns, double *Vr, double *Vt, double *Vp, cplx *Qlm, cplx *Slm, cplx *Tlm, int ltr) {
-	((pf6l)shtns->ftable[SHT_STD][SHT_TYP_3AN])(shtns, Vr, Vt, Vp, Qlm, Slm, Tlm, ltr | SHTNS_NO_WEIGHTS);
+	((pf6l)shtns->ftable[SHT_STD][SHT_TYP_3AN])(shtns, Vr, Vt, Vp, Qlm, Slm, Tlm, ltr | SHTNS_ADJOINT);
 }
 
 
 void adjoint_SH_to_spat_ml(shtns_cfg shtns, int im, cplx *Vr, cplx *Qlm, int ltr) {
-	((pf2ml)shtns->ftable[SHT_M][SHT_TYP_SAN])(shtns, im, Vr, Qlm, ltr | SHTNS_NO_WEIGHTS);
+	((pf2ml)shtns->ftable[SHT_M][SHT_TYP_SAN])(shtns, im, Vr, Qlm, ltr | SHTNS_ADJOINT);
 }
 
 void adjoint_SHsphtor_to_spat_ml(shtns_cfg shtns, int im, cplx *Vt, cplx *Vp, cplx *Slm, cplx *Tlm, int ltr) {
-	((pf4ml)shtns->ftable[SHT_M][SHT_TYP_VAN])(shtns, im, Vt, Vp, Slm, Tlm, ltr | SHTNS_NO_WEIGHTS);
+	((pf4ml)shtns->ftable[SHT_M][SHT_TYP_VAN])(shtns, im, Vt, Vp, Slm, Tlm, ltr | SHTNS_ADJOINT);
 }
 
 void adjoint_SHqst_to_spat_ml(shtns_cfg shtns, int im, cplx *Vr, cplx *Vt, cplx *Vp, cplx *Qlm, cplx *Slm, cplx *Tlm, int ltr) {
-	((pf6ml)shtns->ftable[SHT_M][SHT_TYP_3AN])(shtns, im, Vr, Vt, Vp, Qlm, Slm, Tlm, ltr | SHTNS_NO_WEIGHTS);
+	((pf6ml)shtns->ftable[SHT_M][SHT_TYP_3AN])(shtns, im, Vr, Vt, Vp, Qlm, Slm, Tlm, ltr | SHTNS_ADJOINT);
 }
+
+/* adjoint analysis */
+
+void adjoint_spat_to_SH(shtns_cfg shtns, cplx *Qlm, double *Vr) {
+	((pf2l)shtns->ftable[SHT_STD][SHT_TYP_SSY])(shtns, Qlm, Vr, (int)shtns->lmax | SHTNS_ADJOINT);
+
+	// apply weights for adjoint
+	const double* w = shtns->wg;
+	double f = (shtns->mmax > 0) ? w[-2] : 1.0;
+	if LIKELY(shtns->k_stride_a == 1) {
+		long nlat_padded = shtns->nlat_padded;
+		for (long ip=0; ip<shtns->nphi; ip++) for (long it=0; it<shtns->nlat_2; it++) {
+			double wi = w[it] * f;
+			Vr[ip*nlat_padded + it] *= wi;
+			Vr[ip*nlat_padded + shtns->nlat-1-it] *= wi;
+		}
+	} else {
+		long k_stride = shtns->k_stride_a;
+		for (long it=0; it<shtns->nlat_2; it++) for (long ip=0; ip<shtns->nphi; ip++) {
+			double wi = w[it] * f;
+			Vr[ip + it*k_stride] *= wi;
+			Vr[ip + (shtns->nlat-1-it)*k_stride] *= wi;
+		}
+	}
+}
+
+void adjoint_spat_to_SHsphtor(shtns_cfg shtns, cplx *Slm, cplx *Tlm, double *Vt, double *Vp) {
+	((pf4l)shtns->ftable[SHT_STD][SHT_TYP_VSY])(shtns, Slm, Tlm, Vt, Vp, (int)shtns->lmax | SHTNS_ADJOINT);
+
+	// apply weights for adjoint
+	const double* w = shtns->wg;
+	double f = (shtns->mmax > 0) ? w[-2] : 1.0;
+	if LIKELY(shtns->k_stride_a == 1) {
+		long nlat_padded = shtns->nlat_padded;
+		for (long ip=0; ip<shtns->nphi; ip++) for (long it=0; it<shtns->nlat_2; it++) {
+			double wi = w[it] * f;
+			Vt[ip*nlat_padded + it] *= wi;
+			Vt[ip*nlat_padded + shtns->nlat-1-it] *= wi;
+			Vp[ip*nlat_padded + it] *= wi;
+			Vp[ip*nlat_padded + shtns->nlat-1-it] *= wi;
+		}
+	} else {
+		long k_stride = shtns->k_stride_a;
+		for (long it=0; it<shtns->nlat_2; it++) for (long ip=0; ip<shtns->nphi; ip++) {
+			double wi = w[it] * f;
+			Vt[ip + it*k_stride] *= wi;
+			Vt[ip + (shtns->nlat-1-it)*k_stride] *= wi;
+			Vp[ip + it*k_stride] *= wi;
+			Vp[ip + (shtns->nlat-1-it)*k_stride] *= wi;
+		}
+	}
+}
+
+void adjoint_spat_to_SHqst(shtns_cfg shtns, cplx *Qlm, cplx *Slm, cplx *Tlm, double *Vr, double *Vt, double *Vp) {
+	((pf6l)shtns->ftable[SHT_STD][SHT_TYP_3SY])(shtns, Qlm, Slm, Tlm, Vr, Vt, Vp, (int)shtns->lmax | SHTNS_ADJOINT);
+
+	// apply weights for adjoint
+	const double* w = shtns->wg;
+	double f = (shtns->mmax > 0) ? w[-2] : 1.0;
+	if LIKELY(shtns->k_stride_a == 1) {
+		long nlat_padded = shtns->nlat_padded;
+		for (long ip=0; ip<shtns->nphi; ip++) for (long it=0; it<shtns->nlat_2; it++) {
+			double wi = w[it] * f;
+			Vr[ip*nlat_padded + it] *= wi;
+			Vr[ip*nlat_padded + shtns->nlat-1-it] *= wi;
+			Vt[ip*nlat_padded + it] *= wi;
+			Vt[ip*nlat_padded + shtns->nlat-1-it] *= wi;
+			Vp[ip*nlat_padded + it] *= wi;
+			Vp[ip*nlat_padded + shtns->nlat-1-it] *= wi;
+		}
+	} else {
+		long k_stride = shtns->k_stride_a;
+		for (long it=0; it<shtns->nlat_2; it++) for (long ip=0; ip<shtns->nphi; ip++) {
+			double wi = w[it] * f;
+			Vr[ip + it*k_stride] *= wi;
+			Vr[ip + (shtns->nlat-1-it)*k_stride] *= wi;
+			Vt[ip + it*k_stride] *= wi;
+			Vt[ip + (shtns->nlat-1-it)*k_stride] *= wi;
+			Vp[ip + it*k_stride] *= wi;
+			Vp[ip + (shtns->nlat-1-it)*k_stride] *= wi;
+		}
+	}
+}
+
 
 
 #if defined(SHT_F77_API)

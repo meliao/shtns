@@ -61,6 +61,9 @@ T	static void GEN3(SHtor_to_spat_omp_a,NWAY,SUFFIX)(shtns_cfg shtns, cplx *Tlm, 
 Q	v2d* BrF = (v2d*) Vr;
 V	v2d* BtF = (v2d*) Vt;	v2d* BpF = (v2d*) Vp;
 
+	const int adjoint = (llim & SHTNS_ADJOINT);
+	llim &= SHTNS_ADJOINT-1;	// clear flag to recover true llim
+
   #ifndef SHT_AXISYM
 	imlim = MTR;
 	#ifdef SHT_VAR_LTR
@@ -86,14 +89,22 @@ VX		BpF = BtF + nv/2;
 	    for (int b=0; b<shtns->howmany; b++) {		// inner-loop is batch. For best cache-reuse
 		long spec_ofs = b * shtns->spec_dist;
 		long spat_ofs = b * shtns->nlat_2;
-3		GEN3(_sy3_hi,NWAY,SUFFIX)(shtns, Qlm+spec_ofs, Slm+spec_ofs, Tlm+spec_ofs, BrF+spat_ofs, BtF+spat_ofs, BpF+spat_ofs, llim, im, it0, it1);
-QX		GEN3(_sy1_hi,NWAY,SUFFIX)(shtns, Qlm+spec_ofs, BrF+spat_ofs, llim, im, it0, it1);
+3		GEN3(_sy3_hi,NWAY,SUFFIX)(shtns, Qlm+spec_ofs, Slm+spec_ofs, Tlm+spec_ofs, BrF+spat_ofs, BtF+spat_ofs, BpF+spat_ofs, llim | adjoint, im, it0, it1);
+QX		GEN3(_sy1_hi,NWAY,SUFFIX)(shtns, Qlm+spec_ofs, BrF+spat_ofs, llim | adjoint, im, it0, it1);
 	#ifndef SHT_GRAD
-VX		GEN3(_sy2_hi,NWAY,SUFFIX)(shtns, Slm+spec_ofs, Tlm+spec_ofs, BtF+spat_ofs, BpF+spat_ofs, llim, im, it0, it1);
+VX		GEN3(_sy2_hi,NWAY,SUFFIX)(shtns, Slm+spec_ofs, Tlm+spec_ofs, BtF+spat_ofs, BpF+spat_ofs, llim | adjoint, im, it0, it1);
 	#else
-S		GEN3(_sy1s_hi,NWAY,SUFFIX)(shtns, Slm+spec_ofs, BtF+spat_ofs, BpF+spat_ofs, llim, im, it0, it1);
-T		GEN3(_sy1t_hi,NWAY,SUFFIX)(shtns, Tlm+spec_ofs, BtF+spat_ofs, BpF+spat_ofs, llim, im, it0, it1);
+S		GEN3(_sy1s_hi,NWAY,SUFFIX)(shtns, Slm+spec_ofs, BtF+spat_ofs, BpF+spat_ofs, llim | adjoint, im, it0, it1);
+T		GEN3(_sy1t_hi,NWAY,SUFFIX)(shtns, Tlm+spec_ofs, BtF+spat_ofs, BpF+spat_ofs, llim | adjoint, im, it0, it1);
 	#endif
+		if UNLIKELY(adjoint & (im-1)) {		// adjoint && im==0
+		    if (shtns->wg[-2] != 1.0) {
+			double scale = 1.0/shtns->wg[-2];
+Q			for (int it=0; it<shtns->nlat_2; it++) BrF[spat_ofs + it] *= scale;
+V			for (int it=0; it<shtns->nlat_2; it++) BtF[spat_ofs + it] *= scale;
+V			for (int it=0; it<shtns->nlat_2; it++) BpF[spat_ofs + it] *= scale;
+		    }
+		}
 	    }
 	}
 
@@ -144,6 +155,9 @@ T	static void GEN3(SHtor_to_spat_omp_b,NWAY,SUFFIX)(shtns_cfg shtns, cplx *Tlm, 
 	unsigned imlim = 0;
 Q	v2d* BrF = (v2d*) Vr;
 V	v2d* BtF = (v2d*) Vt;	v2d* BpF = (v2d*) Vp;
+
+	const int adjoint = (llim & SHTNS_ADJOINT);
+	llim &= SHTNS_ADJOINT-1;	// clear flag to recover true llim
 
   #ifndef SHT_AXISYM
 	imlim = MTR;

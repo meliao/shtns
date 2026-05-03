@@ -46,8 +46,8 @@ Q	BrF = Vr;
 V	BtF = Vt;	BpF = Vp;
 
 	const double* wg = shtns->wg;
-	if UNLIKELY(llim & SHTNS_NO_WEIGHTS) wg = shtns->wg_one;		// for adjoint synthesis
-	llim &= ~SHTNS_NO_WEIGHTS;	// clear flag to recover true llim
+	if UNLIKELY(llim & SHTNS_ADJOINT) wg = shtns->wg_adjoint;		// for adjoint synthesis
+	llim &= ~SHTNS_ADJOINT;	// clear flag to recover true llim
 
   #ifndef SHT_AXISYM
 	imlim = MTR;
@@ -55,7 +55,7 @@ V	BtF = Vt;	BpF = Vp;
 		if (imlim*MRES > (unsigned) llim) imlim = ((unsigned) llim)/MRES;		// 32bit mul and div should be faster
 	#endif
 	if (shtns->fft_mode != FFT_NONE) {
-		if (shtns->fft_mode & FFT_OOP) {		// alloc memory for out-of-place FFT
+		if (shtns->fft_mode & (FFT_OOP|FFT_OOP_ANALYS)) {		// alloc memory for out-of-place FFT
 			unsigned long nv = shtns->nspat;
 QX			BrF = (double*) VMALLOC( nv * sizeof(double) );
 VX			BtF = (double*) VMALLOC( 2*nv * sizeof(double) );
@@ -110,7 +110,7 @@ V			memset(Slm+l+spec_ofs, 0, (shtns->nlm - l)*sizeof(cplx));
 V			memset(Tlm+l+spec_ofs, 0, (shtns->nlm - l)*sizeof(cplx));
 		}
 	}
-  	if (shtns->fft_mode & FFT_OOP) {		// free memory
+  	if (shtns->fft_mode & (FFT_OOP|FFT_OOP_ANALYS)) {		// free memory
 Q	    VFREE(BrF);
 VX	    VFREE(BtF);	// this frees also BpF.
 	}
@@ -133,8 +133,8 @@ V	double *l_2;
 V	const int robert_form = shtns->robert_form;
 
 	double* wg = shtns->wg;
-	if UNLIKELY(llim & SHTNS_NO_WEIGHTS) wg = shtns->wg_one;		// for adjoint synthesis
-	llim &= ~SHTNS_NO_WEIGHTS;	// clear flag to recover true llim
+	if UNLIKELY(llim & SHTNS_ADJOINT) wg = shtns->wg_adjoint;		// for adjoint synthesis
+	llim &= ~SHTNS_ADJOINT;	// clear flag to recover true llim
 
 	nk = NLAT_2;	// copy NLAT_2 to a local variable for faster access (inner loop limit)
 	#if _GCC_VEC_
@@ -158,7 +158,7 @@ V	double pei[NLAT_2 + NWAY*VSIZE2] SSE;
 V	double poi[NLAT_2 + NWAY*VSIZE2] SSE;
 
 	ct = shtns->ct;		st = shtns->st;
-V	l_2 = shtns->l_2;
+V	l_2 = (wg == shtns->wg) ? shtns->l_2 : 0;
 
 	for (k=nk*VSIZE2; k<(nk-1+NWAY)*VSIZE2; ++k) {
 Q		rer[k] = 0.0;		ror[k] = 0.0;
@@ -267,13 +267,14 @@ Q		Qlm[0] *= al[0];
 			#if _GCC_VEC_
 				s2d a = vdup(al[l]);
 Q				((v2d*)Qlm)[l] = v2d_reduce(qq[l-1], vall(0)) * a;
-V				a *= vdup(l_2[l]);
+V				if LIKELY(l_2)  a *= vdup(l_2[l]);
 V				((v2d*)Slm)[l] = v2d_reduce(vw[2*l-2], vall(0)) * a;
 V				((v2d*)Tlm)[l] = v2d_reduce(vw[2*l-1], vall(0)) * a;
 			#else
 				double a = al[l];
 Q				Qlm[l] = qq[l-1] * a;
-V				a *= l_2[l];	Slm[l] = vw[2*l-2]*a;		Tlm[l] = vw[2*l-1]*a;
+V				if LIKELY(l_2)  a *= l_2[l];
+V				Slm[l] = vw[2*l-2]*a;		Tlm[l] = vw[2*l-1]*a;
 			#endif
 		}
 		#ifdef SHT_VAR_LTR
@@ -351,7 +352,7 @@ Q			q[0] = vall(0.0);		q[1] = vall(0.0);		q+=2;
 V			v[0] = vall(0.0);		v[1] = vall(0.0);
 V			v[2] = vall(0.0);		v[3] = vall(0.0);		v+=4;
 		}
-		alm0_rescale = alm[0] * shtns->mpos_scale_analys * (shtns->nphi*2);		// handles real-norm
+		alm0_rescale = alm[0] * wg[-2] * (shtns->nphi*2);		// handles real-norm, wg[-2] contains normalization factore for m>0 formerly stored in shtns->mpos_scale_analys
 		do {
 		#if _GCC_VEC_
 Q			rnd* q = qq;

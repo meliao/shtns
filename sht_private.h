@@ -101,7 +101,7 @@ enum sht_types { SHT_TYP_SSY, SHT_TYP_SAN, SHT_TYP_VSY, SHT_TYP_VAN,
 enum sht_grids { GRID_NONE, GRID_GAUSS, GRID_REGULAR, GRID_POLES };
 
 // fft modes
-enum sht_fft { FFT_NONE=0, FFT_THETA_CONTIG=1, FFT_PHI_CONTIG_SPLIT=2, FFT_OOP=8, FFT_REAL=16, FFT_FP32=32, FFT_PHI_CONTIG_ODD=64, FFT_THETA_CONTIG_ODD=128 };
+enum sht_fft { FFT_NONE=0, FFT_THETA_CONTIG=1, FFT_PHI_CONTIG_SPLIT=2, FFT_OOP_ANALYS=4, FFT_OOP=8, FFT_REAL=16, FFT_FP32=32, FFT_PHI_CONTIG_ODD=64, FFT_THETA_CONTIG_ODD=128 };
 
 // pointer to various function types
 typedef void (*pf2l)(shtns_cfg, void*, void*, long int);
@@ -139,7 +139,6 @@ struct shtns_info {		// MUST start with "int nlm;"
 	int m_stride_a;				///< stride in phi direction in intermediate spectral space (m)
 	double *wg;					///< Weights for quadrature rule (Gauss-Legendre or Fejer/Clenshaw-Curtis)
 	double *st_1;				///< 1/sin(theta);
-	double mpos_scale_analys;	///< scale factor for analysis, handles real-norm (0.5 or 1.0);
 
 	fftw_plan ifftc, fftc;
 	fftw_plan ifft_cplx, fft_cplx;		// for complex-valued spatial fields.
@@ -169,7 +168,7 @@ struct shtns_info {		// MUST start with "int nlm;"
 
 	void* ftable[SHT_NVAR][SHT_NTYP];		// pointers to transform functions.
 
-	double* wg_one;		// array of all ones that can replace wg for adjoint synthesis.
+	double* wg_adjoint;		// array of all ones that can replace wg for adjoint synthesis.
 
 	/* rotation stuff (pseudo-spectral) */
 	unsigned npts_rot;		// number of physical points needed
@@ -189,6 +188,7 @@ struct shtns_info {		// MUST start with "int nlm;"
 	unsigned fftw_plan_mode;
 	unsigned layout;		// requested data layout
 	double Y00_1, Y10_ct, Y11_st;
+	double mpos_scale_analys;	///< scale factor for analysis, handles real-norm (0.5 or 1.0);
 	shtns_cfg next;		// pointer to next sht_setup or NULL (records a chained list of SHT setup).
 
 	#ifdef SHTNS_GPU
@@ -271,7 +271,7 @@ struct shtns_rot_ {		// describe a rotation matrix
 //#define SHT_SCALE_FACTOR 2.0370359763344860863e+90
 
 // a large constant that can be combined to lmax (which is restricted to 65535) to mark we don't use weights -- for adjoint synthesis
-#define SHTNS_NO_WEIGHTS 0x40000000
+#define SHTNS_ADJOINT 0x40000000
 
 #ifdef __NVCC__
 		// disable vector extensions when compiling cuda code.
@@ -320,8 +320,12 @@ static void SH_2scal_to_vect(const double *mx, const double* l_2, int llim, int 
 		wl = vw[2*l+3];
 		sl += mxu*vl;
 		tl -= mxu*wl;
-		Sl[l] = sl * vdup(l_2[l+m]);
-		Tl[l] = tl * vdup(l_2[l+m]);
+		if LIKELY(l_2) {
+			sl *= vdup(l_2[l+m]);
+			tl *= vdup(l_2[l+m]);
+		}
+		Sl[l] = sl;
+		Tl[l] = tl;
 	}
   #else
 	v4d em = _mm256_setr_pd(-m,m, m,-m);
@@ -334,7 +338,7 @@ static void SH_2scal_to_vect(const double *mx, const double* l_2, int llim, int 
 		v4d vwu = vread4(vw+2*l+2, 0);		// kept for next iteration
 		v4d mxu = vall4( mx[2*l+1] );
 		stl -= mxu * vwu;
-		stl *= vall4(l_2[l+m]);
+		if LIKELY(l_2) stl *= vall4(l_2[l+m]);
 		Sl[l] = - (v2d) _mm256_castpd256_pd128(stl);
 		Tl[l] = _mm256_extractf128_pd(stl, 1);
 		stl = em * vreverse4(vwu) - vwl * vall4( mx[2*l] );
@@ -538,18 +542,26 @@ static void SH2_to_ishioka(const double* xlm, v2d* VWl, const int llim_m)
 /// Wlm = -st*d(Tlm)/dtheta + I*m*Slm
 /// store interleaved: VWlm(2*l) = Vlm(l);	VWlm(2*l+1) = Wlm(l);
 /// m = signed m (for complex SH transform).
-static void SH_vect_to_2scal(const double *mx, int llim, int m, cplx* Sl, cplx* Tl, cplx* VWl)
+static void SH_vect_to_2scal(const double *mx, int llim, int m, cplx* Sl, cplx* Tl, cplx* VWl, const double* l_2)
 {
 	long l;
   #if !defined(_GCC_VEC_) || !defined( __AVX__ )
 	double em = m;
 	v2d sl = ((v2d*)Sl)[m];
 	v2d tl = ((v2d*)Tl)[m];
+	if UNLIKELY(l_2) {
+		tl *= vdup(l_2[m]);
+		sl *= vdup(l_2[m]);
+	}
 	v2d vs = IxKxZ(em, tl);
 	v2d wt = IxKxZ(em, sl);
 	for (l=m; l<llim; l++) {
 		v2d sl1 = ((v2d*)Sl)[l+1];		// kept for next iteration
 		v2d tl1 = ((v2d*)Tl)[l+1];
+		if UNLIKELY(l_2) {
+			sl1 *= vdup(l_2[l+1]);
+			tl1 *= vdup(l_2[l+1]);
+		}
 		s2d mxu = vdup(mx[2*l]);
 		s2d mxl = vdup(mx[2*l+1]);	// mxl for next iteration
 		((v2d*)VWl)[2*l]   = vs + mxu*sl1;
@@ -570,10 +582,12 @@ static void SH_vect_to_2scal(const double *mx, int llim, int m, cplx* Sl, cplx* 
   #else
 	v4d em = (v4d) _mm256_setr_pd(-m,m, m,-m);
 	v4d stl = v2d_x2_to_v4d( -((v2d*)Sl)[m], ((v2d*)Tl)[m]);
+	if UNLIKELY(l_2)	stl *= vall4(l_2[m]);
 	v4d vswt = em*vreverse4(stl);
 	for (l=m; l<llim; l++) {
 		// 2 full permutes, 1 mul, 2 fma, 2 128bit-loads, 2 64-bit broadcasts, 1 256-bit store
 		v4d stlu = v2d_x2_to_v4d( -((v2d*)Sl)[l+1], ((v2d*)Tl)[l+1]);
+		if UNLIKELY(l_2)	stlu *= vall4(l_2[l+1]);
 		v4d mxu = vall4(mx[2*l]);
 		v4d mxl = vall4(mx[2*l+1]);		// mxl for next iteration
 		vswt -= mxu*stlu;
@@ -590,100 +604,17 @@ static void SH_vect_to_2scal(const double *mx, int llim, int m, cplx* Sl, cplx* 
   #endif
 }
 
-static void SH_vect_to_2scal_alt(const double *mx, int llim, int m, const cplx* Sl, const cplx* Tl, cplx* VWl)
-{
-	double em = m;
-	#ifdef _GCC_VEC_
-	const rnd emx = vneg_even_precalc( vall(em) );
-	//const rnd emx = _mm256_setr_pd(-em, em, -em, em);
-	#endif
-	long l=m;
-	{
-		s2d mxu = vdup(mx[2*l]);
-		#ifndef _GCC_VEC_
-		v2d s = I*em*Tl[l];
-		v2d t = I*em*Sl[l];
-		#else
-		v2d s = v2d_lo(emx) * vxchg(((v2d*)Tl)[l]);
-		v2d t = v2d_lo(emx) * vxchg(((v2d*)Sl)[l]);
-		#endif
-		if (l<llim) {
-			s += mxu*((v2d*)Sl)[l+1];
-			t -= mxu*((v2d*)Tl)[l+1];
-		}
-		((v2d*)VWl)[2*l]   = s;
-		((v2d*)VWl)[2*l+1] = t;
-		l++;
-	}
-	#if VSIZE2 >= 4
-	#if VSIZE2 == 4
-		// AVX: there can be some data forwarding.
-		rnd Sll = vread(Sl+l-1, 0);
-		rnd Tll = vread(Tl+l-1, 0);
-	#endif
-	for (; l<=llim-VSIZE2/2; l+=VSIZE2/2) {		// general case 		V[2*l] = mx[2*l-1]*S[l-1]
-		// AVX512: 4 in-lane permutes, 2 full permutes, 2 mul, 4 fma, 7 512-bit loads, 2 512-bit stores
-		// AVX: 4 in-lane permutes, 2 full permutes, 2 mul, 4 fma, 5 256-bit loads, 2 256-bit stores
-		rnd s = emx * vxchg_even_odd( vread(Tl+l,0) );
-		rnd t = emx * vxchg_even_odd( vread(Sl+l,0) );
-		rnd mxx = vread(mx+2*l-1, 0);
-		rnd mxl = vdup_even(mxx);
-		rnd mxu = vdup_odd(mxx);
-		#if VSIZE2 == 4
-			rnd Slu = vread(Sl+l+1, 0);
-			rnd Tlu = vread(Tl+l+1, 0);
-			s += mxl * Sll + mxu * Slu;
-			t -= mxl * Tll + mxu * Tlu;
-			Sll = Slu;		Tll = Tlu;		// kept for next iteration
-		#else
-			s += mxl * vread(Sl+l-1, 0) + mxu * vread(Sl+l+1, 0);
-			t -= mxl * vread(Tl+l-1, 0) + mxu * vread(Tl+l+1, 0);
-		#endif
-		#ifdef __AVX512F__
-			vstor(VWl+2*l, 0, _mm512_permutex2var_pd(s,_mm512_setr_epi64(0,1,8,9,2,3,10,11), t) );
-			vstor(VWl+2*l, 1, _mm512_permutex2var_pd(s,_mm512_setr_epi64(4,5,12,13,6,7,14,15), t) );
-		#elif defined( __AVX__ )
-			vstor(VWl+2*l, 0, _mm256_permute2f128_pd(s,t, 0x20) );
-			vstor(VWl+2*l, 1, _mm256_permute2f128_pd(s,t, 0x31) );
-		#else
-			#error "unsupported simd vectors"
-		#endif
-	}
-	#endif
-	for (; l<=llim; l++) {		// general case, reminder 		V[2*l] = mx[2*l-1]*S[l-1]
-		s2d mxl = vdup(mx[2*l-1]);
-		s2d mxu = vdup(mx[2*l]);
-		#ifndef _GCC_VEC_
-		v2d imt = I*em*Tl[l];
-		v2d ims = I*em*Sl[l];
-		#else
-		v2d imt = v2d_lo(emx) * vxchg(((v2d*)Tl)[l]);
-		v2d ims = v2d_lo(emx) * vxchg(((v2d*)Sl)[l]);
-		#endif
-		if (l<llim) {
-			imt += mxu*((v2d*)Sl)[l+1];
-			ims -= mxu*((v2d*)Tl)[l+1];
-		}
-		((v2d*)VWl)[2*l]   = imt + mxl*((v2d*)Sl)[l-1];
-		((v2d*)VWl)[2*l+1] = ims - mxl*((v2d*)Tl)[l-1];
-	}
-	{	//l=llim+1
-		s2d mxl = vdup(mx[2*l-1]);
-		((v2d*)VWl)[2*l] = mxl * ((v2d*)Sl)[l-1];
-		((v2d*)VWl)[2*l+1] = -mxl * ((v2d*)Tl)[l-1];		
-	}
-}
-
-
-static void SHsph_to_2scal(const double *mx, int llim, int m, cplx* Sl, cplx* VWl)
+static void SHsph_to_2scal(const double *mx, int llim, int m, cplx* Sl, cplx* VWl, const double* l_2)
 {
 	double em = m;
 	v2d sl = ((v2d*)Sl)[m];
+	if UNLIKELY(l_2)	sl *= vdup(l_2[m]);
 	v2d vs = vdup(0.0);
 	v2d wt = IxKxZ(em, sl);
 	long l;
 	for (l=m; l<llim; l++) {
 		v2d sl1 = ((v2d*)Sl)[l+1];
+		if UNLIKELY(l_2)	sl1 *= vdup(l_2[l+1]);
 		s2d mxu = vdup(mx[2*l]);
 		s2d mxl = vdup(mx[2*l+1]);		// mxl for next iteration
 		((v2d*)VWl)[2*l]   = vs + mxu*sl1;
@@ -702,15 +633,17 @@ static void SHsph_to_2scal(const double *mx, int llim, int m, cplx* Sl, cplx* VW
 	}
 }
 
-static void SHtor_to_2scal(const double *mx, int llim, int m, cplx* Tl, cplx* VWl)
+static void SHtor_to_2scal(const double *mx, int llim, int m, cplx* Tl, cplx* VWl, const double* l_2)
 {
 	double em = -m;
 	v2d tl = - ((v2d*)Tl)[m];
+	if UNLIKELY(l_2)	tl *= vdup(l_2[m]);
 	v2d vs = IxKxZ(em, tl);
 	v2d wt = vdup(0.0);
 	long l;
 	for (l=m; l<llim; l++) {
 		v2d tl1 = - ((v2d*)Tl)[l+1];
+		if UNLIKELY(l_2)	tl1 *= vdup(l_2[l+1]);
 		s2d mxu = vdup(mx[2*l]);
 		s2d mxl = vdup(mx[2*l+1]);		// mxl for next iteration
 		((v2d*)VWl)[2*l]   = vs;

@@ -74,6 +74,7 @@ enum shtns_type {
 #define SHT_ALLOW_PADDING (256*256)	///< allows SHTns to add extra space between lines of the spatial array to avoid cache bank conflicts.
 #define SHT_ROBERT_FORM (256*512)	///< use Robert form for vector transforms. See also \ref shtns_robert_form
 #define SHT_FP32 (256*1024)			///< float support. Currently only on GPU, where it then replaces double (fp64) support which is likely to segfault.
+#define SHT_DESTROY_SPAT (256*4096)		///< spatial input data can be destroyed by spat_to_SH* transforms.
 
 
 #ifndef SHTNS_PRIVATE
@@ -391,6 +392,14 @@ void adjoint_SHqst_to_spat(shtns_cfg, double *Vr, double *Vt, double *Vp, cplx *
 void adjoint_SHqst_to_spat_l(shtns_cfg, double *Vr, double *Vt, double *Vp, cplx *Qlm, cplx *Slm, cplx *Tlm, int ltr);
 void adjoint_SHqst_to_spat_ml(shtns_cfg, int im, cplx *Vr, cplx *Vt, cplx *Vp, cplx *Qlm, cplx *Slm, cplx *Tlm, int ltr);
 ///@}
+
+/// \name Adjoint analysis
+///@{
+void adjoint_spat_to_SH(shtns_cfg, cplx *Qlm, double *Vr);
+void adjoint_spat_to_SHsphtor(shtns_cfg, cplx *Slm, cplx *Tlm, double *Vt, double *Vp);
+void adjoint_spat_to_SHqst(shtns_cfg, cplx *Qlm, cplx *Slm, cplx *Tlm, double *Vr, double *Vt, double *Vp);
+///@}
+
 
 #endif
 

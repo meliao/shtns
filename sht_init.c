@@ -449,7 +449,7 @@ static void planFFT(shtns_cfg shtns, int layout)
 		shtns->fft_mode = FFT_OOP | ((phi_inc==1) ? FFT_PHI_CONTIG_ODD : FFT_THETA_CONTIG_ODD);
 		const int ncplx = NPHI/2 +1;
 		shtns->fftc = fftw_plan_many_dft_r2c(1, &nfft, NLAT, Sh, &nfft, phi_inc, theta_inc, ShF, &ncplx, NLAT, 1, FFTW_ESTIMATE);
-		shtns->ifftc = fftw_plan_many_dft_c2r(1, &nfft, NLAT, ShF, &ncplx, NLAT, 1, Sh, &nfft, phi_inc, theta_inc, FFTW_ESTIMATE);
+		shtns->ifftc = fftw_plan_many_dft_c2r(1, &nfft, NLAT, ShF, &ncplx, NLAT, 1, Sh, &nfft, phi_inc, theta_inc, FFTW_ESTIMATE | FFTW_DESTROY_INPUT);
 	}
 // complex fft for fly transform is a bit different.
 	if (layout & SHT_PHI_CONTIGUOUS) {		// out-of-place split dft
@@ -459,7 +459,7 @@ static void planFFT(shtns_cfg shtns, int layout)
 			shtns->fft_mode = FFT_PHI_CONTIG_SPLIT | FFT_OOP;
 			dim.n = NPHI;    	dim.os = 1;			dim.is = NLAT;		// complex transpose
 			many.n = NLAT/2;	many.os = 2*NPHI;	many.is = 2;
-			shtns->ifftc = fftw_plan_guru_split_dft(1, &dim, 1, &many, ((double*)ShF)+1, (double*)ShF, Sh+NPHI, Sh, shtns->fftw_plan_mode);
+			shtns->ifftc = fftw_plan_guru_split_dft(1, &dim, 1, &many, ((double*)ShF)+1, (double*)ShF, Sh+NPHI, Sh, shtns->fftw_plan_mode | FFTW_DESTROY_INPUT);
 
 			// legacy analysis fft
 			//dim.n = NPHI;    	dim.is = 1;			dim.os = NLAT;
@@ -500,6 +500,10 @@ static void planFFT(shtns_cfg shtns, int layout)
 			shtns->fft_mode = FFT_THETA_CONTIG;
 			shtns->ifftc = fftw_plan_many_dft(1, &nfft, shtns->nlat_2 * howmany, ShF, &nfft, phi_inc/2, 1, ShF, &nfft, phi_inc/2, 1, FFTW_BACKWARD, shtns->fftw_plan_mode);
 			shtns->fftc = shtns->ifftc;		// same thing, with m>0 and m<0 exchanged.
+			if ((layout & SHT_DESTROY_SPAT) == 0) {		// to preserve spatial input data, use an out-of-place transform:
+				shtns->fftc = fftw_plan_many_dft(1, &nfft, shtns->nlat_2 * howmany, ShF, &nfft, phi_inc/2, 1, (cplx*)Sh, &nfft, phi_inc/2, 1, FFTW_BACKWARD, shtns->fftw_plan_mode);
+				shtns->fft_mode |= FFT_OOP_ANALYS;	// out-of-place only for analysis
+			}
 
 		/*	if (shtns->nthreads > 1) {
 				fftw_plan_with_nthreads(1);
@@ -582,10 +586,11 @@ static void grid_weights(shtns_cfg shtns, double latdir)
 	const int overflow = 8*VSIZE2-1;
 	const unsigned char grid = shtns->grid;
 
-	shtns->wg = VMALLOC(2*(NLAT_2 +overflow+VSIZE2) * sizeof(double));	// quadrature weights, double precision.
-	shtns->wg += VSIZE2;	// reserve space before the weight array to store a normalization constant; to keep alignement, we reserve VSIZE2 doubles
-	shtns->wg_one = shtns->wg + NLAT_2 +overflow+1;
-	for (int i=0; i<NLAT_2; i++)	shtns->wg_one[i] = 1.0;		// weights for adjoint synthesis -- all ones
+	const int offset_align = (VSIZE2 > 1) ? VSIZE2 : 2;		// at least 2 additional values, stored at offset -1 and -2
+	shtns->wg = VMALLOC(2*(NLAT_2 +overflow+offset_align) * sizeof(double));	// quadrature weights, double precision.
+	shtns->wg += offset_align;	// reserve space before the weight array to store a normalization constant; to keep alignement, we reserve VSIZE2 doubles
+	shtns->wg_adjoint = shtns->wg + NLAT_2 +overflow+1 + offset_align;
+	for (int i=0; i<NLAT_2; i++)	shtns->wg_adjoint[i] = 1.0;		// weights for adjoint synthesis -- all ones
 
 	iylm_fft_norm = 1.0;	// FFT/SHT normalization for zlm (4pi normalized)
 	if ((SHT_NORM != sht_fourpi)&&(SHT_NORM != sht_schmidt))  iylm_fft_norm = 4*M_PIl;	// FFT/SHT normalization for zlm (orthonormalized)
@@ -638,11 +643,13 @@ static void grid_weights(shtns_cfg shtns, double latdir)
 	}
 
 	shtns->wg[-1] = 1.0/iylm_fft_norm;		// store the inverse of the norm included in gauss weights
-	shtns->wg_one[-1] = 0.0;				// for wg1, store zero here, to disable mean removal
+	shtns->wg_adjoint[-1] = 0.0;			// for wg_adjoint, store zero here, to disable mean removal
+	shtns->wg[-2] = shtns->mpos_scale_analys;
+	shtns->wg_adjoint[-2] = 1.0;
 	for (it=0; it<NLAT_2; it++)
 		shtns->wg[it] = wg[it]*iylm_fft_norm;		// faster double-precision computations.
 	for (it=NLAT_2; it < NLAT_2 +overflow; it++) shtns->wg[it] = 0.0;		// padding for multi-way algorithm.
-	for (it=NLAT_2; it < NLAT_2 +overflow; it++) shtns->wg_one[it] = 0.0;	// padding for multi-way algorithm.
+	for (it=NLAT_2; it < NLAT_2 +overflow; it++) shtns->wg_adjoint[it] = 0.0;	// padding for multi-way algorithm.
 
 	if ((verbose>1) && (grid == GRID_GAUSS)) {
 		printf(" NLAT=%d, NLAT_2=%d\n",NLAT,NLAT_2);
@@ -1248,7 +1255,10 @@ shtns_cfg shtns_create_with_grid(shtns_cfg base, int mmax, int nofft)
 /// release all resources allocated by a grid.
 void shtns_unset_grid(shtns_cfg shtns)
 {
-	if (ref_count(shtns, &shtns->wg) == 1)	VFREE(shtns->wg - VSIZE2);
+	if (ref_count(shtns, &shtns->wg) == 1) {
+		int offset_align = (VSIZE2 > 1) ? VSIZE2 : 2;
+		VFREE(shtns->wg - offset_align);
+	}
 	shtns->wg = NULL;
 	free_SHTarrays(shtns);
 	shtns->nlat = 0;	shtns->nlat_2 = 0;

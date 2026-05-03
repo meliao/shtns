@@ -42,8 +42,8 @@ V	double *BtF, *BpF;	// contains the Fourier transformed data
 	unsigned imlim=0;
 
 	const double* wg = shtns->wg;
-	if UNLIKELY(llim & SHTNS_NO_WEIGHTS) wg = shtns->wg_one;		// for adjoint synthesis
-	llim &= ~SHTNS_NO_WEIGHTS;	// clear flag to recover true llim
+	if UNLIKELY(llim & SHTNS_ADJOINT) wg = shtns->wg_adjoint;		// for adjoint synthesis
+	llim &= ~SHTNS_ADJOINT;	// clear flag to recover true llim
 
 Q	BrF = Vr;
 V	BtF = Vt;	BpF = Vp;
@@ -54,7 +54,7 @@ V	BtF = Vt;	BpF = Vp;
 	#endif
 
 	if (shtns->fft_mode != FFT_NONE) {
-		if (shtns->fft_mode & FFT_OOP) {		// alloc memory for out-of-place FFT
+		if (shtns->fft_mode & (FFT_OOP|FFT_OOP_ANALYS)) {		// alloc memory for out-of-place FFT
 			unsigned long nv = shtns->nspat;
 QX			BrF = (double*) VMALLOC( nv * sizeof(double) );
 VX			BtF = (double*) VMALLOC( 2*nv * sizeof(double) );
@@ -114,7 +114,7 @@ V					memset(Tlm+l+spec_ofs, 0, (shtns->nlm - l)*sizeof(cplx));
 	}
 
   #ifndef SHT_AXISYM
-  	if (shtns->fft_mode & FFT_OOP) {		// free memory
+  	if (shtns->fft_mode & (FFT_OOP|FFT_OOP_ANALYS)) {		// free memory
 Q	    VFREE(BrF);
 VX	    VFREE(BtF);	// this frees also BpF.
 	}
@@ -132,8 +132,8 @@ V	double *BtF, *BpF;	// contains the Fourier transformed data
 	unsigned imlim=0;
 
 	const double* wg = shtns->wg;
-	if UNLIKELY(llim & SHTNS_NO_WEIGHTS) wg = shtns->wg_one;		// for adjoint synthesis
-	llim &= ~SHTNS_NO_WEIGHTS;	// clear flag to recover true llim
+	if UNLIKELY(llim & SHTNS_ADJOINT) wg = shtns->wg_adjoint;		// for adjoint synthesis
+	llim &= ~SHTNS_ADJOINT;	// clear flag to recover true llim
 
 Q	BrF = Vr;
 V	BtF = Vt;	BpF = Vp;
@@ -143,7 +143,7 @@ V	BtF = Vt;	BpF = Vp;
 		if (imlim*MRES > (unsigned) llim) imlim = ((unsigned) llim)/MRES;		// 32bit mul and div should be faster
 	#endif
 
-	if (shtns->fft_mode & FFT_OOP) {		// alloc memory for out-of-place FFT
+	if (shtns->fft_mode & (FFT_OOP|FFT_OOP_ANALYS)) {		// alloc memory for out-of-place FFT
 		unsigned long nv = shtns->nspat;
 QX		BrF = (double*) VMALLOC( nv * sizeof(double) );
 VX		BtF = (double*) VMALLOC( 2*nv * sizeof(double) );
@@ -220,7 +220,7 @@ V				memset(Tlm+l, 0, (shtns->nlm - l)*sizeof(cplx));
 	}
 
   #ifndef SHT_AXISYM
-  	if (shtns->fft_mode & FFT_OOP) {		// free memory
+  	if (shtns->fft_mode & (FFT_OOP|FFT_OOP_ANALYS)) {		// free memory
 Q	    VFREE(BrF);
 VX	    VFREE(BtF);	// this frees also BpF.
 	}
