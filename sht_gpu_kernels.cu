@@ -794,7 +794,7 @@ void sphtor2scal_gpu(shtns_cfg shtns, std::complex<real>* d_Slm, std::complex<re
 template<typename real=double>
 void scal2sphtor_gpu(shtns_cfg shtns, std::complex<real>* d_Vlm, std::complex<real>* d_Wlm, std::complex<real>* d_Slm, std::complex<real>* d_Tlm, int llim)
 {
-	llim &= ~SHTNS_NO_WEIGHTS;	// clear special flag bits
+	llim &= ~SHTNS_ADJOINT;	// clear special flag bits
 	size_t blksze = ((shtns->lmax+3)*2+WARPSZE-1)/WARPSZE * WARPSZE;
 	if (blksze > MAX_THREADS_PER_BLOCK) blksze = MAX_THREADS_PER_BLOCK;
 	const int overlap = 4;

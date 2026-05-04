@@ -670,7 +670,7 @@ int cushtns_init_gpu(shtns_cfg shtns)
 		err_count += gpu_upload_convert(((char*)d_ct) +   nlat_2*sizeof_real_g, shtns->wg, nlat_2, sizeof_real_g);
 		err_count += gpu_upload_convert(((char*)d_ct) + 2*nlat_2*sizeof_real_g, shtns->st, nlat_2, sizeof_real_g);
 		err_count += gpu_upload_convert(((char*)d_ct) + 3*nlat_2*sizeof_real_g, shtns->st_1, nlat_2, sizeof_real_g);
-		err_count += gpu_upload_convert(((char*)d_ct) + 4*nlat_2*sizeof_real_g, shtns->wg_one, nlat_2, sizeof_real_g);
+		err_count += gpu_upload_convert(((char*)d_ct) + 4*nlat_2*sizeof_real_g, shtns->wg_adjoint, nlat_2, sizeof_real_g);
 	}
 
 	shtns->d_xlm = d_xlm;
@@ -883,8 +883,8 @@ void cuda_spat_to_SH(shtns_cfg shtns, real *d_Vr, std::complex<real>* d_Qlm, int
 {
 	int mmax = shtns->mmax;
 	const int mres = shtns->mres;
-	const bool no_weights = (llim & SHTNS_NO_WEIGHTS);
-	llim &= ~SHTNS_NO_WEIGHTS;
+	const bool no_weights = (llim & SHTNS_ADJOINT);
+	llim &= ~SHTNS_ADJOINT;
 	if (llim < mmax*mres)	mmax = llim / mres;		// truncate mmax too !
 
 	if (sizeof(real) != shtns->sizeof_real) { printf("ERROR: SHTns plan not prepared for fp%ld data\n", sizeof(real)*8);	exit(1); }
@@ -1053,38 +1053,38 @@ void cu_spat_to_SHqst_float(shtns_cfg shtns, float *Vr, float *Vt, float *Vp, cp
 extern "C"
 void cu_adjoint_SH_to_spat(shtns_cfg shtns, double *d_Vr, cplx* d_Qlm, int llim)
 {
-	cu_spat_to_SH(shtns, d_Vr, d_Qlm, llim | SHTNS_NO_WEIGHTS);
+	cu_spat_to_SH(shtns, d_Vr, d_Qlm, llim | SHTNS_ADJOINT);
 }
 
 extern "C"
 void cu_adjoint_SH_to_spat_float(shtns_cfg shtns, float *d_Vr, cplx_f* d_Qlm, int llim)
 {
-	cu_spat_to_SH_float(shtns, d_Vr, d_Qlm, llim | SHTNS_NO_WEIGHTS);
+	cu_spat_to_SH_float(shtns, d_Vr, d_Qlm, llim | SHTNS_ADJOINT);
 }
 
 extern "C"
 void cu_adjoint_SHsphtor_to_spat(shtns_cfg shtns, double *Vt, double *Vp, cplx *Slm, cplx *Tlm, int llim)
 {
-	cu_spat_to_SHsphtor(shtns, Vt,Vp, Slm,Tlm, llim | SHTNS_NO_WEIGHTS);
+	cu_spat_to_SHsphtor(shtns, Vt,Vp, Slm,Tlm, llim | SHTNS_ADJOINT);
 }
 
 extern "C"
 void cu_adjoint_SHsphtor_to_spat_float(shtns_cfg shtns, float *Vt, float *Vp, cplx_f *Slm, cplx_f *Tlm, int llim)
 {
-	cu_spat_to_SHsphtor_float(shtns, Vt,Vp, Slm,Tlm, llim | SHTNS_NO_WEIGHTS);
+	cu_spat_to_SHsphtor_float(shtns, Vt,Vp, Slm,Tlm, llim | SHTNS_ADJOINT);
 }
 
 
 extern "C"
 void cu_adjoint_SHqst_to_spat(shtns_cfg shtns, double *Vr, double *Vt, double *Vp, cplx *Qlm, cplx *Slm, cplx *Tlm, int llim)
 {
-	cu_spat_to_SHqst(shtns, Vr,Vt,Vp, Qlm,Slm,Tlm, llim | SHTNS_NO_WEIGHTS);
+	cu_spat_to_SHqst(shtns, Vr,Vt,Vp, Qlm,Slm,Tlm, llim | SHTNS_ADJOINT);
 }
 
 extern "C"
 void cu_adjoint_SHqst_to_spat_float(shtns_cfg shtns, float *Vr, float *Vt, float *Vp, cplx_f *Qlm, cplx_f *Slm, cplx_f *Tlm, int llim)
 {
-	cu_spat_to_SHqst_float(shtns, Vr,Vt,Vp, Qlm,Slm,Tlm, llim | SHTNS_NO_WEIGHTS);
+	cu_spat_to_SHqst_float(shtns, Vr,Vt,Vp, Qlm,Slm,Tlm, llim | SHTNS_ADJOINT);
 }
 
 
@@ -1338,7 +1338,7 @@ void spat_to_SH_gpu(shtns_cfg shtns, double *Vr, cplx *Qlm, long int llim)
 	cu_spat_to_SH(shtns, d_q, (cplx*) d_qlm, llim);
 	CUDA_ERROR_CHECK;
 
-	llim &= ~SHTNS_NO_WEIGHTS;
+	llim &= ~SHTNS_ADJOINT;
 	int mmax = shtns->mmax;
 	int mres = shtns->mres;
 	long nlm_pad = (shtns->howmany==1) ? shtns->nlm : shtns->spec_dist*shtns->howmany;
@@ -1398,7 +1398,7 @@ void spat_to_SHsphtor_gpu(shtns_cfg shtns, double *Vt, double *Vp, cplx *Slm, cp
 	cuda_spat_to_SH<1>(shtns, d_vtp + spat_stride, (cplx*) (d_vwlm + nlm_stride), llim+1);
 	CUDA_ERROR_CHECK;
 
-	llim &= ~SHTNS_NO_WEIGHTS;
+	llim &= ~SHTNS_ADJOINT;
 	scal2sphtor_gpu(shtns, (cplx*) d_vwlm, (cplx*) (d_vwlm+nlm_stride), (cplx*) d_vtp, (cplx*) (d_vtp+nlm_stride), llim);
 
 	int mmax = shtns->mmax;
@@ -1468,7 +1468,7 @@ void spat_to_SHqst_gpu(shtns_cfg shtns, double *Vr, double *Vt, double *Vp, cplx
 	// scalar SHT on the GPU
 	cuda_spat_to_SH<0>(shtns, d_vrtp + 2*spat_stride, (cplx*) (d_qvwlm+nlm_stride), llim);	// uses gpu_buf_in == d_qvwlm internally
 
-	llim &= ~SHTNS_NO_WEIGHTS;
+	llim &= ~SHTNS_ADJOINT;
 	int mmax = shtns->mmax;
 	int mres = shtns->mres;
 	long nlm_pad = (howmany==1) ? shtns->nlm : shtns->spec_dist*howmany;
