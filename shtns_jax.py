@@ -22,9 +22,8 @@ import shtns
 
 jax.config.update("jax_enable_x64", True)
 
-# ---------------------------------------------------------------------------
+###################################
 # FFI library loading
-# ---------------------------------------------------------------------------
 
 _this_dir = os.path.dirname(__file__)
 
@@ -66,10 +65,8 @@ except Exception as e:
     print("Could not find GPU implementation for JAX:", e)
 
 
-# ---------------------------------------------------------------------------
-# sht subclass with JAX methods
-# ---------------------------------------------------------------------------
-
+###################################
+# Re-define sht class with JAX support
 
 class sht(shtns.sht):
     """SHTns sht with JAX autodiff support.
@@ -104,6 +101,7 @@ class sht(shtns.sht):
 
         @jax.custom_jvp
         def _synth_impl(x_in: jax.Array) -> jax.Array:
+            """Defines the forward pass"""
             orig_shape = x_in.shape
             out_shape = (
                 self.spat_shape
@@ -124,10 +122,13 @@ class sht(shtns.sht):
 
         @custom_transpose
         def _synth_tangent(residuals, x_tan: jax.Array) -> jax.Array:
+            """Re-define the forward pass, to allow
+            for custom transpose definition."""
             return _synth_impl(x_tan)
 
         @_synth_tangent.def_transpose
-        def _synth_tangent_transpose(residuals, ct_out: jax.Array):
+        def _synth_impl_vjp(residuals, ct_out: jax.Array):
+            """This defines the VJP."""
             prefix_shape = ct_out.shape[:-2]
             out_shape = (
                 (self.nlm,) if len(ct_out.shape) == 2 else (*prefix_shape, self.nlm)
@@ -137,21 +138,24 @@ class sht(shtns.sht):
             def get_impl(target_name):
                 return lambda x: jax.ffi.ffi_call(
                     target_name,
-                    jax.ShapeDtypeStruct(out_shape, jnp.float64),
+                    jax.ShapeDtypeStruct(out_shape, jnp.complex128),
                     vmap_method="broadcast_all",
                 )(x, cfg=int(self.this))
 
+            scaled = ct_out / weights
+
             result = jax.lax.platform_dependent(
-                ct_out / weights,
+                scaled,
                 cpu=get_impl("shtns_analys"),
                 cuda=get_impl("shtns_analys_gpu"),
             )
             if self.orthonormal:
                 result = result.at[self.lmax + 1 :].multiply(2.0)
-            return (result,)
+            return result
 
         @_synth_impl.defjvp
         def _synth_impl_jvp(primals, tangents):
+            """This defines the JVP."""
             (x_in,) = primals
             (x_tan,) = tangents
             y = _synth_impl(x_in)
@@ -189,7 +193,7 @@ class sht(shtns.sht):
             return _analys_impl(x_tan)
 
         @_analys_tangent.def_transpose
-        def _analys_tangent_transpose(residuals, ct_out: jax.Array):
+        def _analys_vjp(residuals, ct_out: jax.Array):
             orig_shape = ct_out.shape
             out_shape = (
                 self.spat_shape
@@ -226,7 +230,8 @@ class sht(shtns.sht):
         return _analys_impl(x)
 
     def synth_cplx_jax(self, x: jax.Array) -> jax.Array:
-        """Complex inverse SHT: complex128 spectral (nlm_cplx,) -> complex128 spatial (spat_shape)."""
+        """Complex inverse SHT: complex128 spectral (nlm_cplx,) -> 
+        complex128 spatial (spat_shape)."""
         self._check_jax_gpu_grid_compat()
         self._check_shape_dtype(x, (self.nlm_cplx,), jnp.complex128)
 
@@ -249,7 +254,7 @@ class sht(shtns.sht):
             return _synth_cplx_impl(x_tan)
 
         @_tangent.def_transpose
-        def _tangent_transpose(residuals, ct_out: jax.Array):
+        def _synth_cplx_vjp(residuals, ct_out: jax.Array):
             prefix_shape = ct_out.shape[:-2]
             out_shape = (
                 (self.nlm_cplx,)
@@ -267,7 +272,7 @@ class sht(shtns.sht):
             return result
 
         @_synth_cplx_impl.defjvp
-        def _synth_cplx_impl_jvp(primals, tangents):
+        def _synth_cplx_jvp(primals, tangents):
             (x_in,) = primals
             (x_tan,) = tangents
             y = _synth_cplx_impl(x_in)
@@ -278,7 +283,8 @@ class sht(shtns.sht):
         return _synth_cplx_impl(x)
 
     def analys_cplx_jax(self, x: jax.Array) -> jax.Array:
-        """Complex forward SHT: complex128 spatial (spat_shape) -> complex128 spectral (nlm_cplx,)."""
+        """Complex forward SHT: complex128 spatial (spat_shape) -> 
+        complex128 spectral (nlm_cplx,)."""
         self._check_jax_gpu_grid_compat()
         self._check_shape_dtype(x, self.spat_shape, jnp.complex128)
 
@@ -301,7 +307,7 @@ class sht(shtns.sht):
             return _analys_cplx_impl(x_tan)
 
         @_tangent.def_transpose
-        def _tangent_transpose(residuals, ct_out: jax.Array):
+        def _analys_cplx_vjp(residuals, ct_out: jax.Array):
             orig_shape = ct_out.shape
             out_shape = (
                 self.spat_shape
@@ -319,7 +325,7 @@ class sht(shtns.sht):
             return result * weights
 
         @_analys_cplx_impl.defjvp
-        def _analys_cplx_impl_jvp(primals, tangents):
+        def _analys_cplx_jvp(primals, tangents):
             (x_in,) = primals
             (x_tan,) = tangents
             y = _analys_cplx_impl(x_in)

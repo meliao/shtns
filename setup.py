@@ -144,7 +144,7 @@ class make(build_ext):
         # CUDA JAX FFI library (optional).
         if cuda_path != '':
             cmd_gpu = [cxx, '-O2', '-fpic', '-shared', '-std=c++17', '-I' + jax_inc,
-                       '-DSHTNS_GPU', '-I' + cuda_path + '/include']
+                       '-I' + cuda_path + '/include']
             if use_openmp:
                 cmd_gpu.append('-fopenmp')
             for d in libdir:
@@ -155,7 +155,7 @@ class make(build_ext):
                 cmd_gpu.append('-l' + lib)
             for lib in libs_gpu:
                 cmd_gpu.append('-l' + lib)
-            cmd_gpu += [*(shtns_o_gpu + shtns_o_com), 'shtns_jax.cpp', '-o', 'libshtns_jax_cuda.so']
+            cmd_gpu += [*(shtns_o_gpu + shtns_o_com), 'shtns_jax_cuda.cpp', '-o', 'libshtns_jax_cuda.so']
             self.spawn(cmd_gpu)
         super().run()
 

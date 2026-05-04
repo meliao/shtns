@@ -1,3 +1,8 @@
+"""Run these tests from the root of the repository with 
+```
+python -m pytest tests/
+```
+"""
 import numpy as np
 import pytest
 import jax
