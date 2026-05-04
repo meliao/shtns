@@ -1,187 +1,330 @@
-### JAX interface for SHTns
-### Requires jaxbind:  https://github.com/NIFTy-PPL/JAXbind
-### Only CPU support for now.
+"""JAX bindings for SHTns.
 
-### See also: https://docs.jax.dev/en/latest/external-callbacks.html#example-pure-callback-with-custom-jvp
+Import this module instead of shtns to get a sht class with JAX autodiff
+support (synth_jax, analys_jax, synth_cplx_jax, analys_cplx_jax).
 
-### For adding GPU support to jaxbind, look at:
-# https://github.com/jax-ml/jax/issues/1100#issuecomment-1876928289
-# https://github.com/pearu/pydlpack
+Example::
 
-## TODO:
-## 1) check that the adjoints are actually good
-##    in particular, I use the inner-product corresponding to real-valued functions
-##    there may be a factor of 2, or there may be complex conjugation subtelties...
-##    We could also reformulate everything in terms of real arrays?
+    import shtns_jax
+    sh = shtns_jax.sht(lmax)
+    sh.set_grid()
+    alm = sh.analys_jax(spatial_array)   # supports jit, vmap, jvp, vjp
+"""
 
-
+import ctypes
+import os
 
 import jax
+from jax.custom_transpose import custom_transpose
 import jax.numpy as jnp
-import shtns
-import numpy as np
 
-import jaxbind
+import shtns
 
 jax.config.update("jax_enable_x64", True)
 
-## IMPORTANT: shtns must be initialized BEFORE the use with JAX,
-## and this configuration cannot be changed.
-## Allowing multiple shtns configs could be added in the future if needed.
+# ---------------------------------------------------------------------------
+# FFI library loading
+# ---------------------------------------------------------------------------
 
-Lmax=47
-shtns_cfg = shtns.sht(Lmax)     # single configuration used throughout
-shtns_cfg.set_grid(nl_order=2)  # with a dealiased grid
-
-## store the weights for adjoint stuff
-shtns_cfg.wts = shtns_cfg.gauss_wts() * (2*np.pi)/shtns_cfg.nphi
-shtns_cfg.wts = np.hstack((shtns_cfg.wts, np.flip(shtns_cfg.wts))).reshape((-1,1))   # works if nlat is even
-shtns_cfg.wts_1 = 1.0 / shtns_cfg.wts
-shtns_cfg._l2 = shtns_cfg.l * (shtns_cfg.l + 1.0)  # l(l+1)
-shtns_cfg._l_2 = np.zeros_like(shtns_cfg._l2)
-shtns_cfg._l_2[1:] = 1.0 / shtns_cfg._l2[1:]
-
-def sht_synth(out, args, kwargs_dump):
-    nargs = len(args)
-
-    # deserialize keyword arguments
-    #kwargs = jaxbind.load_kwargs(kwargs_dump)
-    # extract keyword argument which can be given to the JAX primitive
-    #workers = kwargs.pop("workers", None)
-
-    # compute the SHT and write the result in the out tuple
-    if nargs==1:
-        out[0][()] = shtns_cfg.synth(args[0])
-    else:
-        q = shtns_cfg.synth(*args)
-        for i in range(nargs):
-            out[i][()] = q[i]
+_this_dir = os.path.dirname(__file__)
 
 
-def sht_analys(out, args, kwargs_dump):
-    nargs = len(args)
-    if nargs==1:
-        out[0][()] = shtns_cfg.analys(args[0])
-    else:
-        alm = shtns_cfg.analys(*args)
-        for i in range(nargs):
-            out[i][()] = alm[i]
+def _load_jax_lib(*names):
+    last_error = None
+    for name in names:
+        try:
+            return ctypes.cdll.LoadLibrary(os.path.join(_this_dir, name))
+        except OSError as e:
+            last_error = e
+    if last_error is not None:
+        raise last_error
+    raise OSError("No library names provided for loading.")
 
 
-def sht_synth_transposed(out, args, kwargs_dump):
-    nargs = len(args)
-    if nargs==1:
-        out[0][()] = shtns_cfg.analys(args[0] * shtns_cfg.wts_1)
-    elif nargs==2:
-        slm,tlm = shtns_cfg.analys(args[0] * shtns_cfg.wts_1,  args[1] * shtns_cfg.wts_1)
-        out[0][()] = slm * shtns_cfg._l2
-        out[1][()] = tlm * shtns_cfg._l2
-    elif nargs==3:
-        qlm,slm,tlm = shtns_cfg.analys(args[0] * shtns_cfg.wts_1,  args[1] * shtns_cfg.wts_1,  args[2] * shtns_cfg.wts_1)
-        out[0][()] = qlm
-        out[1][()] = slm * shtns_cfg._l2
-        out[2][()] = tlm * shtns_cfg._l2
+_shtns_jax_lib_cpu = _load_jax_lib("libshtns_jax_cpu.so")
+_cpu_lib_members = [
+    ("shtns_synth", _shtns_jax_lib_cpu.synth_cpu),
+    ("shtns_analys", _shtns_jax_lib_cpu.analys_cpu),
+    ("shtns_synth_cplx", _shtns_jax_lib_cpu.synth_cplx_cpu),
+    ("shtns_analys_cplx", _shtns_jax_lib_cpu.analys_cplx_cpu),
+]
+for _name, _func in _cpu_lib_members:
+    jax.ffi.register_ffi_target(_name, jax.ffi.pycapsule(_func), platform="cpu")
+    jax.ffi.register_ffi_target(_name, jax.ffi.pycapsule(_func), platform="Host")
 
-def sht_analys_transposed(out, args, kwargs_dump):
-    nargs = len(args)
-
-    if nargs==1:
-        out[0][()] = shtns_cfg.synth(args[0]) * shtns_cfg.wts
-    elif nargs==2:
-        u,v = shtns_cfg.synth(args[0] * shtns_cfg._l_2,  args[1] * shtns_cfg._l_2)
-        out[0][()] = u * shtns_cfg.wts
-        out[1][()] = v * shtns_cfg.wts
-    elif nargs==3:
-        q,u,v = shtns_cfg.synth(args[0], args[1] * shtns_cfg._l_2,  args[2] * shtns_cfg._l_2)
-        out[0][()] = q * shtns_cfg.wts
-        out[1][()] = u * shtns_cfg.wts
-        out[2][()] = v * shtns_cfg.wts
-
-def sht_synth_abstract_eval(*args, **kwargs):
-    nargs = len(args)
-    assert nargs <= 3
-    for i in range(nargs):
-        assert args[i].shape == (shtns_cfg.nlm,)
-        assert args[i].dtype == jnp.complex128
-
-    out_shape = (shtns_cfg.nlat, shtns_cfg.nphi)
-    # return shape, dtype of output
-    return ((out_shape, jnp.float64),) * nargs
-
-def sht_analys_abstract_eval(*args, **kwargs):
-    nargs = len(args)
-    assert nargs <= 3
-    for i in range(nargs):
-        assert args[i].shape == (shtns_cfg.nlat, shtns_cfg.nphi)
-        assert args[i].dtype == jnp.float64
-
-    out_shape = (shtns_cfg.nlm,)
-    # return shape, dtype of output
-    return ((out_shape, jnp.complex128),) * nargs
-
-# Now we register our function as a custom JAX primitive using JAXbind's
-# interface for linear functions. JAXbind returns the resulting JAX primitive.
-
-sht_synth_jax = jaxbind.get_linear_call(
-    sht_synth,
-    sht_synth_transposed,
-    sht_synth_abstract_eval,
-    sht_analys_abstract_eval,
-    func_can_batch=False,  # indicate that our function DOES NOT support custom batching
-)
-
-sht_analys_jax = jaxbind.get_linear_call(
-    sht_analys,
-    sht_analys_transposed,
-    sht_analys_abstract_eval,
-    sht_synth_abstract_eval,
-    func_can_batch=False,
-)
+CUDA_AVAILABLE = False
+try:
+    _shtns_jax_lib_cuda = _load_jax_lib("libshtns_jax_cuda.so")
+    _gpu_lib_members = [
+        ("shtns_synth_gpu", _shtns_jax_lib_cuda.synth_gpu),
+        ("shtns_analys_gpu", _shtns_jax_lib_cuda.analys_gpu),
+    ]
+    for _name, _func in _gpu_lib_members:
+        jax.ffi.register_ffi_target(_name, jax.ffi.pycapsule(_func), platform="CUDA")
+    CUDA_AVAILABLE = True
+except Exception as e:
+    print("Could not find GPU implementation for JAX:", e)
 
 
-# %%%%%%%%%%%%%%% Perform some tests %%%%%%%%%%%%%%%%
-
-if __name__ == "__main__":
-
-    from jax import random
-    import numpy as np
-
-    # generate some random input to showcase the use of the newly registered JAX primitive
-    key = random.PRNGKey(42)
-    key, subkey = random.split(key)
-    qlm = jax.random.uniform(subkey, shape=(shtns_cfg.nlm, ), dtype=jnp.float64)
-    qlm = qlm + 1j * jax.random.uniform(subkey, shape=(shtns_cfg.nlm, ), dtype=jnp.float64)
+# ---------------------------------------------------------------------------
+# sht subclass with JAX methods
+# ---------------------------------------------------------------------------
 
 
-    # apply the new primitive
-    res = sht_synth_jax(qlm)    # shtns call through JAX
-    print(len(res), res[0].shape, qlm.shape)
+class sht(shtns.sht):
+    """SHTns sht with JAX autodiff support.
 
-    ref = shtns_cfg.synth(np.array(qlm))    # direct call to shtns
-    print( np.allclose(res[0],ref) )   # compare results
+    Inherits all NumPy methods from shtns.sht and adds:
+      synth_jax, analys_jax, synth_cplx_jax, analys_cplx_jax
+    """
 
-    # jit compile the new primitive
-    sht_synth_jax_jit = jax.jit(sht_synth_jax)
-    res_jit = sht_synth_jax_jit(qlm)
-    print(res_jit)
-    print( np.allclose(res_jit[0],ref) )   # compare results
+    def _check_jax_gpu_grid_compat(self):
+        if CUDA_AVAILABLE and (self._grid_flags & shtns.SHT_PHI_CONTIGUOUS):
+            raise ValueError(
+                "JAX GPU backend does not support SHT_PHI_CONTIGUOUS grids. "
+                "Call set_grid() with SHT_THETA_CONTIGUOUS or run with CPU backend."
+            )
 
-    # vmap sht_synth over the first axis of the input (first axis is the one that varies slowest in memory, so that the other axes are continuous)
-    sht_synth_vmap = jax.vmap(sht_synth_jax, in_axes=0)
+    def _check_shape_dtype(self, x: jax.Array, shape: tuple, dtype) -> None:
+        n = len(shape)
+        if x.shape[-n:] != shape:
+            raise ValueError(f"Input array must end with shape {shape}. Got {x.shape}.")
+        if x.dtype != dtype:
+            raise ValueError(f"Input array must have dtype {dtype}. Got {x.dtype}.")
 
-    qlm_batch = jnp.arange(1,7).reshape((-1,1)) * qlm    # make an array of several qlm fields, 
+    def _grid_weights(self) -> jax.Array:
+        w = self.gauss_wts()  # shape (nlat/2,)
+        full_w = jnp.concatenate([w, w[::-1]])  # shape (nlat,)
+        return full_w.reshape(1, -1) * 2 * jnp.pi / self.nphi
 
-    res_batch = sht_synth_vmap(qlm_batch)
-    print( res_batch[0].shape )
+    def synth_jax(self, x: jax.Array) -> jax.Array:
+        """Inverse SHT: complex128 spectral (nlm,) -> float64 spatial (spat_shape)."""
+        self._check_jax_gpu_grid_compat()
+        self._check_shape_dtype(x, (self.nlm,), jnp.complex128)
 
-    for i in range(1,7):
-        print( np.allclose(res_batch[0][i-1,:], ref*i) )   # compare results
+        @jax.custom_jvp
+        def _synth_impl(x_in: jax.Array) -> jax.Array:
+            orig_shape = x_in.shape
+            out_shape = (
+                self.spat_shape
+                if len(orig_shape) == 1
+                else (*orig_shape[:-1], *self.spat_shape)
+            )
 
-    slm = qlm * 2
-    res = sht_synth_jax(qlm,slm)   # transform of a 2D vector, res contains the two field (theta and phi components)
-    print(res[0].shape, res[1].shape)
+            def get_impl(target_name):
+                return lambda x: jax.ffi.ffi_call(
+                    target_name,
+                    jax.ShapeDtypeStruct(out_shape, jnp.float64),
+                    vmap_method="broadcast_all",
+                )(x, cfg=int(self.this))
 
+            return jax.lax.platform_dependent(
+                x_in, cpu=get_impl("shtns_synth"), cuda=get_impl("shtns_synth_gpu")
+            )
 
-    # compute the jvp of sht_synth
-    res_jvp = jax.jvp(sht_synth_jax, (qlm,), (qlm,))
+        @custom_transpose
+        def _synth_tangent(residuals, x_tan: jax.Array) -> jax.Array:
+            return _synth_impl(x_tan)
 
+        @_synth_tangent.def_transpose
+        def _synth_tangent_transpose(residuals, ct_out: jax.Array):
+            prefix_shape = ct_out.shape[:-2]
+            out_shape = (
+                (self.nlm,) if len(ct_out.shape) == 2 else (*prefix_shape, self.nlm)
+            )
+            weights = self._grid_weights()
+
+            def get_impl(target_name):
+                return lambda x: jax.ffi.ffi_call(
+                    target_name,
+                    jax.ShapeDtypeStruct(out_shape, jnp.float64),
+                    vmap_method="broadcast_all",
+                )(x, cfg=int(self.this))
+
+            result = jax.lax.platform_dependent(
+                ct_out / weights,
+                cpu=get_impl("shtns_analys"),
+                cuda=get_impl("shtns_analys_gpu"),
+            )
+            if self.orthonormal:
+                result = result.at[self.lmax + 1 :].multiply(2.0)
+            return (result,)
+
+        @_synth_impl.defjvp
+        def _synth_impl_jvp(primals, tangents):
+            (x_in,) = primals
+            (x_tan,) = tangents
+            y = _synth_impl(x_in)
+            tan_out_types = jax.typeof(y).to_tangent_aval()
+            y_tan = _synth_tangent(tan_out_types, None, x_tan)
+            return y, y_tan
+
+        return _synth_impl(x)
+
+    def analys_jax(self, x: jax.Array) -> jax.Array:
+        """Forward SHT: float64 spatial (spat_shape) -> complex128 spectral (nlm,)."""
+        self._check_jax_gpu_grid_compat()
+        self._check_shape_dtype(x, self.spat_shape, jnp.float64)
+
+        @jax.custom_jvp
+        def _analys_impl(x_in: jax.Array) -> jax.Array:
+            prefix_shape = x_in.shape[:-2]
+            out_shape = (
+                (self.nlm,) if len(x_in.shape) == 2 else (*prefix_shape, self.nlm)
+            )
+
+            def get_impl(target_name):
+                return lambda x: jax.ffi.ffi_call(
+                    target_name,
+                    jax.ShapeDtypeStruct(out_shape, jnp.complex128),
+                    vmap_method="broadcast_all",
+                )(x, cfg=int(self.this))
+
+            return jax.lax.platform_dependent(
+                x_in, cpu=get_impl("shtns_analys"), cuda=get_impl("shtns_analys_gpu")
+            )
+
+        @custom_transpose
+        def _analys_tangent(residuals, x_tan: jax.Array) -> jax.Array:
+            return _analys_impl(x_tan)
+
+        @_analys_tangent.def_transpose
+        def _analys_tangent_transpose(residuals, ct_out: jax.Array):
+            orig_shape = ct_out.shape
+            out_shape = (
+                self.spat_shape
+                if len(orig_shape) == 1
+                else (*orig_shape[:-1], *self.spat_shape)
+            )
+
+            def get_impl(target_name):
+                return lambda x: jax.ffi.ffi_call(
+                    target_name,
+                    jax.ShapeDtypeStruct(out_shape, jnp.float64),
+                    vmap_method="broadcast_all",
+                )(x, cfg=int(self.this))
+
+            if self.orthonormal:
+                ct_out = ct_out.at[self.lmax + 1 :].multiply(0.5)
+            result = jax.lax.platform_dependent(
+                ct_out,
+                cpu=get_impl("shtns_synth"),
+                cuda=get_impl("shtns_synth_gpu"),
+            )
+            weights = self._grid_weights()
+            return result * weights
+
+        @_analys_impl.defjvp
+        def _analys_impl_jvp(primals, tangents):
+            (x_in,) = primals
+            (x_tan,) = tangents
+            y = _analys_impl(x_in)
+            tan_out_types = jax.typeof(y).to_tangent_aval()
+            y_tan = _analys_tangent(tan_out_types, None, x_tan)
+            return y, y_tan
+
+        return _analys_impl(x)
+
+    def synth_cplx_jax(self, x: jax.Array) -> jax.Array:
+        """Complex inverse SHT: complex128 spectral (nlm_cplx,) -> complex128 spatial (spat_shape)."""
+        self._check_jax_gpu_grid_compat()
+        self._check_shape_dtype(x, (self.nlm_cplx,), jnp.complex128)
+
+        @jax.custom_jvp
+        def _synth_cplx_impl(x_in: jax.Array) -> jax.Array:
+            orig_shape = x_in.shape
+            out_shape = (
+                self.spat_shape
+                if len(orig_shape) == 1
+                else (*orig_shape[:-1], *self.spat_shape)
+            )
+            return jax.ffi.ffi_call(
+                "shtns_synth_cplx",
+                jax.ShapeDtypeStruct(out_shape, jnp.complex128),
+                vmap_method="broadcast_all",
+            )(x_in, cfg=int(self.this))
+
+        @custom_transpose
+        def _tangent(residuals, x_tan: jax.Array) -> jax.Array:
+            return _synth_cplx_impl(x_tan)
+
+        @_tangent.def_transpose
+        def _tangent_transpose(residuals, ct_out: jax.Array):
+            prefix_shape = ct_out.shape[:-2]
+            out_shape = (
+                (self.nlm_cplx,)
+                if len(ct_out.shape) == 2
+                else (*prefix_shape, self.nlm_cplx)
+            )
+            weights = self._grid_weights()
+            result = jax.ffi.ffi_call(
+                "shtns_analys_cplx",
+                jax.ShapeDtypeStruct(out_shape, jnp.complex128),
+                vmap_method="broadcast_all",
+            )(ct_out / weights, cfg=int(self.this))
+            if self.orthonormal:
+                result = result.at[self.zm != 0].multiply(2.0)
+            return result
+
+        @_synth_cplx_impl.defjvp
+        def _synth_cplx_impl_jvp(primals, tangents):
+            (x_in,) = primals
+            (x_tan,) = tangents
+            y = _synth_cplx_impl(x_in)
+            tan_out_types = jax.typeof(y).to_tangent_aval()
+            y_tan = _tangent(tan_out_types, None, x_tan)
+            return y, y_tan
+
+        return _synth_cplx_impl(x)
+
+    def analys_cplx_jax(self, x: jax.Array) -> jax.Array:
+        """Complex forward SHT: complex128 spatial (spat_shape) -> complex128 spectral (nlm_cplx,)."""
+        self._check_jax_gpu_grid_compat()
+        self._check_shape_dtype(x, self.spat_shape, jnp.complex128)
+
+        @jax.custom_jvp
+        def _analys_cplx_impl(x_in: jax.Array) -> jax.Array:
+            prefix_shape = x_in.shape[:-2]
+            out_shape = (
+                (self.nlm_cplx,)
+                if len(x_in.shape) == 2
+                else (*prefix_shape, self.nlm_cplx)
+            )
+            return jax.ffi.ffi_call(
+                "shtns_analys_cplx",
+                jax.ShapeDtypeStruct(out_shape, jnp.complex128),
+                vmap_method="broadcast_all",
+            )(x_in, cfg=int(self.this))
+
+        @custom_transpose
+        def _tangent(residuals, x_tan: jax.Array) -> jax.Array:
+            return _analys_cplx_impl(x_tan)
+
+        @_tangent.def_transpose
+        def _tangent_transpose(residuals, ct_out: jax.Array):
+            orig_shape = ct_out.shape
+            out_shape = (
+                self.spat_shape
+                if len(orig_shape) == 1
+                else (*orig_shape[:-1], *self.spat_shape)
+            )
+            if self.orthonormal:
+                ct_out = ct_out.at[self.zm != 0].multiply(0.5)
+            result = jax.ffi.ffi_call(
+                "shtns_synth_cplx",
+                jax.ShapeDtypeStruct(out_shape, jnp.complex128),
+                vmap_method="broadcast_all",
+            )(ct_out, cfg=int(self.this))
+            weights = self._grid_weights()
+            return result * weights
+
+        @_analys_cplx_impl.defjvp
+        def _analys_cplx_impl_jvp(primals, tangents):
+            (x_in,) = primals
+            (x_tan,) = tangents
+            y = _analys_cplx_impl(x_in)
+            tan_out_types = jax.typeof(y).to_tangent_aval()
+            y_tan = _tangent(tan_out_types, None, x_tan)
+            return y, y_tan
+
+        return _analys_cplx_impl(x)

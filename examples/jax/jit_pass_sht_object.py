@@ -4,12 +4,13 @@ import jax
 import jax.numpy as jnp
 import numpy as np
 import shtns
+import shtns_jax
 
 jax.config.update("jax_enable_x64", True)
 
 
 def main():
-    sh = shtns.sht(8, 8, 1)
+    sh = shtns_jax.sht(8, 8, 1)
     sh.set_grid(flags=shtns.SHT_ALLOW_GPU + shtns.SHT_THETA_CONTIGUOUS)
 
     rng = np.random.default_rng(0)
@@ -46,7 +47,7 @@ def main():
     )
 
     # New sht object with new Lmax, should trigger recompilation
-    sh2 = shtns.sht(10, 10, 1)
+    sh2 = shtns_jax.sht(10, 10, 1)
     sh2.set_grid(flags=shtns.SHT_ALLOW_GPU + shtns.SHT_THETA_CONTIGUOUS)
 
     qlm_2 = rng.standard_normal(sh2.nlm) + 1j * rng.standard_normal(sh2.nlm)

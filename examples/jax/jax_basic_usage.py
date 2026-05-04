@@ -3,13 +3,14 @@ import ctypes
 
 import numpy as np
 
+import shtns_jax
 import shtns
 import jax.numpy as jnp
 
 jax.config.update("jax_enable_x64", True)  # support float64
 
 
-sh = shtns.sht(127, 8)
+sh = shtns_jax.sht(127, 8)
 sh.set_grid(flags=shtns.SHT_ALLOW_GPU + shtns.SHT_PHI_CONTIGUOUS)
 print(
     "lmax=%d, mmax=%d, mres=%d, nlm=%d; nlat=%d, nphi=%d"

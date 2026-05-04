@@ -4,6 +4,7 @@ import jax
 import jax.numpy as jnp
 
 import shtns
+import shtns_jax
 
 RTOL = 1e-10
 ATOL = 1e-10
@@ -17,7 +18,7 @@ GPU_AVAILABLE = len(CUDA_DEVICES) > 0
 CPU_DEVICES = jax.devices("cpu")
 
 def _make_cfg(lmax=8, mmax=8, mres=1):
-    sh = shtns.sht(lmax, mmax, mres)
+    sh = shtns_jax.sht(lmax, mmax, mres)
     sh.set_grid(flags=shtns.SHT_ALLOW_GPU + shtns.SHT_THETA_CONTIGUOUS)
     return sh
 
@@ -141,7 +142,7 @@ def test_cpu_implementation(fn_name, make_input):
 @pytest.mark.skipif(not GPU_AVAILABLE, reason="GPU-only test")
 def test_theta_contiguous_cuda():
     # This one asserts that an error is thrown
-    sh = shtns.sht(8, 8)
+    sh = shtns_jax.sht(8, 8)
     ntheta, nphi = sh.set_grid(flags=shtns.SHT_PHI_CONTIGUOUS)
     thetas = np.arccos(sh.cos_theta)
     phis = np.linspace(0, 2 * np.pi, nphi, endpoint=False)

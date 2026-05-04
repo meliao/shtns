@@ -122,11 +122,13 @@ class make(build_ext):
     def run(self):
         self.spawn(config_cmd)
         self.spawn(['make','--jobs=4', *shtns_o])   # make the objects required to build extension
-        # Build JAX shared libraries for FFI bindings.
+        # Build JAX shared libraries for FFI bindings (optional).
         jax_inc = get_jaxlib_include()
         if not jax_inc:
-            raise RuntimeError("JAX build requested but jaxlib headers were not found. "
-                               "Ensure jax/jaxlib are installed in the build environment.")
+            print("WARNING: jaxlib not found; skipping libshtns_jax_cpu.so build. "
+                  "Install jax/jaxlib then reinstall shtns[jax] to enable JAX support.")
+            super().run()
+            return
         cxx = os.environ.get('CXX', 'g++')
         # CPU JAX FFI library.
         cmd_cpu = [cxx, '-O2', '-fpic', '-shared', '-std=c++17', '-I' + jax_inc]
@@ -173,6 +175,6 @@ setup(name='shtns',
         author_email='nathanael.schaeffer@univ-grenoble-alpes.fr',
         url='https://bitbucket.org/nschaeff/shtns',
         ext_modules=shtns_ext,
-        py_modules=["shtns"],
+        py_modules=["shtns", "shtns_jax"],
         requires=["numpy"],
         )
