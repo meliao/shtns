@@ -10,7 +10,7 @@ Example::
     sh.set_grid()
     alm = sh.analys_jax(spatial_array)   # supports jit, vmap, jvp, vjp
 """
-
+import logging
 import ctypes
 import os
 
@@ -62,21 +62,21 @@ try:
         jax.ffi.register_ffi_target(_name, jax.ffi.pycapsule(_func), platform="CUDA")
     CUDA_AVAILABLE = True
 except Exception as e:
-    print("Could not find GPU implementation for JAX:", e)
+    logging.warning("Could not find GPU implementation for JAX:")
 
 
-def _dispatch_platform(x, cpu_fn, cuda_fn):
-    """Dispatch to cpu_fn(x) or cuda_fn(x) based on where x lives.
+# def _dispatch_platform(x, cpu_fn, cuda_fn):
+#     """Dispatch to cpu_fn(x) or cuda_fn(x) based on where x lives.
 
-    jax.lax.platform_dependent uses the default backend outside of JIT,
-    which picks CUDA even when data is on CPU. This helper checks the
-    actual device in eager mode and uses platform_dependent only inside
-    traced (JIT/vmap) contexts where it works correctly.
-    """
-    if isinstance(x, jax.core.Tracer):
-        return jax.lax.platform_dependent(x, cpu=cpu_fn, cuda=cuda_fn)
-    is_gpu = CUDA_AVAILABLE and any(d.platform == "gpu" for d in x.devices())
-    return cuda_fn(x) if is_gpu else cpu_fn(x)
+#     jax.lax.platform_dependent uses the default backend outside of JIT,
+#     which picks CUDA even when data is on CPU. This helper checks the
+#     actual device in eager mode and uses platform_dependent only inside
+#     traced (JIT/vmap) contexts where it works correctly.
+#     """
+#     if isinstance(x, jax.core.Tracer):
+#         return jax.lax.platform_dependent(x, cpu=cpu_fn, cuda=cuda_fn)
+#     is_gpu = CUDA_AVAILABLE and any(d.platform == "gpu" for d in x.devices())
+#     return cuda_fn(x) if is_gpu else cpu_fn(x)
 
 
 ###################################
@@ -130,8 +130,8 @@ class sht(shtns.sht):
                     vmap_method="broadcast_all",
                 )(x, cfg=int(self.this))
 
-            return _dispatch_platform(
-                x_in, get_impl("shtns_synth"), get_impl("shtns_synth_gpu")
+            return jax.lax.platform_dependent(
+                x_in, cpu=get_impl("shtns_synth"), cuda=get_impl("shtns_synth_gpu")
             )
 
         @custom_transpose
@@ -158,8 +158,8 @@ class sht(shtns.sht):
 
             scaled = ct_out / weights
 
-            result = _dispatch_platform(
-                scaled, get_impl("shtns_analys"), get_impl("shtns_analys_gpu")
+            result = jax.lax.platform_dependent(
+                scaled, cpu=get_impl("shtns_analys"), cuda=get_impl("shtns_analys_gpu")
             )
             if self.orthonormal:
                 result = result.at[self.lmax + 1 :].multiply(2.0)
@@ -196,8 +196,8 @@ class sht(shtns.sht):
                     vmap_method="broadcast_all",
                 )(x, cfg=int(self.this))
 
-            return _dispatch_platform(
-                x_in, get_impl("shtns_analys"), get_impl("shtns_analys_gpu")
+            return jax.lax.platform_dependent(
+                x_in, cpu=get_impl("shtns_analys"), cuda=get_impl("shtns_analys_gpu")
             )
 
         @custom_transpose
@@ -222,8 +222,8 @@ class sht(shtns.sht):
 
             if self.orthonormal:
                 ct_out = ct_out.at[self.lmax + 1 :].multiply(0.5)
-            result = _dispatch_platform(
-                ct_out, get_impl("shtns_synth"), get_impl("shtns_synth_gpu")
+            result = jax.lax.platform_dependent(
+                ct_out, cpu=get_impl("shtns_synth"), cuda=get_impl("shtns_synth_gpu")
             )
             weights = self._grid_weights()
             return result * weights

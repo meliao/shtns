@@ -3,6 +3,7 @@
 import jax
 import jax.numpy as jnp
 import numpy as np
+import shtns
 from shtns import SHT_ALLOW_GPU, SHT_THETA_CONTIGUOUS
 import shtns_jax
 

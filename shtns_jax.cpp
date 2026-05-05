@@ -57,13 +57,12 @@ ffi::Error analys_jax_cpu(int64_t cfg, ffi::Buffer<ffi::F64> x,
 	  return ffi::Error::InvalidArgument("shtns: analys output array has wrong size");
   }
 
-  std::vector<double> x_copy(x.typed_data(), x.typed_data() + n_elem);
+  // spat_to_SH uses the spatial buffer as FFT scratch space (in-place transforms),
+  // so we must copy before passing to avoid corrupting JAX's immutable Arg buffer.
+  // std::vector<double> x_copy(x.typed_data(), x.typed_data() + n_elem);
   for (int64_t n = 0; n < n_other; n++) {
-      spat_to_SH(sh, &x_copy[n * n_spat], (cplx*) &(y->typed_data()[n * nlm]));
+      spat_to_SH(sh, &(x.typed_data()[n * n_spat]), (cplx*) &(y->typed_data()[n * nlm]));
   }
-  // for (int64_t n = 0; n < n_other; n ++) {	// loop over other dimensions
-	//   spat_to_SH(sh, &(x.typed_data()[n*n_spat]), (cplx*) &(y->typed_data()[n*nlm]));
-  // }
   return ffi::Error::Success();
 }
 

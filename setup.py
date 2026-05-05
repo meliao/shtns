@@ -161,6 +161,7 @@ class make(build_ext):
 
 class build_py_with_jax_lib(build_py):
     def run(self):
+        self.run_command('build_ext')  # build .so files before copying them
         super().run()
         # Ensure JAX FFI libraries end up next to shtns.py in site-packages.
         for name in ("libshtns_jax_cpu.so", "libshtns_jax_cuda.so", "libshtns_jax.so"):

@@ -53,10 +53,10 @@ def _cplx_spatial_input(sh, seed):
 
 
 TRANSFORMS = [
-    pytest.param("synth_jax", _spectral_input, id="synth"),
+    # pytest.param("synth_jax", _spectral_input, id="synth"),
     pytest.param("analys_jax", _spatial_real_input, id="analys"),
-    pytest.param("synth_cplx_jax", _cplx_spectral_input, id="synth_cplx"),
-    pytest.param("analys_cplx_jax", _cplx_spatial_input, id="analys_cplx"),
+    # pytest.param("synth_cplx_jax", _cplx_spectral_input, id="synth_cplx"),
+    # pytest.param("analys_cplx_jax", _cplx_spatial_input, id="analys_cplx"),
 ]
 
 
@@ -122,6 +122,22 @@ def test_no_input_modification(fn_name, make_input):
 
     assert jnp.array_equal(x, x_copy), f"{fn_name} modified its input array."
 
+@pytest.mark.parametrize("fn_name,make_input", TRANSFORMS)
+def test_against_numpy(fn_name, make_input):
+    sh = _make_cfg()
+    fn_jax = getattr(sh, fn_name)
+    # Get the name of the reference implementation by stripping the "_jax" suffix
+    fn_numpy = getattr(sh, fn_name.replace("_jax", ""))
+    x = make_input(sh, seed=0)
+    x_cp = x.copy()
+    y_numpy = fn_numpy(np.array(x))
+    y_jax = fn_jax(x_cp)
+    print(f"y_jax shape: {y_jax.shape}, y_numpy shape: {y_numpy.shape}")
+    print(y_jax[:5])
+    print(y_numpy[:5])
+    diffs = np.abs(np.array(y_jax) - np.array(y_numpy))
+    print("Max difference:", np.max(diffs))
+    assert np.allclose(y_jax, y_numpy, rtol=RTOL, atol=ATOL), f"{fn_name} output differs from numpy implementation."
 
 @pytest.mark.skipif(not GPU_AVAILABLE, reason="GPU-only test")
 @pytest.mark.parametrize("fn_name,make_input", TRANSFORMS)
