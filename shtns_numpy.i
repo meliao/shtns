@@ -482,7 +482,7 @@ struct shtns_rot_ {		// describe a rotation matrix
 	}
 	void SHqst_to_spat_cplx(PyObject *Qlm, PyObject *Slm, PyObject *Tlm, PyObject *Vr, PyObject *Vt, PyObject *Vp) {
 		int n = $self->lmax + 1;
-		if (check_spatial(4,Vr, $self->nspat) && check_spatial(5,Vt, $self->nspat) && check_spatial(6,Vp, $self->nspat)
+		if (check_spectral(4,Vr, $self->nspat) && check_spectral(5,Vt, $self->nspat) && check_spectral(6,Vp, $self->nspat)
 			&& check_spectral(1,Qlm, n*n) && check_spectral(2,Slm, n*n) && check_spectral(3,Tlm, n*n))
 		SHqst_to_spat_cplx($self, PyArray_Data(Qlm), PyArray_Data(Slm), PyArray_Data(Tlm), PyArray_Data(Vr), PyArray_Data(Vt), PyArray_Data(Vp));
 	}
