@@ -144,7 +144,7 @@ class make(build_ext):
         # CUDA JAX FFI library (optional).
         if cuda_path != '':
             cmd_gpu = [cxx, '-O2', '-fpic', '-shared', '-std=c++17', '-I' + jax_inc,
-                       '-I' + cuda_path + '/include']
+                       '-I' + cuda_path + '/include', '-DSHTNS_GPU']
             if use_openmp:
                 cmd_gpu.append('-fopenmp')
             for d in libdir:

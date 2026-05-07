@@ -53,7 +53,7 @@ def _cplx_spatial_input(sh, seed):
 
 
 TRANSFORMS = [
-    # pytest.param("synth_jax", _spectral_input, id="synth"),
+    pytest.param("synth_jax", _spectral_input, id="synth"),
     pytest.param("analys_jax", _spatial_real_input, id="analys"),
     # pytest.param("synth_cplx_jax", _cplx_spectral_input, id="synth_cplx"),
     # pytest.param("analys_cplx_jax", _cplx_spatial_input, id="analys_cplx"),

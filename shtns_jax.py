@@ -55,8 +55,8 @@ CUDA_AVAILABLE = False
 try:
     _shtns_jax_lib_cuda = _load_jax_lib("libshtns_jax_cuda.so")
     _gpu_lib_members = [
-        ("shtns_synth_gpu", _shtns_jax_lib_cuda.synth_gpu),
-        ("shtns_analys_gpu", _shtns_jax_lib_cuda.analys_gpu),
+        ("shtns_synth", _shtns_jax_lib_cuda.synth_gpu),
+        ("shtns_analys", _shtns_jax_lib_cuda.analys_gpu),
     ]
     for _name, _func in _gpu_lib_members:
         jax.ffi.register_ffi_target(_name, jax.ffi.pycapsule(_func), platform="CUDA")
@@ -64,19 +64,6 @@ try:
 except Exception as e:
     logging.warning("Could not find GPU implementation for JAX:")
 
-
-# def _dispatch_platform(x, cpu_fn, cuda_fn):
-#     """Dispatch to cpu_fn(x) or cuda_fn(x) based on where x lives.
-
-#     jax.lax.platform_dependent uses the default backend outside of JIT,
-#     which picks CUDA even when data is on CPU. This helper checks the
-#     actual device in eager mode and uses platform_dependent only inside
-#     traced (JIT/vmap) contexts where it works correctly.
-#     """
-#     if isinstance(x, jax.core.Tracer):
-#         return jax.lax.platform_dependent(x, cpu=cpu_fn, cuda=cuda_fn)
-#     is_gpu = CUDA_AVAILABLE and any(d.platform == "gpu" for d in x.devices())
-#     return cuda_fn(x) if is_gpu else cpu_fn(x)
 
 
 ###################################
@@ -123,16 +110,11 @@ class sht(shtns.sht):
                 else (*orig_shape[:-1], *self.spat_shape)
             )
 
-            def get_impl(target_name):
-                return lambda x: jax.ffi.ffi_call(
-                    target_name,
-                    jax.ShapeDtypeStruct(out_shape, jnp.float64),
-                    vmap_method="broadcast_all",
-                )(x, cfg=int(self.this))
-
-            return jax.lax.platform_dependent(
-                x_in, cpu=get_impl("shtns_synth"), cuda=get_impl("shtns_synth_gpu")
-            )
+            return jax.ffi.ffi_call(
+                "shtns_synth",
+                jax.ShapeDtypeStruct(out_shape, jnp.float64),
+                vmap_method="broadcast_all",
+            )(x_in, cfg=int(self.this))
 
         @custom_transpose
         def _synth_tangent(residuals, x_tan: jax.Array) -> jax.Array:
@@ -149,18 +131,13 @@ class sht(shtns.sht):
             )
             weights = self._grid_weights()
 
-            def get_impl(target_name):
-                return lambda x: jax.ffi.ffi_call(
-                    target_name,
-                    jax.ShapeDtypeStruct(out_shape, jnp.complex128),
-                    vmap_method="broadcast_all",
-                )(x, cfg=int(self.this))
-
             scaled = ct_out / weights
 
-            result = jax.lax.platform_dependent(
-                scaled, cpu=get_impl("shtns_analys"), cuda=get_impl("shtns_analys_gpu")
-            )
+            result = jax.ffi.ffi_call(
+                "shtns_analys",
+                jax.ShapeDtypeStruct(out_shape, jnp.complex128),
+                vmap_method="broadcast_all",
+            )(scaled, cfg=int(self.this))
             if self.orthonormal:
                 result = result.at[self.lmax + 1 :].multiply(2.0)
             return result
@@ -189,16 +166,11 @@ class sht(shtns.sht):
                 (self.nlm,) if len(x_in.shape) == 2 else (*prefix_shape, self.nlm)
             )
 
-            def get_impl(target_name):
-                return lambda x: jax.ffi.ffi_call(
-                    target_name,
-                    jax.ShapeDtypeStruct(out_shape, jnp.complex128),
-                    vmap_method="broadcast_all",
-                )(x, cfg=int(self.this))
-
-            return jax.lax.platform_dependent(
-                x_in, cpu=get_impl("shtns_analys"), cuda=get_impl("shtns_analys_gpu")
-            )
+            return jax.ffi.ffi_call(
+                "shtns_analys",
+                jax.ShapeDtypeStruct(out_shape, jnp.complex128),
+                vmap_method="broadcast_all",
+            )(x_in, cfg=int(self.this))
 
         @custom_transpose
         def _analys_tangent(residuals, x_tan: jax.Array) -> jax.Array:
@@ -213,18 +185,13 @@ class sht(shtns.sht):
                 else (*orig_shape[:-1], *self.spat_shape)
             )
 
-            def get_impl(target_name):
-                return lambda x: jax.ffi.ffi_call(
-                    target_name,
-                    jax.ShapeDtypeStruct(out_shape, jnp.float64),
-                    vmap_method="broadcast_all",
-                )(x, cfg=int(self.this))
-
             if self.orthonormal:
                 ct_out = ct_out.at[self.lmax + 1 :].multiply(0.5)
-            result = jax.lax.platform_dependent(
-                ct_out, cpu=get_impl("shtns_synth"), cuda=get_impl("shtns_synth_gpu")
-            )
+            result = jax.ffi.ffi_call(
+                "shtns_synth",
+                jax.ShapeDtypeStruct(out_shape, jnp.float64),
+                vmap_method="broadcast_all",
+            )(ct_out, cfg=int(self.this))
             weights = self._grid_weights()
             return result * weights
 
