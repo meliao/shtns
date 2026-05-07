@@ -10,6 +10,7 @@ Example::
     sh.set_grid()
     alm = sh.analys_jax(spatial_array)   # supports jit, vmap, jvp, vjp
 """
+
 import logging
 import ctypes
 import os
@@ -61,13 +62,13 @@ try:
     for _name, _func in _gpu_lib_members:
         jax.ffi.register_ffi_target(_name, jax.ffi.pycapsule(_func), platform="CUDA")
     CUDA_AVAILABLE = True
-except Exception as e:
+except Exception:
     logging.warning("Could not find GPU implementation for JAX:")
-
 
 
 ###################################
 # Re-define sht class with JAX support
+
 
 class sht(shtns.sht):
     """SHTns sht with JAX autodiff support.
@@ -207,7 +208,7 @@ class sht(shtns.sht):
         return _analys_impl(x)
 
     def synth_cplx_jax(self, x: jax.Array) -> jax.Array:
-        """Complex inverse SHT: complex128 spectral (nlm_cplx,) -> 
+        """Complex inverse SHT: complex128 spectral (nlm_cplx,) ->
         complex128 spatial (spat_shape)."""
         self._check_jax_gpu_grid_compat()
         self._check_shape_dtype(x, (self.nlm_cplx,), jnp.complex128)
@@ -260,7 +261,7 @@ class sht(shtns.sht):
         return _synth_cplx_impl(x)
 
     def analys_cplx_jax(self, x: jax.Array) -> jax.Array:
-        """Complex forward SHT: complex128 spatial (spat_shape) -> 
+        """Complex forward SHT: complex128 spatial (spat_shape) ->
         complex128 spectral (nlm_cplx,)."""
         self._check_jax_gpu_grid_compat()
         self._check_shape_dtype(x, self.spat_shape, jnp.complex128)

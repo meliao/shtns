@@ -1,8 +1,9 @@
-"""Run these tests from the root of the repository with 
+"""Run these tests from the root of the repository with
 ```
 python -m pytest tests/
 ```
 """
+
 import numpy as np
 import pytest
 import jax
@@ -21,6 +22,7 @@ except RuntimeError:
     CUDA_DEVICES = []
 GPU_AVAILABLE = len(CUDA_DEVICES) > 0
 CPU_DEVICES = jax.devices("cpu")
+
 
 def _make_cfg(lmax=8, mmax=8, mres=1):
     sh = shtns_jax.sht(lmax, mmax, mres)
@@ -48,7 +50,9 @@ def _cplx_spectral_input(sh, seed):
 
 def _cplx_spatial_input(sh, seed):
     rng = np.random.default_rng(seed)
-    z = rng.standard_normal((sh.nphi, sh.nlat)) + 1j * rng.standard_normal((sh.nphi, sh.nlat))
+    z = rng.standard_normal((sh.nphi, sh.nlat)) + 1j * rng.standard_normal(
+        (sh.nphi, sh.nlat)
+    )
     return jnp.array(z, dtype=jnp.complex128)
 
 
@@ -112,6 +116,7 @@ def test_vjp(fn_name, make_input):
     assert cot_in.shape == x.shape
     assert cot_in.dtype == x.dtype
 
+
 @pytest.mark.parametrize("fn_name,make_input", TRANSFORMS)
 def test_no_input_modification(fn_name, make_input):
     sh = _make_cfg()
@@ -121,6 +126,7 @@ def test_no_input_modification(fn_name, make_input):
     _ = fn(x)
 
     assert jnp.array_equal(x, x_copy), f"{fn_name} modified its input array."
+
 
 @pytest.mark.parametrize("fn_name,make_input", TRANSFORMS)
 def test_against_numpy(fn_name, make_input):
@@ -137,7 +143,10 @@ def test_against_numpy(fn_name, make_input):
     print(y_numpy[:5])
     diffs = np.abs(np.array(y_jax) - np.array(y_numpy))
     print("Max difference:", np.max(diffs))
-    assert np.allclose(y_jax, y_numpy, rtol=RTOL, atol=ATOL), f"{fn_name} output differs from numpy implementation."
+    assert np.allclose(y_jax, y_numpy, rtol=RTOL, atol=ATOL), (
+        f"{fn_name} output differs from numpy implementation."
+    )
+
 
 @pytest.mark.skipif(not GPU_AVAILABLE, reason="GPU-only test")
 @pytest.mark.parametrize("fn_name,make_input", TRANSFORMS)
@@ -147,7 +156,7 @@ def test_cuda_implementation(fn_name, make_input):
     fn = getattr(sh, fn_name)
     x = make_input(sh, seed=0)
     x_cuda = jax.device_put(x, device=CUDA_DEVICES[0])
-    y_cuda = fn(x_cuda)
+    y_cuda = fn(x_cuda)  # noqa: F841
 
 
 @pytest.mark.skipif(not GPU_AVAILABLE, reason="GPU-only test")
@@ -158,7 +167,8 @@ def test_cpu_implementation(fn_name, make_input):
     fn = getattr(sh, fn_name)
     x = make_input(sh, seed=0)
     x_cpu = jax.device_put(x, device=CPU_DEVICES[0])
-    y_cpu = fn(x_cpu)
+    y_cpu = fn(x_cpu)  # noqa: F841
+
 
 @pytest.mark.skipif(not GPU_AVAILABLE, reason="GPU-only test")
 def test_theta_contiguous_cuda():
@@ -169,7 +179,7 @@ def test_theta_contiguous_cuda():
     phis = np.linspace(0, 2 * np.pi, nphi, endpoint=False)
     phi_grid, theta_grid = np.meshgrid(phis, thetas, indexing="ij")
     f_const = np.full(phi_grid.shape, 3.0, dtype=np.float64)
-    
+
     # Check that the analys_jax and synth_jax perform as expected on this grid.
     with pytest.raises(ValueError, match="SHT_PHI_CONTIGUOUS"):
         _ = sh.analys_jax(f_const)
