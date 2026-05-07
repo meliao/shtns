@@ -428,7 +428,7 @@ sphtor2scal_kernel(const double* __restrict__ mx, const double* __restrict__ slm
 template<typename real, bool ISHIOKA=true> __global__ void
 sphtor2ish_kernel(const real* __restrict__ mx, const real* __restrict__ xlm,
 		const real* __restrict__ slm, const real* __restrict__ tlm, real *vlm, real *wlm, 
-		const int llim, const int lmax, const int mres, const int ql_dist=0, const int ql_ish_dist=0)
+		const int llim, const int lmax, const int mres, const int ql_dist=0, const int ql_ish_dist=0, const bool adjoint=false)
 {
 	// indices for overlapping blocks:
 	const int overlap = (ISHIOKA) ? 8 : 4;
@@ -455,6 +455,11 @@ sphtor2ish_kernel(const real* __restrict__ mx, const real* __restrict__ xlm,
 		mm = mx[ofs];
 		if (slm) v = slm[ofs + b*ql_dist];
 		if (tlm) w = tlm[ofs + b*ql_dist];
+		if (adjoint && ll+m>0) {
+			real ll_1 = ((real) 1) / ((ll+m)*(ll+m+1));
+			v *= ll_1;
+			w *= ll_1;
+		}
 	}
 	M[j] = mm;
 	sl[j] = v;
@@ -789,12 +794,14 @@ void sphtor2scal_gpu(shtns_cfg shtns, std::complex<real>* d_Slm, std::complex<re
 	const int overlap = (shtns->kernel_flags & CUSHT_NO_ISHIOKA) ? 4 : 8;
 	dim3 blocks((2*(shtns->lmax+3)+blksze-overlap-1)/(blksze-overlap), mmax+1, shtns->howmany);
 	dim3 threads(blksze, 1, 1);
+	const bool adjoint = (llim & SHTNS_ADJOINT);
+	llim &= ~SHTNS_ADJOINT;
 	if (shtns->kernel_flags & CUSHT_NO_ISHIOKA) {
 		sphtor2ish_kernel<real, false> <<< blocks, threads, blksze*3*sizeof(real), shtns->comp_stream >>>
-			((real*) shtns->d_mx_stdt, (real*) shtns->d_xlm, (real*) d_Slm, (real*) d_Tlm, (real*) d_Vlm, (real*) d_Wlm, llim, shtns->lmax, shtns->mres, shtns->spec_dist*2, shtns->nlm_stride);
+			((real*) shtns->d_mx_stdt, (real*) shtns->d_xlm, (real*) d_Slm, (real*) d_Tlm, (real*) d_Vlm, (real*) d_Wlm, llim, shtns->lmax, shtns->mres, shtns->spec_dist*2, shtns->nlm_stride, adjoint);
 	} else
 	sphtor2ish_kernel <<< blocks, threads, blksze*3*sizeof(real), shtns->comp_stream >>>
-		((real*) shtns->d_mx_stdt, (real*) shtns->d_xlm, (real*) d_Slm, (real*) d_Tlm, (real*) d_Vlm, (real*) d_Wlm, llim, shtns->lmax, shtns->mres, shtns->spec_dist*2, shtns->nlm_stride);
+		((real*) shtns->d_mx_stdt, (real*) shtns->d_xlm, (real*) d_Slm, (real*) d_Tlm, (real*) d_Vlm, (real*) d_Wlm, llim, shtns->lmax, shtns->mres, shtns->spec_dist*2, shtns->nlm_stride, adjoint);
 	CUDA_ERROR_CHECK;
 }
 

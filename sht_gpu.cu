@@ -1161,8 +1161,9 @@ void SHsphtor_to_spat_gpu(shtns_cfg shtns, cplx *Slm, cplx *Tlm, double *Vt, dou
 	long nlm_pad = (howmany==1) ? shtns->nlm : shtns->spec_dist*howmany;
 	const long sizeof_real = shtns->sizeof_real;
 
-	if (llim < mmax*mres) {
-		mmax = llim / mres;	// truncate mmax too !
+	const int llim_true = llim &~ SHTNS_ADJOINT;
+	if (llim_true < mmax*mres) {
+		mmax = llim_true / mres;	// truncate mmax too !
 		if (howmany == 1) nlm_pad = nlm_calc( shtns->lmax, mmax, mres);		// transfer less data
 	}
 	if (howmany > 1  &&  2*nlm_pad > nlm_stride) { printf("ERROR: distance between field too large, unsupported\n."); return; }
