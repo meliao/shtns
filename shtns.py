@@ -133,6 +133,8 @@ class sht(object):
     def __init__(self, lmax, mmax=-1, mres=1, norm=sht_orthonormal, nthreads=0):
         r"""__init__(sht self, int lmax, int mmax=-1, int mres=1, int norm=sht_orthonormal, int nthreads=0) -> sht"""
         _shtns.sht_swiginit(self, _shtns.new_sht(lmax, mmax, mres, norm, nthreads))
+        self._grid_flags = 0
+
 
         		## array giving the degree of spherical harmonic coefficients.
         self.l = np.zeros(self.nlm, dtype=np.int32)
@@ -151,6 +153,14 @@ class sht(object):
         	self._gpu_synth_list = [self.cu_SH_to_spat, self.cu_SHsphtor_to_spat, self.cu_SHqst_to_spat]
         	self._gpu_analys_list = [self.cu_spat_to_SH, self.cu_spat_to_SHsphtor, self.cu_spat_to_SHqst]
 
+        # These attrs are used for implementing VJP and JVP rules for the 
+        # jax implementation
+        self.orthonormal = (norm == sht_orthonormal)
+        # zl, zm are indices for the complex SHT. Logic copied from self.zlm()
+        idx_vals = np.arange(self.nlm_cplx)
+        self.zl = np.sqrt(idx_vals).astype(int)
+        self.zm = idx_vals - self.zl * (self.zl + 1)
+
 
 
     __swig_destroy__ = _shtns.delete_sht
@@ -158,6 +168,7 @@ class sht(object):
     def set_grid(self, nlat=0, nphi=0, flags=sht_quick_init, polar_opt=1.0e-10, nl_order=1):
         r"""set_grid(sht self, int nlat=0, int nphi=0, int flags=sht_quick_init, double polar_opt=1.0e-10, int nl_order=1)"""
         val = _shtns.sht_set_grid(self, nlat, nphi, flags, polar_opt, nl_order)
+        self._grid_flags = int(flags)
 
         		## array giving the cosine of the colatitude for the grid.
         self.cos_theta = self.__ct()
@@ -382,8 +393,10 @@ class sht(object):
     		self._gpu_analys_list[n-1](*v_ptr, *out_ptr)
     		cupy.cuda.runtime.deviceSynchronize()
     	else:
+    		# Use private working copies so the backend cannot mutate user inputs.
+    		v_work = [vi.copy(order="C") for vi in v]
     		out = [np.empty(self.nlm, dtype=complex) for i in range(n)]
-    		self._cpu_analys_list[n-1](*v, *out)
+    		self._cpu_analys_list[n-1](*v_work, *out)
     	return out[0] if n==1 else tuple(out)
 
     def synth_grad(self,slm):
@@ -673,6 +686,7 @@ class rotation(object):
         r"""apply a rotation (previously defined by set_angles_ZYZ(), set_angles_ZXZ() or set_angle_axis()) to a spherical harmonic expansion of a complex-valued field with 'orthonormal' convention."""
         return _shtns.rotation_apply_cplx(self, Qlm)
 
+
+
 # Register rotation in _shtns:
 _shtns.rotation_swigregister(rotation)
-

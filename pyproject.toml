@@ -37,6 +37,7 @@ See <https://bitbucket.org/nschaeff/shtns/src/master/README.md>
 dependencies = [
   'numpy',
 ]
+optional-dependencies = { jax = ["jax>=0.5,<0.9"], examples = ["matplotlib"] }
 requires-python = ">=3.2"
 classifiers = [
     "Programming Language :: C",
