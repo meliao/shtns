@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2010-2023 Centre National de la Recherche Scientifique.
+ * Copyright (c) 2010-2026 Centre National de la Recherche Scientifique.
  * written by Nathanael Schaeffer (CNRS, ISTerre, Grenoble, France).
  * 
  * nathanael.schaeffer@univ-grenoble-alpes.fr
@@ -116,7 +116,7 @@ __launch_bounds__(64, 1)	// leads to better performance for small transforms on 
 void leg_m_kernel(
 	const real_g* __restrict__ al, const real_g* __restrict__ ct, const real* __restrict__ ql, real *q,
 	const int llim, const int nlat_2, const int nphi, const int m_inc,
-	const int ql_dist, const int q_dist
+	const int ql_dist, const int q_dist, const bool m0_x2_adjoint
 #if BLKSZE_SH2ISH > 0
 	,const real* __restrict__ xlm
 #endif
@@ -386,6 +386,7 @@ void leg_m_kernel(
 				  #if SHT_HI_PREC & 1
 					if (S==0)	{	north += mean[f];	south += mean[f];	}		// mean added at the very end for improved accuracy when mean >> std
 				  #endif
+					if (m0_x2_adjoint) {  north += north;	south += south;	 }		// multiply by 2 for some normalizations
 				  #ifndef LAYOUT_REAL_FFT
 					q[it*k_inc              + (b*NFIELDS+f)*q_dist] = north;
 					q[(nlat_2*2-1-it)*k_inc + (b*NFIELDS+f)*q_dist] = south;

@@ -811,8 +811,9 @@ static void legendre(shtns_cfg shtns, const int S, const void *ql, void *q, cons
 	int nlm_stride = (sh2ish_fuse) ? shtns->spec_dist*2 : shtns->nlm_stride;
 	int par_idx = (sh2ish_fuse) ? 2 : 0;
 
-	int llim_ = llim;
-	void* params[11] = {&shtns->d_clm, &shtns->d_ct, &ql, &q, &llim_, &nlat_2, &shtns->nphi, &shtns->nlat_padded, &nlm_stride, &shtns->nlat, &shtns->d_xlm};
+	bool m0_x2 = ((llim & SHTNS_ADJOINT) && (mmax>0) && (SHT_NORM != sht_fourpi));
+	int llim_ = (llim &~ SHTNS_ADJOINT);
+	void* params[12] = {&shtns->d_clm, &shtns->d_ct, &ql, &q, &llim_, &nlat_2, &shtns->nphi, &shtns->nlat_padded, &nlm_stride, &shtns->nlat, &m0_x2, &shtns->d_xlm};
 	cuLaunchKernel(shtns->gpu_kernels[S], 
 			shtns->gridDim_x[par_idx], shtns->gridDim_y[0], mmax+1,		// grid dim
 			shtns->nwarp[par_idx]*WARPSZE, 1, 1,					// block dim
@@ -1106,7 +1107,7 @@ cudaError_t copy_convert_field_to_gpu(void* dst, void* src, long n, int sizeof_r
 }
 
 extern "C"
-void SH_to_spat_gpu(shtns_cfg shtns, cplx *Qlm, double *Vr, const long int llim)
+void SH_to_spat_gpu(shtns_cfg shtns, cplx *Qlm, double *Vr, long int llim)
 {
 	cudaError_t err = cudaSuccess;
 	const int mres = shtns->mres;
@@ -1118,8 +1119,9 @@ void SH_to_spat_gpu(shtns_cfg shtns, cplx *Qlm, double *Vr, const long int llim)
 	double *d_qlm = d_q;		// "in-place" operation possible with ishioka
 	if (SHT_ALLOW_SH2ISH_FUSE == 1  &&  shtns->nwarp[2]>0) d_qlm = shtns->gpu_buf_in; // include sh2ishioka into legendre kernel
 
-	if (llim < mmax*mres) {
-		mmax = llim / mres;	// truncate mmax too !
+	int llim_true = (llim &~SHTNS_ADJOINT);
+	if (llim_true < mmax*mres) {
+		mmax = llim_true / mres;	// truncate mmax too !
 		if (shtns->howmany == 1) nlm_pad = nlm_calc( shtns->lmax, mmax, mres);		// transfer less data
 	}
 

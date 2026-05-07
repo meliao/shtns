@@ -663,6 +663,7 @@ void set_block_size_ish(int n_elem_x, int howmany_z, int& blksze_x, int& blksze_
 template<typename real=double>
 void sh2ishioka_gpu(shtns_cfg shtns, std::complex<real>* d_Qlm, std::complex<real>* d_Qlm_ish, int llim, int mmax, int S=0)
 {
+	llim &= SHTNS_ADJOINT-1;
 #ifndef SHT_ISH_ALT
 	int blksze = (((llim+2)*2+WARPSZE-1)/WARPSZE) * WARPSZE;
 	if (blksze > MAX_THREADS_PER_BLOCK) blksze = MAX_THREADS_PER_BLOCK;
