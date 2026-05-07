@@ -200,6 +200,15 @@ struct shtns_rot_ {		// describe a rotation matrix
 		if cupy is not None:
 			self._gpu_synth_list = [self.cu_SH_to_spat, self.cu_SHsphtor_to_spat, self.cu_SHqst_to_spat]
 			self._gpu_analys_list = [self.cu_spat_to_SH, self.cu_spat_to_SHsphtor, self.cu_spat_to_SHqst]
+
+		# These attrs are used for implementing VJP and JVP rules for the 
+        # jax implementation
+        self._grid_flags = 0
+        self.orthonormal = (norm == sht_orthonormal)
+        # zl, zm are indices for the complex SHT. Logic copied from self.zlm()
+        idx_vals = np.arange(self.nlm_cplx)
+        self.zl = np.sqrt(idx_vals).astype(int)
+        self.zm = idx_vals - self.zl * (self.zl + 1)
 	%}
 	%feature("kwargs") shtns_info;
 	shtns_info(int lmax, int mmax=-1, int mres=1, int norm=sht_orthonormal, int nthreads=0) {	// default arguments : mmax, mres and norm
@@ -222,6 +231,8 @@ struct shtns_rot_ {		// describe a rotation matrix
 	}
 	
 	%pythonappend set_grid %{
+		## Save grid flags for checking GPU compatibility
+		self._grid_flags = int(flags)
 		## array giving the cosine of the colatitude for the grid.
 		self.cos_theta = self.__ct()
 		self.cos_theta.flags.writeable = False
