@@ -3,9 +3,24 @@
 # and https://stackoverflow.com/questions/42585210/extending-setuptools-extension-to-use-cmake-in-setup-py
 
 from setuptools import setup, Extension
+from setuptools.command.build_py import build_py
 from setuptools.command.build_ext import build_ext, new_compiler, customize_compiler
 from numpy import get_include
 import os,sys
+import shutil
+from pathlib import Path
+
+
+def get_jaxlib_include():
+    try:
+        import jaxlib
+    except Exception:
+        return None
+    try:
+        inc = Path(jaxlib.__file__).resolve().parent / "include"
+        return str(inc) if inc.exists() else None
+    except Exception:
+        return None
 
 def getver():
     with open('CHANGELOG.md') as f:
@@ -65,7 +80,8 @@ if sys.platform.startswith('darwin'):    # MacOS specific (thanks to S. Belkner)
     from platform import machine
     libdir.append( "/opt/homebrew/lib" if machine() == 'arm64' else "/usr/local/lib" )      # directory depends on arm64 vs x86-64 !
 if len(libdir)>0:
-    config_cmd.append('LDFLAGS="-L{}"'.format(' -L'.join(libdir)))
+    # Pass LDFLAGS as a single argv item without embedded quotes.
+    config_cmd.append('LDFLAGS=-L{}'.format(' -L'.join(libdir)))
 
 use_openmp = os.environ.get('SHTNS_OPENMP', '1') != '0'   # allows to disable openmp with environment variable SHTNS_OPENMP=0
 if use_openmp:
@@ -106,15 +122,60 @@ class make(build_ext):
     def run(self):
         self.spawn(config_cmd)
         self.spawn(['make','--jobs=4', *shtns_o])   # make the objects required to build extension
+        # Build JAX shared libraries for FFI bindings (optional).
+        jax_inc = get_jaxlib_include()
+        if not jax_inc:
+            print("WARNING: jaxlib not found; skipping libshtns_jax_cpu.so build. "
+                  "Install jax/jaxlib then reinstall shtns[jax] to enable JAX support.")
+            super().run()
+            return
+        cxx = os.environ.get('CXX', 'g++')
+        # CPU JAX FFI library.
+        cmd_cpu = [cxx, '-O2', '-fpic', '-shared', '-std=c++17', '-I' + jax_inc]
+        if use_openmp:
+            cmd_cpu.append('-fopenmp')
+        for d in libdir:
+            cmd_cpu.append('-L' + d)
+        for lib in libs:
+            cmd_cpu.append('-l' + lib)
+        cmd_cpu += [*(shtns_o_cpu + shtns_o_com), 'shtns_jax.cpp', '-o', 'libshtns_jax_cpu.so']
+        self.spawn(cmd_cpu)
+
+        # CUDA JAX FFI library (optional).
+        if cuda_path != '':
+            cmd_gpu = [cxx, '-O2', '-fpic', '-shared', '-std=c++17', '-I' + jax_inc,
+                       '-I' + cuda_path + '/include', '-DSHTNS_GPU']
+            if use_openmp:
+                cmd_gpu.append('-fopenmp')
+            for d in libdir:
+                cmd_gpu.append('-L' + d)
+            for d in libdir_gpu:
+                cmd_gpu.append('-L' + d)
+            for lib in libs:
+                cmd_gpu.append('-l' + lib)
+            for lib in libs_gpu:
+                cmd_gpu.append('-l' + lib)
+            cmd_gpu += [*(shtns_o_gpu + shtns_o_com), 'shtns_jax_cuda.cpp', '-o', 'libshtns_jax_cuda.so']
+            self.spawn(cmd_gpu)
         super().run()
 
+class build_py_with_jax_lib(build_py):
+    def run(self):
+        self.run_command('build_ext')  # build .so files before copying them
+        super().run()
+        # Ensure JAX FFI libraries end up next to shtns.py in site-packages.
+        for name in ("libshtns_jax_cpu.so", "libshtns_jax_cuda.so", "libshtns_jax.so"):
+            src = os.path.join(os.path.abspath('.'), name)
+            if os.path.exists(src):
+                shutil.copy2(src, os.path.join(self.build_lib, name))
+
 setup(name='shtns',
-    cmdclass={'build_ext': make },
+    cmdclass={'build_ext': make, 'build_py': build_py_with_jax_lib },
         description='High performance Spherical Harmonic Transform',
         author='Nathanael Schaeffer',
         author_email='nathanael.schaeffer@univ-grenoble-alpes.fr',
         url='https://bitbucket.org/nschaeff/shtns',
         ext_modules=shtns_ext,
-        py_modules=["shtns"],
+        py_modules=["shtns", "shtns_jax"],
         requires=["numpy"],
         )
