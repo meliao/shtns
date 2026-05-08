@@ -22,7 +22,9 @@ def test_synth_does_not_modify_inputs(contig, n_args):
             qlm = rng.standard_normal(sh.nlm) + 1j * rng.standard_normal(sh.nlm)
             qlm = np.asarray(qlm, dtype=np.complex128)
         else:
-            base = rng.standard_normal(sh.nlm * 2) + 1j * rng.standard_normal(sh.nlm * 2)
+            base = rng.standard_normal(sh.nlm * 2) + 1j * rng.standard_normal(
+                sh.nlm * 2
+            )
             base = np.asarray(base, dtype=np.complex128)
             qlm = base[::2]
             assert not qlm.flags.forc
@@ -56,3 +58,25 @@ def test_analys_does_not_modify_inputs(contig, n_args):
 
     for v, original in zip(inputs, originals):
         assert np.array_equal(v, original)
+
+
+def test_analys_vector():
+    sh = _make_cfg(8, 8, 1)
+    rng = np.random.default_rng(789)
+
+    v1 = rng.standard_normal(sh.spat_shape).astype(np.float64)
+    v2 = rng.standard_normal(sh.spat_shape).astype(np.float64)
+    v3 = rng.standard_normal(sh.spat_shape).astype(np.float64)
+    qlm, slm, tlm = sh.analys(v1, v2, v3)
+
+    assert qlm.shape == (sh.nlm,)
+    assert slm.shape == (sh.nlm,)
+    assert tlm.shape == (sh.nlm,)
+
+    # Check there are no nans or infs.
+    assert np.all(np.isfinite(qlm))
+    assert np.all(np.isfinite(slm))
+    assert np.all(np.isfinite(tlm))
+    assert not np.any(np.isnan(qlm))
+    assert not np.any(np.isnan(slm))
+    assert not np.any(np.isnan(tlm))

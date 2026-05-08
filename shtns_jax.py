@@ -45,6 +45,8 @@ _shtns_jax_lib_cpu = _load_jax_lib("libshtns_jax_cpu.so")
 _cpu_lib_members = [
     ("shtns_synth", _shtns_jax_lib_cpu.synth_cpu),
     ("shtns_analys", _shtns_jax_lib_cpu.analys_cpu),
+    ("shtns_synth_vec", _shtns_jax_lib_cpu.synth_vec_cpu),
+    ("shtns_analys_vec", _shtns_jax_lib_cpu.analys_vec_cpu),
     ("shtns_synth_cplx", _shtns_jax_lib_cpu.synth_cplx_cpu),
     ("shtns_analys_cplx", _shtns_jax_lib_cpu.analys_cplx_cpu),
 ]
@@ -206,6 +208,46 @@ class sht(shtns.sht):
             return y, y_tan
 
         return _analys_impl(x)
+
+    def synth_vec_jax(self, x: jax.Array) -> jax.Array:
+        """
+        Vector inverse SHT: complex128 spectral (3, nlm,) -> float64 spatial (3, spat_shape).
+        """
+        self._check_jax_gpu_grid_compat()
+        self._check_shape_dtype(x, (3, self.nlm), jnp.complex128)
+
+        def _synth_vec_impl(x_in: jax.Array) -> jax.Array:
+            orig_shape = x_in.shape
+            out_shape = (
+                (3, *self.spat_shape)
+                if len(orig_shape) == 2
+                else (*orig_shape[:-2], 3, *self.spat_shape)
+            )
+            return jax.ffi.ffi_call(
+                "shtns_synth_vec",
+                jax.ShapeDtypeStruct(out_shape, jnp.float64),
+                vmap_method="broadcast_all",
+            )(x_in, cfg=int(self.this))
+
+        return _synth_vec_impl(x)
+
+    def analys_vec_jax(self, x: jax.Array) -> jax.Array:
+        """Vector forward SHT: float64 spatial (3, spat_shape) -> complex128 spectral (3, nlm)."""
+        self._check_jax_gpu_grid_compat()
+        self._check_shape_dtype(x, (3, *self.spat_shape), jnp.float64)
+
+        def _analys_vec_impl(x_in: jax.Array) -> jax.Array:
+            prefix_shape = x_in.shape[:-3]
+            out_shape = (
+                (3, self.nlm) if len(x_in.shape) == 3 else (*prefix_shape, 3, self.nlm)
+            )
+            return jax.ffi.ffi_call(
+                "shtns_analys_vec",
+                jax.ShapeDtypeStruct(out_shape, jnp.complex128),
+                vmap_method="broadcast_all",
+            )(x_in, cfg=int(self.this))
+
+        return _analys_vec_impl(x)
 
     def synth_cplx_jax(self, x: jax.Array) -> jax.Array:
         """Complex inverse SHT: complex128 spectral (nlm_cplx,) ->

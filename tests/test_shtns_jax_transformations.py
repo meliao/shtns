@@ -37,9 +37,22 @@ def _spectral_input(sh, seed):
     return jnp.array(qlm, dtype=jnp.complex128)
 
 
+def _spectral_vec_input(sh, seed):
+    rng = np.random.default_rng(seed)
+    qlm_vec = rng.standard_normal((3, sh.nlm)) + 1j * rng.standard_normal((3, sh.nlm))
+    qlm_vec[:, sh.m == 0] = qlm_vec[:, sh.m == 0].real + 0j
+    return jnp.array(qlm_vec, dtype=jnp.complex128)
+
+
 def _spatial_real_input(sh, seed):
     rng = np.random.default_rng(seed)
     return jnp.array(rng.standard_normal((sh.nphi, sh.nlat)), dtype=jnp.float64)
+
+
+def _spatial_vec_input(sh, seed):
+    rng = np.random.default_rng(seed)
+    vec = rng.standard_normal((3, sh.nphi, sh.nlat))
+    return jnp.array(vec, dtype=jnp.float64)
 
 
 def _cplx_spectral_input(sh, seed):
@@ -56,12 +69,19 @@ def _cplx_spatial_input(sh, seed):
     return jnp.array(z, dtype=jnp.complex128)
 
 
-TRANSFORMS = [
+SCALAR_TRANSFORMS = [
     pytest.param("synth_jax", _spectral_input, id="synth"),
     pytest.param("analys_jax", _spatial_real_input, id="analys"),
     # pytest.param("synth_cplx_jax", _cplx_spectral_input, id="synth_cplx"),
     # pytest.param("analys_cplx_jax", _cplx_spatial_input, id="analys_cplx"),
 ]
+
+VECTOR_TRANSFORMS = [
+    pytest.param("synth_vec_jax", _spectral_vec_input, id="synth_vec"),
+    pytest.param("analys_vec_jax", _spatial_vec_input, id="analys_vec"),
+]
+
+TRANSFORMS = SCALAR_TRANSFORMS + VECTOR_TRANSFORMS
 
 
 @pytest.mark.parametrize("fn_name,make_input", TRANSFORMS)
@@ -128,8 +148,8 @@ def test_no_input_modification(fn_name, make_input):
     assert jnp.array_equal(x, x_copy), f"{fn_name} modified its input array."
 
 
-@pytest.mark.parametrize("fn_name,make_input", TRANSFORMS)
-def test_against_numpy(fn_name, make_input):
+@pytest.mark.parametrize("fn_name,make_input", SCALAR_TRANSFORMS)
+def test_against_numpy_scalar(fn_name, make_input):
     sh = _make_cfg()
     fn_jax = getattr(sh, fn_name)
     # Get the name of the reference implementation by stripping the "_jax" suffix
@@ -137,6 +157,27 @@ def test_against_numpy(fn_name, make_input):
     x = make_input(sh, seed=0)
     x_cp = x.copy()
     y_numpy = fn_numpy(np.array(x))
+    y_jax = fn_jax(x_cp)
+    print(f"y_jax shape: {y_jax.shape}, y_numpy shape: {y_numpy.shape}")
+    print(y_jax[:5])
+    print(y_numpy[:5])
+    diffs = np.abs(np.array(y_jax) - np.array(y_numpy))
+    print("Max difference:", np.max(diffs))
+    assert np.allclose(y_jax, y_numpy, rtol=RTOL, atol=ATOL), (
+        f"{fn_name} output differs from numpy implementation."
+    )
+
+
+@pytest.mark.parametrize("fn_name,make_input", VECTOR_TRANSFORMS)
+def test_against_numpy_vector(fn_name, make_input):
+    sh = _make_cfg()
+    fn_jax = getattr(sh, fn_name)
+    # Get the name of the reference implementation by stripping the "_jax" suffix
+    fn_numpy = getattr(sh, fn_name.replace("_vec_jax", ""))
+    x = make_input(sh, seed=0)
+    x_cp = x.copy()
+    y_numpy = fn_numpy(np.array(x[0]), np.array(x[1]), np.array(x[2]))
+    y_numpy = np.array(y_numpy)
     y_jax = fn_jax(x_cp)
     print(f"y_jax shape: {y_jax.shape}, y_numpy shape: {y_numpy.shape}")
     print(y_jax[:5])

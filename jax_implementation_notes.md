@@ -16,8 +16,8 @@ This builds two modules, the `shtns` module we all know and love, and a second m
 | `analys_jax` | Y | Y | Y | Y | |
 | `synth_cplx_jax` | N | N | N | N | |
 | `analys_cplx_jax` | N | N | N | N | |
-| `synth_vec_jax` | N | N | N | N | Vectorial SH -> spat transform. |
-| `analys_vec_jax` | N | N | N | N | Vectorial spat -> SH transform. |
+| `synth_vec_jax` | Y | N | N | N | Vectorial SH -> spat transform. |
+| `analys_vec_jax` | Y | N | N | N | Vectorial spat -> SH transform. |
 
 
 ## Testing the JAX code
