@@ -945,7 +945,7 @@ void ileg_m_kernel(const real_g* __restrict__ al, const real_g* __restrict__ wg,
 				}
 				// TODO: could be optimized once everything is in a warp, can be distributed among NFIELDS.
 				if (BLOCKSIZE > WARPSZE) {	__syncthreads(); } else { _syncwarp_fence; }
-				if (it<NFIELDS)  ql[llim+1  + (b*NFIELDS+it)*ql_dist] = yl[it*l_inc];		// store the mean for future assembly, in ishioka2sh_kernel()
+				if (w_norm != 0 && it<NFIELDS)  ql[llim+1  + (b*NFIELDS+it)*ql_dist] = yl[it*l_inc];		// store the mean for future assembly, in ishioka2sh_kernel()
 				#pragma unroll
 				for (int f=0; f<NFIELDS; f++) my_reo[f] = yl[f*l_inc] * w_norm;
 		}

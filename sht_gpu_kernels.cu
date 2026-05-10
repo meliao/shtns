@@ -278,7 +278,7 @@ sh2ishioka_kernel(const double* __restrict__ xlm, const double* __restrict__ ql,
 /// includes zero-out for unused modes.
 template<typename real> __global__ void
 ishioka2sh_kernel_alt(const int NFIELDS, const real* __restrict__ xlm, const real* __restrict__ ql_ish, real* ql,
-	const int llim, const int lmax, const int mmax, const int mres, const int S, const real mpos_scale, const int ql_ish_dist=0, const int ql_dist=0)
+	const int llim, const int lmax, const int mmax, const int mres, const int S, const real mpos_scale, const int ql_ish_dist=0, const int ql_dist=0, const int no_mean=0)
 {
 	const int im = blockIdx.y;
 	const int ll = blockDim.x * blockIdx.x + threadIdx.x;
@@ -306,7 +306,7 @@ ishioka2sh_kernel_alt(const int NFIELDS, const real* __restrict__ xlm, const rea
 			if (add2) {	// l-m even && real part (ll&3 == 0)
 				q += ql_ish[k*ql_ish_dist -2] * x1;		// contribution of l-2
 			}
-			if (sizeof(real)==4 && ll+S==0) {	// for S==0, add the mean (l==0) as late as possible
+			if (sizeof(real)==4 && ll+no_mean==0) {	// for S==0, add the mean (l==0) as late as possible
 				q += ql_ish[k*ql_ish_dist + llim + 1] * x0;
 			}
 			ql[k*ql_dist] = q;	// coalesced store
@@ -707,7 +707,7 @@ void sh2ishioka_gpu(shtns_cfg shtns, std::complex<real>* d_Qlm, std::complex<rea
 /// includes zero-out for unused modes.
 template<typename real> __global__ void
 reduced2sh_kernel_alt(const int NFIELDS, const real* __restrict__ xlm, const real* __restrict__ ql_ish, real* ql,
-	const int llim, const int lmax, const int mmax, const int mres, const int S, const real mpos_scale, const int ql_ish_dist=0, const int ql_dist=0)
+	const int llim, const int lmax, const int mmax, const int mres, const int S, const real mpos_scale, const int ql_ish_dist=0, const int ql_dist=0, const int no_mean=0)
 {
 	const int im = blockIdx.y;
 	const int ll = blockDim.x * blockIdx.x + threadIdx.x;
@@ -728,7 +728,7 @@ reduced2sh_kernel_alt(const int NFIELDS, const real* __restrict__ xlm, const rea
 		const bool read = (ll>>1) <= llim && ((ll&1)==0);
 		for (int k=NFIELDS-1; k>=0; k--) {
 			if (read)  q = ql_ish[k*ql_ish_dist] * x0;	// only real part (ll&1 == 0)
-			if (sizeof(real)==4 && ll+S==0) {	// for S==0, add the mean (l==0) as late as possible
+			if (sizeof(real)==4 && ll+no_mean==0) {	// for S==0, add the mean (l==0) as late as possible
 				q += ql_ish[k*ql_ish_dist + llim + 1] * x0;
 			}
 			ql[k*ql_dist] = q;	// coalesced store
@@ -740,7 +740,7 @@ reduced2sh_kernel_alt(const int NFIELDS, const real* __restrict__ xlm, const rea
 		const bool read = (ll>>1) <= llim-m;
 		x0 *= mpos_scale;
 		for (int k=NFIELDS-1; k>=0; k--) {
-			if (read)  q = ql_ish[k*ql_ish_dist] * x0;	// only real part (ll&1 == 0)
+			if (read)  q = ql_ish[k*ql_ish_dist] * x0;
 			ql[k*ql_dist] = q;	// coalesced store
 		}
 	}
@@ -777,10 +777,10 @@ void ishioka2sh_gpu(shtns_cfg shtns, std::complex<real>* d_Qlm_ish, std::complex
 	const real* xlm = (real*) shtns->d_x2lm;
 	if (shtns->kernel_flags & CUSHT_NO_ISHIOKA) {
 		reduced2sh_kernel_alt <<< blocks, threads, 0, shtns->comp_stream >>>
-			(nfields, xlm, (real*) d_Qlm_ish, (real*) d_Qlm, llim, shtns->lmax, mmax, shtns->mres, S, mpos_scale, shtns->nlm_stride, shtns->spec_dist*2);
+			(nfields, xlm, (real*) d_Qlm_ish, (real*) d_Qlm, llim, shtns->lmax, mmax, shtns->mres, S, mpos_scale, shtns->nlm_stride, shtns->spec_dist*2, S+adjoint);
 	} else {
 		ishioka2sh_kernel_alt <<< blocks, threads, 0, shtns->comp_stream >>>
-			(nfields, xlm, (real*) d_Qlm_ish, (real*) d_Qlm, llim, shtns->lmax, mmax, shtns->mres, S, mpos_scale, shtns->nlm_stride, shtns->spec_dist*2);
+			(nfields, xlm, (real*) d_Qlm_ish, (real*) d_Qlm, llim, shtns->lmax, mmax, shtns->mres, S, mpos_scale, shtns->nlm_stride, shtns->spec_dist*2, S+adjoint);
 	}
 #endif
 	CUDA_ERROR_CHECK;
