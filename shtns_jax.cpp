@@ -148,6 +148,76 @@ XLA_FFI_DEFINE_HANDLER_SYMBOL(
         .Ret<ffi::Buffer<ffi::C128>>()   // [qlm, slm, tlm]: stacked spectral (3, nlm)
 );
 
+// Adjoint of vector synthesis: F64 spatial (3, n_spat) -> C128 spectral (3, nlm)
+// Used as VJP of synth_vec.
+ffi::Error adjoint_synth_vec_jax_cpu(int64_t cfg, ffi::Buffer<ffi::F64> x,
+                                      ffi::ResultBuffer<ffi::C128> y) {
+  shtns_cfg sh = reinterpret_cast<shtns_cfg>(cfg);
+  long n_spat = sh->nlat * sh->nphi;
+  long n_total = x.element_count();
+  if ((n_spat == 0) || (n_total % (3 * n_spat) != 0))
+    return ffi::Error::InvalidArgument("shtns: adjoint_synth_vec input array has wrong size");
+  long n_other = n_total / (3 * n_spat);
+  long nlm = sh->nlm;
+  if (y->element_count() != n_other * 3 * nlm)
+    return ffi::Error::InvalidArgument("shtns: adjoint_synth_vec output array has wrong size");
+  // Make a copy of the input
+  std::vector<double> x_copy(x.typed_data(), x.typed_data() + n_total);
+  for (int64_t n = 0; n < n_other; n++) {
+    double* vr = &(x_copy[n * 3 * n_spat ]);
+    double* vt = &(x_copy[n * 3 * n_spat + 1 * n_spat]);
+    double* vp = &(x_copy[n * 3 * n_spat + 2 * n_spat]);
+    cplx* qlm = (cplx*) &(y->typed_data()[n * 3 * nlm );
+    cplx* slm = (cplx*) &(y->typed_data()[n * 3 * nlm + 1 * nlm]);
+    cplx* tlm = (cplx*) &(y->typed_data()[n * 3 * nlm + 2 * nlm]);
+    adjoint_SHqst_to_spat(sh, vr, vt, vp, qlm, slm, tlm);
+  }
+  return ffi::Error::Success();
+}
+
+XLA_FFI_DEFINE_HANDLER_SYMBOL(
+    adjoint_synth_vec_cpu, adjoint_synth_vec_jax_cpu,
+    ffi::Ffi::Bind()
+        .Attr<int64_t>("cfg")
+        .Arg<ffi::Buffer<ffi::F64>>()    // [vr, vt, vp]: stacked spatial (3, n_spat)
+        .Ret<ffi::Buffer<ffi::C128>>()   // [qlm, slm, tlm]: stacked spectral (3, nlm)
+);
+
+// Adjoint of vector analysis: C128 spectral (3, nlm) -> F64 spatial (3, n_spat)
+// Used as VJP of analys_vec.
+ffi::Error adjoint_analys_vec_jax_cpu(int64_t cfg, ffi::Buffer<ffi::C128> x,
+                                       ffi::ResultBuffer<ffi::F64> y) {
+  shtns_cfg sh = reinterpret_cast<shtns_cfg>(cfg);
+  long nlm = (x.dimensions().size() == 0) ? 0 : x.dimensions().back();
+  if (nlm != sh->nlm)
+    return ffi::Error::InvalidArgument("shtns: adjoint_analys_vec input array has wrong size");
+  long n_total = x.element_count();
+  if (n_total % (3 * nlm) != 0)
+    return ffi::Error::InvalidArgument("shtns: adjoint_analys_vec input second-to-last dim must be 3");
+  long n_other = n_total / (3 * nlm);
+  long n_spat = sh->nlat * sh->nphi;
+  if (y->element_count() != n_other * 3 * n_spat)
+    return ffi::Error::InvalidArgument("shtns: adjoint_analys_vec output array has wrong size");
+  for (int64_t n = 0; n < n_other; n++) {
+    cplx* qlm = (cplx*) &(x.typed_data()[n * 3 * nlm ]);
+    cplx* slm = (cplx*) &(x.typed_data()[n * 3 * nlm + 1 * nlm]);
+    cplx* tlm = (cplx*) &(x.typed_data()[n * 3 * nlm + 2 * nlm]);
+    double* vr = &(y->typed_data()[n * 3 * n_spat ]);
+    double* vt = &(y->typed_data()[n * 3 * n_spat + 1 * n_spat]);
+    double* vp = &(y->typed_data()[n * 3 * n_spat + 2 * n_spat]);
+    adjoint_spat_to_SHqst(sh, qlm, slm, tlm, vr, vt, vp);
+  }
+  return ffi::Error::Success();
+}
+
+XLA_FFI_DEFINE_HANDLER_SYMBOL(
+    adjoint_analys_vec_cpu, adjoint_analys_vec_jax_cpu,
+    ffi::Ffi::Bind()
+        .Attr<int64_t>("cfg")
+        .Arg<ffi::Buffer<ffi::C128>>()   // [qlm, slm, tlm]: stacked spectral (3, nlm)
+        .Ret<ffi::Buffer<ffi::F64>>()    // [vr, vt, vp]: stacked spatial (3, n_spat)
+);
+
 // Complex synthesis: C128 spectral (nlm_cplx) -> C128 spatial (nlat*nphi)
 ffi::Error synth_cplx_jax_cpu(int64_t cfg, ffi::Buffer<ffi::C128> x,
                                ffi::ResultBuffer<ffi::C128> y) {

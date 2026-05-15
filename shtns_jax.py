@@ -47,6 +47,8 @@ _cpu_lib_members = [
     ("shtns_analys", _shtns_jax_lib_cpu.analys_cpu),
     ("shtns_synth_vec", _shtns_jax_lib_cpu.synth_vec_cpu),
     ("shtns_analys_vec", _shtns_jax_lib_cpu.analys_vec_cpu),
+    ("shtns_adjoint_synth_vec", _shtns_jax_lib_cpu.adjoint_synth_vec_cpu),
+    ("shtns_adjoint_analys_vec", _shtns_jax_lib_cpu.adjoint_analys_vec_cpu),
     ("shtns_synth_cplx", _shtns_jax_lib_cpu.synth_cplx_cpu),
     ("shtns_analys_cplx", _shtns_jax_lib_cpu.analys_cplx_cpu),
 ]
@@ -211,11 +213,12 @@ class sht(shtns.sht):
 
     def synth_vec_jax(self, x: jax.Array) -> jax.Array:
         """
-        Vector inverse SHT: complex128 spectral (3, nlm,) -> float64 spatial (3, spat_shape).
+        Vector inverse SHT: complex128 spectral (3, nlm,) -> float64 spatial (3, *spat_shape).
         """
         self._check_jax_gpu_grid_compat()
         self._check_shape_dtype(x, (3, self.nlm), jnp.complex128)
 
+        @jax.custom_jvp
         def _synth_vec_impl(x_in: jax.Array) -> jax.Array:
             orig_shape = x_in.shape
             out_shape = (
@@ -229,6 +232,34 @@ class sht(shtns.sht):
                 vmap_method="broadcast_all",
             )(x_in, cfg=int(self.this))
 
+        @custom_transpose
+        def _synth_vec_tangent(residuals, x_tan: jax.Array) -> jax.Array:
+            return _synth_vec_impl(x_tan)
+
+        @_synth_vec_tangent.def_transpose
+        def _synth_vec_vjp(residuals, ct_out: jax.Array):
+            n_vec_spat_dims = 1 + len(self.spat_shape)
+            prefix_shape = ct_out.shape[:-n_vec_spat_dims]
+            out_shape = (
+                (3, self.nlm)
+                if len(ct_out.shape) == n_vec_spat_dims
+                else (*prefix_shape, 3, self.nlm)
+            )
+            return jax.ffi.ffi_call(
+                "shtns_adjoint_synth_vec",
+                jax.ShapeDtypeStruct(out_shape, jnp.complex128),
+                vmap_method="broadcast_all",
+            )(ct_out, cfg=int(self.this))
+
+        @_synth_vec_impl.defjvp
+        def _synth_vec_jvp(primals, tangents):
+            (x_in,) = primals
+            (x_tan,) = tangents
+            y = _synth_vec_impl(x_in)
+            tan_out_types = jax.typeof(y).to_tangent_aval()
+            y_tan = _synth_vec_tangent(tan_out_types, None, x_tan)
+            return y, y_tan
+
         return _synth_vec_impl(x)
 
     def analys_vec_jax(self, x: jax.Array) -> jax.Array:
@@ -236,6 +267,7 @@ class sht(shtns.sht):
         self._check_jax_gpu_grid_compat()
         self._check_shape_dtype(x, (3, *self.spat_shape), jnp.float64)
 
+        @jax.custom_jvp
         def _analys_vec_impl(x_in: jax.Array) -> jax.Array:
             prefix_shape = x_in.shape[:-3]
             out_shape = (
@@ -246,6 +278,33 @@ class sht(shtns.sht):
                 jax.ShapeDtypeStruct(out_shape, jnp.complex128),
                 vmap_method="broadcast_all",
             )(x_in, cfg=int(self.this))
+
+        @custom_transpose
+        def _analys_vec_tangent(residuals, x_tan: jax.Array) -> jax.Array:
+            return _analys_vec_impl(x_tan)
+
+        @_analys_vec_tangent.def_transpose
+        def _analys_vec_vjp(residuals, ct_out: jax.Array):
+            orig_shape = ct_out.shape
+            out_shape = (
+                (3, *self.spat_shape)
+                if len(orig_shape) == 2
+                else (*orig_shape[:-2], 3, *self.spat_shape)
+            )
+            return jax.ffi.ffi_call(
+                "shtns_adjoint_analys_vec",
+                jax.ShapeDtypeStruct(out_shape, jnp.float64),
+                vmap_method="broadcast_all",
+            )(ct_out, cfg=int(self.this))
+
+        @_analys_vec_impl.defjvp
+        def _analys_vec_jvp(primals, tangents):
+            (x_in,) = primals
+            (x_tan,) = tangents
+            y = _analys_vec_impl(x_in)
+            tan_out_types = jax.typeof(y).to_tangent_aval()
+            y_tan = _analys_vec_tangent(tan_out_types, None, x_tan)
+            return y, y_tan
 
         return _analys_vec_impl(x)
 
