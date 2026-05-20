@@ -51,6 +51,8 @@ _cpu_lib_members = [
     ("shtns_adjoint_analys_vec", _shtns_jax_lib_cpu.adjoint_analys_vec_cpu),
     ("shtns_synth_cplx", _shtns_jax_lib_cpu.synth_cplx_cpu),
     ("shtns_analys_cplx", _shtns_jax_lib_cpu.analys_cplx_cpu),
+    ("shtns_synth_vec_cplx", _shtns_jax_lib_cpu.synth_vec_cplx_cpu),
+    ("shtns_analys_vec_cplx", _shtns_jax_lib_cpu.analys_vec_cplx_cpu),
 ]
 for _name, _func in _cpu_lib_members:
     jax.ffi.register_ffi_target(_name, jax.ffi.pycapsule(_func), platform="cpu")
@@ -307,6 +309,48 @@ class sht(shtns.sht):
             return y, y_tan
 
         return _analys_vec_impl(x)
+
+    def synth_vec_cplx_jax(self, x: jax.Array) -> jax.Array:
+        """Complex vector inverse SHT: complex128 spectral (3, nlm_cplx) ->
+        complex128 spatial (3, spat_shape)."""
+        self._check_jax_gpu_grid_compat()
+        self._check_shape_dtype(x, (3, self.nlm_cplx), jnp.complex128)
+
+        def _synth_vec_cplx_impl(x_in: jax.Array) -> jax.Array:
+            orig_shape = x_in.shape
+            out_shape = (
+                (3, *self.spat_shape)
+                if len(orig_shape) == 2
+                else (*orig_shape[:-2], 3, *self.spat_shape)
+            )
+            return jax.ffi.ffi_call(
+                "shtns_synth_vec_cplx",
+                jax.ShapeDtypeStruct(out_shape, jnp.complex128),
+                vmap_method="broadcast_all",
+            )(x_in, cfg=int(self.this))
+
+        return _synth_vec_cplx_impl(x)
+
+    def analys_vec_cplx_jax(self, x: jax.Array) -> jax.Array:
+        """Complex vector forward SHT: complex128 spatial (3, spat_shape) ->
+        complex128 spectral (3, nlm_cplx)."""
+        self._check_jax_gpu_grid_compat()
+        self._check_shape_dtype(x, (3, *self.spat_shape), jnp.complex128)
+
+        def _analys_vec_cplx_impl(x_in: jax.Array) -> jax.Array:
+            prefix_shape = x_in.shape[:-3]
+            out_shape = (
+                (3, self.nlm_cplx)
+                if len(x_in.shape) == 3
+                else (*prefix_shape, 3, self.nlm_cplx)
+            )
+            return jax.ffi.ffi_call(
+                "shtns_analys_vec_cplx",
+                jax.ShapeDtypeStruct(out_shape, jnp.complex128),
+                vmap_method="broadcast_all",
+            )(x_in, cfg=int(self.this))
+
+        return _analys_vec_cplx_impl(x)
 
     def synth_cplx_jax(self, x: jax.Array) -> jax.Array:
         """Complex inverse SHT: complex128 spectral (nlm_cplx,) ->

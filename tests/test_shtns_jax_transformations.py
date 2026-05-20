@@ -69,6 +69,20 @@ def _cplx_spatial_input(sh, seed):
     return jnp.array(z, dtype=jnp.complex128)
 
 
+def _cplx_spectral_vec_input(sh, seed):
+    rng = np.random.default_rng(seed)
+    alm_vec = rng.standard_normal((3, sh.nlm_cplx)) + 1j * rng.standard_normal(
+        (3, sh.nlm_cplx)
+    )
+    return jnp.array(alm_vec, dtype=jnp.complex128)
+
+def _cplx_spatial_vec_input(sh, seed):
+    rng = np.random.default_rng(seed)
+    z_vec = rng.standard_normal((3, sh.nphi, sh.nlat)) + 1j * rng.standard_normal(
+        (3, sh.nphi, sh.nlat)
+    )
+    return jnp.array(z_vec, dtype=jnp.complex128)
+
 SCALAR_TRANSFORMS = [
     pytest.param("synth_jax", _spectral_input, id="synth"),
     pytest.param("analys_jax", _spatial_real_input, id="analys"),
@@ -79,6 +93,8 @@ SCALAR_TRANSFORMS = [
 VECTOR_TRANSFORMS = [
     pytest.param("synth_vec_jax", _spectral_vec_input, id="synth_vec"),
     pytest.param("analys_vec_jax", _spatial_vec_input, id="analys_vec"),
+    pytest.param("synth_vec_cplx_jax", _cplx_spectral_vec_input, id="synth_vec_cplx"),
+    pytest.param("analys_vec_cplx_jax", _cplx_spatial_vec_input, id="analys_vec_cplx"),
 ]
 
 TRANSFORMS = SCALAR_TRANSFORMS + VECTOR_TRANSFORMS
@@ -173,9 +189,25 @@ def test_against_numpy_vector(fn_name, make_input):
     sh = _make_cfg()
     fn_jax = getattr(sh, fn_name)
     # Get the name of the reference implementation by stripping the "_jax" suffix
-    fn_numpy = getattr(sh, fn_name.replace("_vec_jax", ""))
+    contains_cplx = "cplx" in fn_name
+    if fn_name.startswith("synth"):
+        if contains_cplx:
+            fn_numpy = sh.synth_cplx
+        else:
+            fn_numpy = sh.synth
+    elif fn_name.startswith("analys"):
+        if contains_cplx:
+            fn_numpy = sh.analys_cplx
+        else:
+            fn_numpy = sh.analys
+    else:
+        raise ValueError(f"Unexpected function name: {fn_name}")
     x = make_input(sh, seed=0)
     x_cp = x.copy()
+    in_0 = np.array(x[0])
+    in_1 = np.array(x[1])
+    in_2 = np.array(x[2])
+    print("Input dtypes:", in_0.dtype, in_1.dtype, in_2.dtype)
     y_numpy = fn_numpy(np.array(x[0]), np.array(x[1]), np.array(x[2]))
     y_numpy = np.array(y_numpy)
     y_jax = fn_jax(x_cp)

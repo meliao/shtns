@@ -450,7 +450,7 @@ class sht(object):
     		zt = np.empty(self.spat_shape, dtype=complex)		# v_theta
     		zp = np.empty(self.spat_shape, dtype=complex)		# v_phi
     		self.SHqst_to_spat_cplx(q[0],q[1],q[2],zr,zt,zp)
-    		return vr,vt,vp
+    		return zr,zt,zp
 
     def analys_cplx(self,*arg):
     	"""
