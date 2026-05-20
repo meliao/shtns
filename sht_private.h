@@ -219,6 +219,7 @@ struct shtns_info {		// MUST start with "int nlm;"
 	//cufftHandle cufft_plan_float;				// the cufft Handle single precision
 	#endif
 	cudaEvent_t gpu_timer[3];
+	cudaEvent_t sync_evt;		// for synchronizing comp_stream with external streams (e.g. JAX)
 	#endif	/* SHTNS_GPU  ===> NOTHING ELSE  IN THE STRUCTURE BEYOND THIS LINE */
 
 	// the end should be aligned on the size of int, to allow the storage of small arrays.

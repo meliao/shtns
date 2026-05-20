@@ -64,6 +64,8 @@ try:
     _gpu_lib_members = [
         ("shtns_synth", _shtns_jax_lib_cuda.synth_gpu),
         ("shtns_analys", _shtns_jax_lib_cuda.analys_gpu),
+        ("shtns_synth_vec", _shtns_jax_lib_cuda.synth_vec_gpu),
+        ("shtns_analys_vec", _shtns_jax_lib_cuda.analys_vec_gpu),
     ]
     for _name, _func in _gpu_lib_members:
         jax.ffi.register_ffi_target(_name, jax.ffi.pycapsule(_func), platform="CUDA")

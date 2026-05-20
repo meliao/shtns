@@ -555,6 +555,7 @@ void cushtns_release_gpu(shtns_cfg shtns)
 {
 	if (shtns->gpu_staging_mem) cudaFree(shtns->gpu_staging_mem);
 	if (shtns->cu_flags & CUSHT_OWN_XFER_STREAM) cudaStreamDestroy(shtns->xfer_stream);
+	cudaEventDestroy(shtns->sync_evt);
 	destroy_cuda_buffer_fft(shtns);
 	cushtns_profiling(shtns, 0);		// frees resources allocated for profiling
 	// TODO: arrays possibly shared between different shtns_cfg should be deallocated ONLY if not used by other shtns_cfg.
@@ -681,6 +682,7 @@ int cushtns_init_gpu(shtns_cfg shtns)
 
 	err_count += init_cuda_buffer_fft(shtns, device_id, sizeof_real);
 	err_count += init_cuda_program(shtns, gpu_arch_target);
+	cudaEventCreateWithFlags(&shtns->sync_evt, cudaEventDisableTiming);
 
 	if (err_count != 0) {
 		cushtns_release_gpu(shtns);
