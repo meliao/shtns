@@ -261,3 +261,47 @@ def test_theta_contiguous_cuda():
 
     with pytest.raises(ValueError, match="SHT_PHI_CONTIGUOUS"):
         _ = sh.synth_jax(qlm_jax)
+
+
+def _cplx_qst_input(sh, seed):
+    rng = np.random.default_rng(seed)
+    out = []
+    for _ in range(3):
+        c = rng.standard_normal(sh.nlm_cplx) + 1j * rng.standard_normal(sh.nlm_cplx)
+        out.append(c.astype(np.complex128))
+    return out  # [Qlm, Slm, Tlm]
+
+
+@pytest.mark.parametrize("lmax", [8, 16])
+@pytest.mark.parametrize("seed", [1, 2])
+def test_SHqst_to_point_cplx(lmax, seed):
+    """SHqst_to_point_cplx at grid nodes must match the full-grid complex vector
+    synthesis SHqst_to_spat_cplx (exposed as synth_cplx with 3 args)."""
+    sh = shtns_jax.sht(lmax, lmax, 1)
+    nlat, nphi = sh.set_grid(flags=shtns.SHT_THETA_CONTIGUOUS)
+    Qlm, Slm, Tlm = _cplx_qst_input(sh, seed)
+
+    vr, vt, vp = sh.synth_cplx(Qlm, Slm, Tlm)  # ground truth, shape (nphi, nlat)
+    cost = sh.cos_theta
+    phi = np.linspace(0, 2 * np.pi, nphi, endpoint=False)
+
+    # interior latitudes only (avoid the poles where sin(theta) -> 0)
+    for i in range(nphi):
+        for j in range(1, nlat - 1):
+            r, t, p = sh.SHqst_to_point_cplx(Qlm, Slm, Tlm, cost[j], phi[i])
+            assert np.allclose(r, vr[i, j], rtol=RTOL, atol=ATOL)
+            assert np.allclose(t, vt[i, j], rtol=RTOL, atol=ATOL)
+            assert np.allclose(p, vp[i, j], rtol=RTOL, atol=ATOL)
+
+
+def test_SHqst_to_point_cplx_vectorized():
+    """Array (cost, phi) input returns arrays equal to looping scalar calls."""
+    sh = shtns_jax.sht(12, 12, 1)
+    nlat, nphi = sh.set_grid(flags=shtns.SHT_THETA_CONTIGUOUS)
+    Qlm, Slm, Tlm = _cplx_qst_input(sh, seed=5)
+    cost = sh.cos_theta[1:-1]
+    phi = np.full_like(cost, 0.7)
+    vr, vt, vp = sh.SHqst_to_point_cplx(Qlm, Slm, Tlm, cost, phi)
+    for k in range(cost.size):
+        r, t, p = sh.SHqst_to_point_cplx(Qlm, Slm, Tlm, float(cost[k]), float(phi[k]))
+        assert np.allclose([vr[k], vt[k], vp[k]], [r, t, p], rtol=RTOL, atol=ATOL)

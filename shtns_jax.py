@@ -18,6 +18,7 @@ import os
 import jax
 from jax.custom_transpose import custom_transpose
 import jax.numpy as jnp
+import numpy as np
 
 import shtns
 
@@ -103,6 +104,122 @@ class sht(shtns.sht):
         w = self.gauss_wts()  # shape (nlat/2,)
         full_w = jnp.concatenate([w, w[::-1]])  # shape (nlat,)
         return full_w.reshape(1, -1) * 2 * jnp.pi / self.nphi
+
+    def _dtheta_cplx_op(self):
+        """Precompute (and cache) the sin(theta) d/dtheta operator on the complex
+        SH layout (index k = l(l+1)+m), expressed so that it can be evaluated by
+        SH_to_point_cplx.
+
+        Uses the orthonormal-SH recurrence
+            sin(theta) dY_l^m/dtheta = l eps_{l+1}^m Y_{l+1}^m - (l+1) eps_l^m Y_{l-1}^m,
+            eps_l^m = sqrt((l^2 - m^2) / ((2l-1)(2l+1))),
+        which in coefficient form (g = sin(theta) df/dtheta) reads
+            d_(l,m) = (l-1) eps_l^m c_(l-1,m) - (l+2) eps_{l+1}^m c_(l+1,m).
+
+        The derivative of a degree-lmax field carries degree lmax+1 content, so the
+        output is laid out for a degree-(lmax+1) config ``sh_hi`` (which can still be
+        evaluated pointwise without a grid). Returns (sh_hi, idx_dn, w_dn, idx_up,
+        w_up): gather indices into the BASE (length nlm_cplx) coefficient array and
+        weights, each of length ``sh_hi.nlm_cplx``; out-of-range gathers carry
+        weight 0 and index 0.
+        """
+        cached = getattr(self, "_dtheta_cplx_cache", None)
+        if cached is not None:
+            return cached
+
+        lmax = self.lmax
+        nlm = self.nlm_cplx
+        sh_hi = sht(lmax + 1, lmax + 1, 1)  # degree lmax+1; no grid needed for point eval
+
+        l = np.asarray(sh_hi.zl, dtype=np.int64)   # output (hi) layout
+        m = np.asarray(sh_hi.zm, dtype=np.int64)
+
+        def eps(ll, mm):
+            ll = ll.astype(np.float64)
+            mm = mm.astype(np.float64)
+            num = ll * ll - mm * mm
+            den = (2.0 * ll - 1.0) * (2.0 * ll + 1.0)
+            out = np.zeros_like(num)
+            ok = (den != 0.0) & (num >= 0.0)
+            out[ok] = np.sqrt(num[ok] / den[ok])
+            return out
+
+        # Lower neighbour, base coeff (l-1, m): contributes (l-1) eps_l^m c_(l-1,m)
+        ld = l - 1
+        has_dn = (ld >= np.abs(m)) & (ld >= 0) & (ld <= lmax)
+        idx_dn = np.where(has_dn, ld * (ld + 1) + m, 0)      # zidx_base(l-1,m)
+        w_dn = np.where(has_dn, ld.astype(np.float64) * eps(l, m), 0.0)
+
+        # Upper neighbour, base coeff (l+1, m): contributes -(l+2) eps_{l+1}^m c_(l+1,m)
+        lu = l + 1
+        has_up = (lu >= np.abs(m)) & (lu <= lmax)
+        idx_up = np.where(has_up, lu * (lu + 1) + m, 0)      # zidx_base(l+1,m)
+        w_up = np.where(has_up, -(l + 2).astype(np.float64) * eps(lu, m), 0.0)
+
+        assert idx_dn.max(initial=0) < nlm and idx_up.max(initial=0) < nlm
+        cache = (sh_hi, idx_dn, w_dn, idx_up, w_up)
+        self._dtheta_cplx_cache = cache
+        return cache
+
+    def SHqst_to_point_cplx(self, Qlm, Slm, Tlm, cost, phi):
+        """Evaluate a complex-valued 3D vector field, given by its complex
+        radial/spheroidal/toroidal (Q/S/T) spectral coefficients, at the point
+        cost=cos(theta), phi.  Returns complex (vr, vt, vp).
+
+        Complex analogue of the (real) shtns.SHqst_to_point, built purely in
+        Python on top of the inherited scalar complex point evaluator
+        SH_to_point_cplx.  Q/S/T are complex arrays of length nlm_cplx.
+
+        cost, phi may be scalars (returns 3 complex scalars) or matching 1-D
+        arrays (returns 3 complex arrays); the coefficient transforms are formed
+        once and only the scalar C point-eval is looped over the points.
+        """
+        n = self.nlm_cplx
+        Qlm = np.ascontiguousarray(Qlm, dtype=np.complex128)
+        Slm = np.ascontiguousarray(Slm, dtype=np.complex128)
+        Tlm = np.ascontiguousarray(Tlm, dtype=np.complex128)
+        for name, arr in (("Qlm", Qlm), ("Slm", Slm), ("Tlm", Tlm)):
+            if arr.shape != (n,):
+                raise ValueError(f"{name} must have shape ({n},). Got {arr.shape}.")
+
+        zm = np.asarray(self.zm, dtype=np.float64)
+        sh_hi, idx_dn, w_dn, idx_up, w_up = self._dtheta_cplx_op()
+
+        def stdt_hi(c):
+            # sin(theta) d c/d theta, laid out for the degree-(lmax+1) config sh_hi
+            return w_dn * c[idx_dn] + w_up * c[idx_up]
+
+        # transformed coefficient arrays (formed once, independent of the point)
+        S_dt = stdt_hi(Slm)           # sin(theta) dS/dtheta (sh_hi layout)
+        T_dt = stdt_hi(Tlm)           # sin(theta) dT/dtheta (sh_hi layout)
+        S_dp = 1j * zm * Slm          # dS/dphi = i m S      (base layout)
+        T_dp = 1j * zm * Tlm          # dT/dphi = i m T      (base layout)
+
+        cost_arr = np.atleast_1d(np.asarray(cost, dtype=np.float64))
+        phi_arr = np.atleast_1d(np.asarray(phi, dtype=np.float64))
+        if cost_arr.shape != phi_arr.shape:
+            raise ValueError("cost and phi must have the same shape.")
+
+        vr = np.empty(cost_arr.shape, dtype=np.complex128)
+        vt = np.empty(cost_arr.shape, dtype=np.complex128)
+        vp = np.empty(cost_arr.shape, dtype=np.complex128)
+        sp = self.SH_to_point_cplx          # base (degree lmax)
+        sp_hi = sh_hi.SH_to_point_cplx      # degree lmax+1, for the theta-derivative
+        for i in range(cost_arr.size):
+            ct = float(cost_arr.flat[i])
+            ph = float(phi_arr.flat[i])
+            sint = np.sqrt((1.0 - ct) * (1.0 + ct))
+            vr.flat[i] = sp(Qlm, ct, ph)
+            dSdt = sp_hi(S_dt, ct, ph) / sint
+            dTdt = sp_hi(T_dt, ct, ph) / sint
+            imS = sp(S_dp, ct, ph) / sint
+            imT = sp(T_dp, ct, ph) / sint
+            vt.flat[i] = dSdt + imT      # dS/dtheta + (i m / sin) T
+            vp.flat[i] = imS - dTdt      # (i m / sin) S - dT/dtheta
+
+        if np.isscalar(cost) and np.isscalar(phi):
+            return complex(vr[0]), complex(vt[0]), complex(vp[0])
+        return vr, vt, vp
 
     def synth_jax(self, x: jax.Array) -> jax.Array:
         """Inverse SHT: complex128 spectral (nlm,) -> float64 spatial (spat_shape)."""
