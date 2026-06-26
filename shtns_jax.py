@@ -129,9 +129,11 @@ class sht(shtns.sht):
 
         lmax = self.lmax
         nlm = self.nlm_cplx
-        sh_hi = sht(lmax + 1, lmax + 1, 1)  # degree lmax+1; no grid needed for point eval
+        sh_hi = sht(
+            lmax + 1, lmax + 1, 1
+        )  # degree lmax+1; no grid needed for point eval
 
-        l = np.asarray(sh_hi.zl, dtype=np.int64)   # output (hi) layout
+        l = np.asarray(sh_hi.zl, dtype=np.int64)  # output (hi) layout  # noqa: E741
         m = np.asarray(sh_hi.zm, dtype=np.int64)
 
         def eps(ll, mm):
@@ -147,13 +149,13 @@ class sht(shtns.sht):
         # Lower neighbour, base coeff (l-1, m): contributes (l-1) eps_l^m c_(l-1,m)
         ld = l - 1
         has_dn = (ld >= np.abs(m)) & (ld >= 0) & (ld <= lmax)
-        idx_dn = np.where(has_dn, ld * (ld + 1) + m, 0)      # zidx_base(l-1,m)
+        idx_dn = np.where(has_dn, ld * (ld + 1) + m, 0)  # zidx_base(l-1,m)
         w_dn = np.where(has_dn, ld.astype(np.float64) * eps(l, m), 0.0)
 
         # Upper neighbour, base coeff (l+1, m): contributes -(l+2) eps_{l+1}^m c_(l+1,m)
         lu = l + 1
         has_up = (lu >= np.abs(m)) & (lu <= lmax)
-        idx_up = np.where(has_up, lu * (lu + 1) + m, 0)      # zidx_base(l+1,m)
+        idx_up = np.where(has_up, lu * (lu + 1) + m, 0)  # zidx_base(l+1,m)
         w_up = np.where(has_up, -(l + 2).astype(np.float64) * eps(lu, m), 0.0)
 
         assert idx_dn.max(initial=0) < nlm and idx_up.max(initial=0) < nlm
@@ -190,10 +192,10 @@ class sht(shtns.sht):
             return w_dn * c[idx_dn] + w_up * c[idx_up]
 
         # transformed coefficient arrays (formed once, independent of the point)
-        S_dt = stdt_hi(Slm)           # sin(theta) dS/dtheta (sh_hi layout)
-        T_dt = stdt_hi(Tlm)           # sin(theta) dT/dtheta (sh_hi layout)
-        S_dp = 1j * zm * Slm          # dS/dphi = i m S      (base layout)
-        T_dp = 1j * zm * Tlm          # dT/dphi = i m T      (base layout)
+        S_dt = stdt_hi(Slm)  # sin(theta) dS/dtheta (sh_hi layout)
+        T_dt = stdt_hi(Tlm)  # sin(theta) dT/dtheta (sh_hi layout)
+        S_dp = 1j * zm * Slm  # dS/dphi = i m S      (base layout)
+        T_dp = 1j * zm * Tlm  # dT/dphi = i m T      (base layout)
 
         cost_arr = np.atleast_1d(np.asarray(cost, dtype=np.float64))
         phi_arr = np.atleast_1d(np.asarray(phi, dtype=np.float64))
@@ -203,8 +205,8 @@ class sht(shtns.sht):
         vr = np.empty(cost_arr.shape, dtype=np.complex128)
         vt = np.empty(cost_arr.shape, dtype=np.complex128)
         vp = np.empty(cost_arr.shape, dtype=np.complex128)
-        sp = self.SH_to_point_cplx          # base (degree lmax)
-        sp_hi = sh_hi.SH_to_point_cplx      # degree lmax+1, for the theta-derivative
+        sp = self.SH_to_point_cplx  # base (degree lmax)
+        sp_hi = sh_hi.SH_to_point_cplx  # degree lmax+1, for the theta-derivative
         for i in range(cost_arr.size):
             ct = float(cost_arr.flat[i])
             ph = float(phi_arr.flat[i])
@@ -214,8 +216,8 @@ class sht(shtns.sht):
             dTdt = sp_hi(T_dt, ct, ph) / sint
             imS = sp(S_dp, ct, ph) / sint
             imT = sp(T_dp, ct, ph) / sint
-            vt.flat[i] = dSdt + imT      # dS/dtheta + (i m / sin) T
-            vp.flat[i] = imS - dTdt      # (i m / sin) S - dT/dtheta
+            vt.flat[i] = dSdt + imT  # dS/dtheta + (i m / sin) T
+            vp.flat[i] = imS - dTdt  # (i m / sin) S - dT/dtheta
 
         if np.isscalar(cost) and np.isscalar(phi):
             return complex(vr[0]), complex(vt[0]), complex(vp[0])
