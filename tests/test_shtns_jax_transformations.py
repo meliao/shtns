@@ -76,12 +76,23 @@ def _cplx_spectral_vec_input(sh, seed):
     )
     return jnp.array(alm_vec, dtype=jnp.complex128)
 
+
 def _cplx_spatial_vec_input(sh, seed):
     rng = np.random.default_rng(seed)
     z_vec = rng.standard_normal((3, sh.nphi, sh.nlat)) + 1j * rng.standard_normal(
         (3, sh.nphi, sh.nlat)
     )
     return jnp.array(z_vec, dtype=jnp.complex128)
+
+
+def _cplx_qst_input(sh, seed):
+    rng = np.random.default_rng(seed)
+    out = []
+    for _ in range(3):
+        c = rng.standard_normal(sh.nlm_cplx) + 1j * rng.standard_normal(sh.nlm_cplx)
+        out.append(c.astype(np.complex128))
+    return out  # [Qlm, Slm, Tlm]
+
 
 SCALAR_TRANSFORMS = [
     pytest.param("synth_jax", _spectral_input, id="synth"),
@@ -96,6 +107,7 @@ VECTOR_TRANSFORMS = [
     pytest.param("synth_vec_cplx_jax", _cplx_spectral_vec_input, id="synth_vec_cplx"),
     pytest.param("analys_vec_cplx_jax", _cplx_spatial_vec_input, id="analys_vec_cplx"),
 ]
+
 
 TRANSFORMS = SCALAR_TRANSFORMS + VECTOR_TRANSFORMS
 
@@ -261,3 +273,205 @@ def test_theta_contiguous_cuda():
 
     with pytest.raises(ValueError, match="SHT_PHI_CONTIGUOUS"):
         _ = sh.synth_jax(qlm_jax)
+
+
+@pytest.mark.parametrize("lmax", [8, 16])
+@pytest.mark.parametrize("seed", [1, 2])
+def test_SHqst_to_point_cplx(lmax, seed):
+    """SHqst_to_point_cplx at grid nodes must match the full-grid complex vector
+    synthesis SHqst_to_spat_cplx (exposed as synth_cplx with 3 args)."""
+    sh = shtns_jax.sht(lmax, lmax, 1)
+    nlat, nphi = sh.set_grid(flags=shtns.SHT_THETA_CONTIGUOUS)
+    Qlm, Slm, Tlm = _cplx_qst_input(sh, seed)
+
+    vr, vt, vp = sh.synth_cplx(Qlm, Slm, Tlm)  # ground truth, shape (nphi, nlat)
+    cost = sh.cos_theta
+    phi = np.linspace(0, 2 * np.pi, nphi, endpoint=False)
+
+    for i in range(nphi):
+        for j in range(nlat):
+            r, t, p = sh.SHqst_to_point_cplx(Qlm, Slm, Tlm, cost[j], phi[i])
+            assert np.allclose(r, vr[i, j], rtol=RTOL, atol=ATOL)
+            assert np.allclose(t, vt[i, j], rtol=RTOL, atol=ATOL)
+            assert np.allclose(p, vp[i, j], rtol=RTOL, atol=ATOL)
+
+
+def test_SHqst_to_point_cplx_vectorized():
+    """Array (cost, phi) input returns arrays equal to looping scalar calls."""
+    sh = shtns_jax.sht(12, 12, 1)
+    nlat, nphi = sh.set_grid(flags=shtns.SHT_THETA_CONTIGUOUS)
+    Qlm, Slm, Tlm = _cplx_qst_input(sh, seed=5)
+    cost = sh.cos_theta[1:-1]
+    phi = np.full_like(cost, 0.7)
+    vr, vt, vp = sh.SHqst_to_point_cplx(Qlm, Slm, Tlm, cost, phi)
+    for k in range(cost.size):
+        r, t, p = sh.SHqst_to_point_cplx(Qlm, Slm, Tlm, float(cost[k]), float(phi[k]))
+        assert np.allclose([vr[k], vt[k], vp[k]], [r, t, p], rtol=RTOL, atol=ATOL)
+
+
+@pytest.mark.parametrize("lmax", [8, 16, 32])
+def test_SHqst_to_point_cplx_analytic(lmax: int) -> None:
+    """
+    Analytic test case.
+    """
+    sh = shtns_jax.sht(lmax, lmax)
+    nlat, nphi = sh.set_grid(flags=shtns.SHT_THETA_CONTIGUOUS)
+
+    Qlm = np.zeros(sh.nlm_cplx, dtype=np.complex128)
+    Slm = np.zeros(sh.nlm_cplx, dtype=np.complex128)
+    Tlm = np.zeros(sh.nlm_cplx, dtype=np.complex128)
+
+    # Set some non-zero coefficients.
+    Qlm[sh.zidx(3, 1)] = 1.0 + 1j
+    Slm[sh.zidx(2, -2)] = 1.0 + 1j
+    Tlm[sh.zidx(2, -1)] = 1.0 + 1j
+
+    # Create a uniform grid in phi theta space for sampling
+    phi_vals = np.linspace(0, 2 * np.pi, 100, endpoint=False)
+    # Don't want to sample either pole.
+    theta_vals = np.linspace(0, np.pi, 101, endpoint=False)[1:]
+
+    theta_grid, phi_grid = np.meshgrid(theta_vals, phi_vals)
+
+    cost_vec = np.cos(theta_grid.flatten())
+    sint_vec = np.sin(theta_grid.flatten())
+    phi_vec = phi_grid.flatten()
+    print("cost_vec dtype: ", cost_vec.dtype)
+    print("phi_vec dtype: ", phi_vec.dtype)
+
+    vr, vtheta, vphi = sh.SHqst_to_point_cplx(Qlm, Slm, Tlm, cost_vec, phi_vec)
+
+    #####################################################
+    # Spherical harmonic evals for computing reference solution.
+    # l = 3, m = 1
+    coeffs_3_1 = np.zeros(sh.nlm_cplx, dtype=np.complex128)
+    coeffs_3_1[sh.zidx(3, 1)] = 1.0
+    Y_3_1_evals = np.zeros_like(cost_vec, dtype=np.complex128)
+    for i in range(cost_vec.size):
+        Y_3_1_evals[i] = sh.SH_to_point_cplx(coeffs_3_1, cost_vec[i], phi_vec[i])
+    # l = 2, m = -2
+    coeffs_2_m2 = np.zeros(sh.nlm_cplx, dtype=np.complex128)
+    coeffs_2_m2[sh.zidx(2, -2)] = 1.0
+    Y_2_m2_evals = np.zeros_like(cost_vec, dtype=np.complex128)
+    for i in range(cost_vec.size):
+        Y_2_m2_evals[i] = sh.SH_to_point_cplx(coeffs_2_m2, cost_vec[i], phi_vec[i])
+    # l = 2, m = -1
+    coeffs_2_m1 = np.zeros(sh.nlm_cplx, dtype=np.complex128)
+    coeffs_2_m1[sh.zidx(2, -1)] = 1.0
+    Y_2_m1_evals = np.zeros_like(cost_vec, dtype=np.complex128)
+    for i in range(cost_vec.size):
+        Y_2_m1_evals[i] = sh.SH_to_point_cplx(coeffs_2_m1, cost_vec[i], phi_vec[i])
+    # l=2, m=0
+    coeffs_2_0 = np.zeros(sh.nlm_cplx, dtype=np.complex128)
+    coeffs_2_0[sh.zidx(2, 0)] = 1.0
+    Y_2_0_evals = np.zeros_like(cost_vec, dtype=np.complex128)
+    for i in range(cost_vec.size):
+        Y_2_0_evals[i] = sh.SH_to_point_cplx(coeffs_2_0, cost_vec[i], phi_vec[i])
+
+    ####################################################
+    # Construct expected solutions
+    vr_expected = (1.0 + 1j) * Y_3_1_evals
+
+    # vt_expected
+    term1 = 2 * np.exp(-1j * phi_vec) * Y_2_m1_evals
+    term2 = -2 * cost_vec / sint_vec * Y_2_m2_evals
+    term3 = -1j / sint_vec * Y_2_m1_evals
+    vt_expected = (1.0 + 1j) * (term1 + term2 + term3)
+
+    # vp_expected
+    term1 = np.sqrt(6) * np.exp(-1j * phi_vec) * Y_2_0_evals
+    term2 = -cost_vec / sint_vec * Y_2_m1_evals
+    term3 = 2j / sint_vec * Y_2_m2_evals
+    vp_expected = -1 * (1.0 + 1j) * (term1 + term2 + term3)
+
+    ####################################################
+    # Compare computed vs expected
+
+    assert np.allclose(vr, vr_expected, rtol=RTOL, atol=ATOL)
+    assert np.allclose(vtheta, vt_expected, rtol=RTOL, atol=ATOL)
+
+    # print("vphi: ", vphi[:5])
+    # print("vp_expected: ", vp_expected[:5])
+    # print("diffs: ", np.abs(vphi - vp_expected)[:5])
+
+    assert np.allclose(vphi, vp_expected, rtol=RTOL, atol=ATOL)
+
+
+@pytest.mark.parametrize("lmax", [8, 16, 32])
+def test_SHqst_to_point_cplx_against_real(lmax: int) -> None:
+    """
+    Test the complex function against the one for real-valued signals.
+    """
+    sh = shtns_jax.sht(lmax, lmax)
+    nlat, nphi = sh.set_grid(flags=shtns.SHT_THETA_CONTIGUOUS)
+
+    Qlm = np.zeros(sh.nlm_cplx, dtype=np.complex128)
+    Slm = np.zeros(sh.nlm_cplx, dtype=np.complex128)
+    Tlm = np.zeros(sh.nlm_cplx, dtype=np.complex128)
+
+    # Set some non-zero coefficients.
+    # c[l,-m] = (-1)^m * conj(c[l,m])
+    Qlm[sh.zidx(3, 1)] = 1.0 + 1j
+    Qlm[sh.zidx(3, -1)] = -1.0 + 1j
+    Slm[sh.zidx(2, 2)] = 1.0 + 1j
+    Slm[sh.zidx(2, -2)] = 1.0 - 1j
+    Tlm[sh.zidx(2, 1)] = 1.0 + 1j
+    Tlm[sh.zidx(2, -1)] = -1.0 + 1j
+
+    # Do the same for real-valued signals.
+    Qlm_real = np.zeros(sh.nlm, dtype=np.complex128)
+    Slm_real = np.zeros(sh.nlm, dtype=np.complex128)
+    Tlm_real = np.zeros(sh.nlm, dtype=np.complex128)
+    Qlm_real[sh.idx(3, 1)] = 1.0 + 1j
+    Slm_real[sh.idx(2, 2)] = 1.0 + 1j
+    Tlm_real[sh.idx(2, 1)] = 1.0 + 1j
+
+    # Check that I've set up the coeffs correctly by transforming to the GL grid.
+    vr_real, vtheta_real, vphi_real = sh.synth(Qlm_real, Slm_real, Tlm_real)
+    vr_cplx, vtheta_cplx, vphi_cplx = sh.synth_cplx(Qlm, Slm, Tlm)
+
+    print("vr_real: ", vr_real.flatten()[:5])
+    print("vr_cplx: ", vr_cplx.flatten()[:5])
+    assert np.allclose(vr_real, vr_cplx, rtol=RTOL, atol=ATOL)
+    assert np.allclose(vtheta_real, vtheta_cplx, rtol=RTOL, atol=ATOL)
+    assert np.allclose(vphi_real, vphi_cplx, rtol=RTOL, atol=ATOL)
+
+    # Create a uniform grid in phi theta space for sampling
+    phi_vals = np.linspace(0, 2 * np.pi, 100, endpoint=False)
+    # Don't want to sample either pole.
+    theta_vals = np.linspace(0, np.pi, 101, endpoint=False)[1:]
+
+    theta_grid, phi_grid = np.meshgrid(theta_vals, phi_vals)
+
+    cost_vec = np.cos(theta_grid.flatten())
+    phi_vec = phi_grid.flatten()
+    print("cost_vec dtype: ", cost_vec.dtype)
+    print("phi_vec dtype: ", phi_vec.dtype)
+
+    vr = np.zeros_like(cost_vec, dtype=np.complex128)
+    vtheta = np.zeros_like(cost_vec, dtype=np.complex128)
+    vphi = np.zeros_like(cost_vec, dtype=np.complex128)
+
+    vr, vtheta, vphi = sh.SHqst_to_point_cplx(Qlm, Slm, Tlm, cost_vec, phi_vec)
+
+    # Test against the output of SHqst_to_point
+    vr_real = np.zeros_like(cost_vec, dtype=np.float64)
+    vtheta_real = np.zeros_like(cost_vec, dtype=np.float64)
+    vphi_real = np.zeros_like(cost_vec, dtype=np.float64)
+    for i in range(cost_vec.size):
+        vr_real[i], vtheta_real[i], vphi_real[i] = sh.SHqst_to_point(
+            Qlm_real, Slm_real, Tlm_real, cost_vec[i], phi_vec[i]
+        )
+    # vr_real, vtheta_real, vphi_real = sh.SHqst_to_point(Qlm_real, Slm_real, Tlm_real, cost_vec, phi_vec)
+
+    print("vr: ", vr[:5])
+    print("vr_real: ", vr_real[:5])
+    print("max abs diffs: ", np.max(np.abs(vr - vr_real)))
+    print("vr max imag part: ", np.max(np.abs(vr.imag)))
+    assert np.allclose(vr, vr_real, rtol=RTOL, atol=ATOL)
+    assert np.allclose(vtheta, vtheta_real, rtol=RTOL, atol=ATOL)
+    assert np.allclose(vphi, vphi_real, rtol=RTOL, atol=ATOL)
+
+    assert np.max(vr.imag) < ATOL
+    assert np.max(vtheta.imag) < ATOL
+    assert np.max(vphi.imag) < ATOL
