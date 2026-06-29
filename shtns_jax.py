@@ -54,6 +54,8 @@ _cpu_lib_members = [
     ("shtns_analys_cplx", _shtns_jax_lib_cpu.analys_cplx_cpu),
     ("shtns_synth_vec_cplx", _shtns_jax_lib_cpu.synth_vec_cplx_cpu),
     ("shtns_analys_vec_cplx", _shtns_jax_lib_cpu.analys_vec_cplx_cpu),
+    ("shtns_rotation_apply_real", _shtns_jax_lib_cpu.rotation_apply_real_cpu),
+    ("shtns_rotation_apply_cplx", _shtns_jax_lib_cpu.rotation_apply_cplx_cpu),
 ]
 for _name, _func in _cpu_lib_members:
     jax.ffi.register_ffi_target(_name, jax.ffi.pycapsule(_func), platform="cpu")
@@ -578,3 +580,110 @@ class sht(shtns.sht):
             return y, y_tan
 
         return _analys_cplx_impl(x)
+
+
+####################################
+# Re-define shtns.rotation class with JAX support
+
+
+class rotation(shtns.rotation):
+    """shtns.rotation with JAX autodiff support (apply_real_jax, apply_cplx_jax)."""
+
+    def _check_shape_dtype(self, x: jax.Array, shape: tuple, dtype) -> None:
+        n = len(shape)
+        if x.shape[-n:] != shape:
+            raise ValueError(f"Input array must end with shape {shape}. Got {x.shape}.")
+        if x.dtype != dtype:
+            raise ValueError(f"Input array must have dtype {dtype}. Got {x.dtype}.")
+
+    @property
+    def _nlm(self) -> int:
+        return shtns.nlm_calc(self.lmax, self.mmax, 1)
+
+    @property
+    def _nlm_cplx(self) -> int:
+        return shtns.nlm_cplx_calc(self.lmax, self.mmax, 1)
+
+    def apply_real_jax(self, x: jax.Array) -> jax.Array:
+        """Rotate real SH coefficients: complex128 (..., nlm) -> complex128 (..., nlm)."""
+        nlm = self._nlm
+        self._check_shape_dtype(x, (nlm,), jnp.complex128)
+        cfg = int(self.this)
+
+        # Build inverse rotation for VJP: ZYZ(-γ, -β, -α) inverts ZYZ(α, β, γ).
+        # Stored on self so the C pointer stays alive as long as this rotation object.
+        inv = shtns.rotation(self.lmax, self.mmax)
+        inv.set_angles_ZYZ(-self.gamma, -self.beta, -self.alpha)
+        self._vjp_inv_rot_real = inv
+        inv_cfg = int(inv.this)
+
+        @jax.custom_jvp
+        def _impl(x_in: jax.Array) -> jax.Array:
+            return jax.ffi.ffi_call(
+                "shtns_rotation_apply_real",
+                jax.ShapeDtypeStruct(x_in.shape, jnp.complex128),
+                vmap_method="broadcast_all",
+            )(x_in, cfg=cfg)
+
+        @custom_transpose
+        def _tangent(residuals, x_tan: jax.Array) -> jax.Array:
+            return _impl(x_tan)
+
+        @_tangent.def_transpose
+        def _vjp(residuals, ct_out: jax.Array):
+            return jax.ffi.ffi_call(
+                "shtns_rotation_apply_real",
+                jax.ShapeDtypeStruct(ct_out.shape, jnp.complex128),
+                vmap_method="broadcast_all",
+            )(ct_out, cfg=inv_cfg)
+
+        @_impl.defjvp
+        def _jvp(primals, tangents):
+            (x_in,) = primals
+            (x_tan,) = tangents
+            y = _impl(x_in)
+            y_tan = _tangent(jax.typeof(y).to_tangent_aval(), None, x_tan)
+            return y, y_tan
+
+        return _impl(x)
+
+    def apply_cplx_jax(self, x: jax.Array) -> jax.Array:
+        """Rotate complex SH coefficients: complex128 (..., nlm_cplx) -> complex128 (..., nlm_cplx)."""
+        nlm_cplx = self._nlm_cplx
+        self._check_shape_dtype(x, (nlm_cplx,), jnp.complex128)
+        cfg = int(self.this)
+
+        inv = shtns.rotation(self.lmax, self.mmax)
+        inv.set_angles_ZYZ(-self.gamma, -self.beta, -self.alpha)
+        self._vjp_inv_rot_cplx = inv
+        inv_cfg = int(inv.this)
+
+        @jax.custom_jvp
+        def _impl(x_in: jax.Array) -> jax.Array:
+            return jax.ffi.ffi_call(
+                "shtns_rotation_apply_cplx",
+                jax.ShapeDtypeStruct(x_in.shape, jnp.complex128),
+                vmap_method="broadcast_all",
+            )(x_in, cfg=cfg)
+
+        @custom_transpose
+        def _tangent(residuals, x_tan: jax.Array) -> jax.Array:
+            return _impl(x_tan)
+
+        @_tangent.def_transpose
+        def _vjp(residuals, ct_out: jax.Array):
+            return jax.ffi.ffi_call(
+                "shtns_rotation_apply_cplx",
+                jax.ShapeDtypeStruct(ct_out.shape, jnp.complex128),
+                vmap_method="broadcast_all",
+            )(ct_out, cfg=inv_cfg)
+
+        @_impl.defjvp
+        def _jvp(primals, tangents):
+            (x_in,) = primals
+            (x_tan,) = tangents
+            y = _impl(x_in)
+            y_tan = _tangent(jax.typeof(y).to_tangent_aval(), None, x_tan)
+            return y, y_tan
+
+        return _impl(x)

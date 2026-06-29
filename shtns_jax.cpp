@@ -341,3 +341,51 @@ XLA_FFI_DEFINE_HANDLER_SYMBOL(
         .Arg<ffi::Buffer<ffi::C128>>()   // [vr, vt, vp]:   stacked complex spatial  (3, n_spat)
         .Ret<ffi::Buffer<ffi::C128>>()   // [qlm, slm, tlm]: stacked complex spectral (3, nlm_cplx)
 );
+
+// Rotation apply_real: C128 spectral (..., nlm) -> C128 spectral (..., nlm)
+// This is for a REAL signal on the sphere.
+ffi::Error rotation_apply_real_jax_cpu(int64_t cfg, ffi::Buffer<ffi::C128> x,
+                                        ffi::ResultBuffer<ffi::C128> y) {
+  shtns_rot r = reinterpret_cast<shtns_rot>(cfg);
+  long nlm = x.dimensions().back();
+  long n_other = (nlm > 0) ? x.element_count() / nlm : 0;
+  if (y->element_count() != x.element_count())
+    return ffi::Error::InvalidArgument("shtns: rotation_apply_real: output size mismatch");
+  for (int64_t n = 0; n < n_other; n++)
+    shtns_rotation_apply_real(r,
+        (cplx*)&x.typed_data()[n * nlm],
+        (cplx*)&y->typed_data()[n * nlm]);
+  return ffi::Error::Success();
+}
+
+XLA_FFI_DEFINE_HANDLER_SYMBOL(
+    rotation_apply_real_cpu, rotation_apply_real_jax_cpu,
+    ffi::Ffi::Bind()
+        .Attr<int64_t>("cfg")
+        .Arg<ffi::Buffer<ffi::C128>>()   // alm: real SH spectral coeffs (..., nlm)
+        .Ret<ffi::Buffer<ffi::C128>>()   // rlm: rotated coeffs (..., nlm)
+);
+
+// Rotation apply_cplx: C128 spectral (..., nlm_cplx) -> C128 spectral (..., nlm_cplx)
+// This is for a COMPLEX signal on the sphere.
+ffi::Error rotation_apply_cplx_jax_cpu(int64_t cfg, ffi::Buffer<ffi::C128> x,
+                                        ffi::ResultBuffer<ffi::C128> y) {
+  shtns_rot r = reinterpret_cast<shtns_rot>(cfg);
+  long nlm_cplx = x.dimensions().back();
+  long n_other = (nlm_cplx > 0) ? x.element_count() / nlm_cplx : 0;
+  if (y->element_count() != x.element_count())
+    return ffi::Error::InvalidArgument("shtns: rotation_apply_cplx: output size mismatch");
+  for (int64_t n = 0; n < n_other; n++)
+    shtns_rotation_apply_cplx(r,
+        (cplx*)&x.typed_data()[n * nlm_cplx],
+        (cplx*)&y->typed_data()[n * nlm_cplx]);
+  return ffi::Error::Success();
+}
+
+XLA_FFI_DEFINE_HANDLER_SYMBOL(
+    rotation_apply_cplx_cpu, rotation_apply_cplx_jax_cpu,
+    ffi::Ffi::Bind()
+        .Attr<int64_t>("cfg")
+        .Arg<ffi::Buffer<ffi::C128>>()   // alm: complex SH spectral coeffs (..., nlm_cplx)
+        .Ret<ffi::Buffer<ffi::C128>>()   // rlm: rotated coeffs (..., nlm_cplx)
+);
