@@ -475,3 +475,84 @@ def test_SHqst_to_point_cplx_against_real(lmax: int) -> None:
     assert np.max(vr.imag) < ATOL
     assert np.max(vtheta.imag) < ATOL
     assert np.max(vphi.imag) < ATOL
+
+
+@pytest.mark.parametrize("lmax", [8, 16, 32])
+def test_SHqst_to_lat_jax_against_numpy(lmax: int) -> None:
+    """
+    Test the SHqst_to_lat_jax function against the numpy implementation.
+    """
+    sh = shtns_jax.sht(lmax, lmax)
+    nlat, nphi = sh.set_grid(flags=shtns.SHT_THETA_CONTIGUOUS)
+
+    Qlm = _spectral_input(sh, seed=1)
+    Slm = _spectral_input(sh, seed=2)
+    Tlm = _spectral_input(sh, seed=3)
+
+    cost = np.cos(2.0)
+    print("cost dtype: ", cost.dtype)
+    nphi = 45
+
+    # Call the JAX implementation
+    vr_jax, vtheta_jax, vphi_jax = sh.SHqst_to_lat_jax(Qlm, Slm, Tlm, cost, nphi)
+
+    # Call the numpy implementation
+    # First need to define the empty arrays for output
+    vr_numpy = np.empty(nphi)
+    vtheta_numpy = np.empty(nphi)
+    vphi_numpy = np.empty(nphi)
+    Qlm_np = np.array(Qlm)
+    Slm_np = np.array(Slm)
+    Tlm_np = np.array(Tlm)
+    sh.SHqst_to_lat(Qlm_np, Slm_np, Tlm_np, cost, vr_numpy, vtheta_numpy, vphi_numpy)
+
+    assert np.allclose(vr_jax, vr_numpy, rtol=RTOL, atol=ATOL)
+    assert np.allclose(vtheta_jax, vtheta_numpy, rtol=RTOL, atol=ATOL)
+    assert np.allclose(vphi_jax, vphi_numpy, rtol=RTOL, atol=ATOL)
+
+
+@pytest.mark.parametrize("lmax", [8, 16, 32])
+def test_SHqst_to_lat_jax_transforms(lmax: int) -> None:
+    """
+    Tests jax.jit and jax.vmap for SHqst_to_lat_jax."""
+    sh = shtns_jax.sht(lmax, lmax)
+    nlat, nphi = sh.set_grid(flags=shtns.SHT_THETA_CONTIGUOUS)
+
+    Qlm = _spectral_input(sh, seed=1)
+    Slm = _spectral_input(sh, seed=2)
+    Tlm = _spectral_input(sh, seed=3)
+
+    cost = np.cos(2.0)
+    print("cost dtype: ", cost.dtype)
+    nphi = 45
+
+    # JIT the function.
+    jit_fn = jax.jit(sh.SHqst_to_lat_jax, static_argnames=("nphi",))
+    vr_jit, vtheta_jit, vphi_jit = jit_fn(Qlm, Slm, Tlm, cost, nphi)
+
+    # Test vmap over the cost argument.
+    # nphi must be closed over rather than passed as an argument: passing it through
+    # jax.jit(jax.vmap(...)) would make the outer jit trace it as a dynamic integer,
+    # which the inner jit cannot hash as a static arg.
+    batch_size = 3
+    cost_batch = np.cos(np.linspace(0.1, 2.0, batch_size))
+    jit_fn_vmap = jax.jit(
+        jax.vmap(
+            lambda Qlm, Slm, Tlm, cost: sh.SHqst_to_lat_jax(Qlm, Slm, Tlm, cost, nphi),
+            in_axes=(None, None, None, 0),
+        )
+    )
+    vr_vmap, vtheta_vmap, vphi_vmap = jit_fn_vmap(Qlm, Slm, Tlm, cost_batch)
+    # Check output shapes.
+    assert vr_vmap.shape == (batch_size, nphi)
+    assert vtheta_vmap.shape == (batch_size, nphi)
+    assert vphi_vmap.shape == (batch_size, nphi)
+
+    # Compare the outputs of the vmap with the individual calls.
+    for i in range(batch_size):
+        vr_single, vtheta_single, vphi_single = sh.SHqst_to_lat_jax(
+            Qlm, Slm, Tlm, cost_batch[i], nphi
+        )
+        assert np.allclose(vr_vmap[i], vr_single, rtol=RTOL, atol=ATOL)
+        assert np.allclose(vtheta_vmap[i], vtheta_single, rtol=RTOL, atol=ATOL)
+        assert np.allclose(vphi_vmap[i], vphi_single, rtol=RTOL, atol=ATOL)

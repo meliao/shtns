@@ -56,6 +56,7 @@ _cpu_lib_members = [
     ("shtns_analys_vec_cplx", _shtns_jax_lib_cpu.analys_vec_cplx_cpu),
     ("shtns_rotation_apply_real", _shtns_jax_lib_cpu.rotation_apply_real_cpu),
     ("shtns_rotation_apply_cplx", _shtns_jax_lib_cpu.rotation_apply_cplx_cpu),
+    ("shtns_SHqst_to_lat", _shtns_jax_lib_cpu.SHqst_to_lat_cpu),
 ]
 for _name, _func in _cpu_lib_members:
     jax.ffi.register_ffi_target(_name, jax.ffi.pycapsule(_func), platform="cpu")
@@ -432,6 +433,55 @@ class sht(shtns.sht):
             return y, y_tan
 
         return _analys_vec_impl(x)
+
+    def SHqst_to_lat_jax(
+        self,
+        Qlm: jax.Array,
+        Slm: jax.Array,
+        Tlm: jax.Array,
+        cost: jax.Array,
+        nphi: int,
+    ) -> jax.Array:
+        """
+        Latitude-ring synthesis for vectors: 
+        
+        spectral QST -> float64 spatial (3, nphi) at a particular latitude.
+
+        Returns 3 (nphi,) arrays [Vr, Vt, Vp] at the latitude
+        cos(theta)=cost on nphi evenly-spaced longitude points.
+
+        Supports jit and vmap (including vmap over cost for batched latitudes).
+        """
+        self._check_shape_dtype(Qlm, (self.nlm,), jnp.complex128)
+        self._check_shape_dtype(Slm, (self.nlm,), jnp.complex128)
+        self._check_shape_dtype(Tlm, (self.nlm,), jnp.complex128)
+        cost_arr = jnp.asarray(cost, dtype=jnp.float64).reshape(1)
+
+        cfg = int(self.this)
+        ltr = int(self.lmax)
+        mtr = int(self.mmax)
+
+        @jax.custom_jvp
+        def _impl(spec: jax.Array, cost_in: jax.Array) -> jax.Array:
+            prefix = spec.shape[:-2]
+            out_shape = (*prefix, 3, nphi) if prefix else (3, nphi)
+            return jax.ffi.ffi_call(
+                "shtns_SHqst_to_lat",
+                jax.ShapeDtypeStruct(out_shape, jnp.float64),
+                vmap_method="broadcast_all",
+            )(spec, cost_in, cfg=cfg, nphi=nphi, ltr=ltr, mtr=mtr)
+
+        @_impl.defjvp
+        def _jvp(primals, tangents):
+            spec, cost_in = primals
+            spec_tan, _ = tangents
+            y = _impl(spec, cost_in)
+            y_tan = _impl(spec_tan, cost_in)
+            return y, y_tan
+
+        spec = jnp.stack([Qlm, Slm, Tlm], axis=-2)
+        out = _impl(spec, cost_arr)
+        return out[..., 0, :], out[..., 1, :], out[..., 2, :]
 
     def synth_vec_cplx_jax(self, x: jax.Array) -> jax.Array:
         """Complex vector inverse SHT: complex128 spectral (3, nlm_cplx) ->

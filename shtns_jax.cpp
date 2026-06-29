@@ -342,6 +342,50 @@ XLA_FFI_DEFINE_HANDLER_SYMBOL(
         .Ret<ffi::Buffer<ffi::C128>>()   // [qlm, slm, tlm]: stacked complex spectral (3, nlm_cplx)
 );
 
+
+// SHqst_to_lat: C128 spectral (..., 3, nlm) + F64 cost (..., 1) -> F64 spatial (..., 3, nphi)
+// NOT thread-safe: SHqst_to_lat caches Legendre functions in shtns_cfg. Batch loop is serial.
+ffi::Error SHqst_to_lat_jax_cpu(int64_t cfg, int64_t nphi_attr, int64_t ltr, int64_t mtr,
+                                  ffi::Buffer<ffi::C128> spec,
+                                  ffi::Buffer<ffi::F64> cost_buf,
+                                  ffi::ResultBuffer<ffi::F64> out) {
+  shtns_cfg sh = reinterpret_cast<shtns_cfg>(cfg);
+  int nphi = (int)nphi_attr;
+  long nlm = sh->nlm;
+  long n_total = spec.element_count();
+  if (nlm <= 0 || n_total % (3 * nlm) != 0)
+    return ffi::Error::InvalidArgument("shtns: SHqst_to_lat: spectral input bad size");
+  long n_other = n_total / (3 * nlm);
+  if (out->element_count() != n_other * 3 * nphi)
+    return ffi::Error::InvalidArgument("shtns: SHqst_to_lat: output bad size");
+  for (int64_t n = 0; n < n_other; n++) {
+    double cost = cost_buf.typed_data()[n];
+    cplx* qlm = (cplx*)&spec.typed_data()[n * 3 * nlm];
+    cplx* slm = (cplx*)&spec.typed_data()[n * 3 * nlm + nlm];
+    cplx* tlm = (cplx*)&spec.typed_data()[n * 3 * nlm + 2 * nlm];
+    double* vr = &out->typed_data()[n * 3 * nphi];
+    double* vt = &out->typed_data()[n * 3 * nphi + nphi];
+    double* vp = &out->typed_data()[n * 3 * nphi + 2 * nphi];
+    SHqst_to_lat(sh, qlm, slm, tlm, cost, vr, vt, vp, nphi, (int)ltr, (int)mtr);
+  }
+  return ffi::Error::Success();
+}
+
+XLA_FFI_DEFINE_HANDLER_SYMBOL(
+    SHqst_to_lat_cpu, SHqst_to_lat_jax_cpu,
+    ffi::Ffi::Bind()
+        .Attr<int64_t>("cfg")
+        .Attr<int64_t>("nphi")
+        .Attr<int64_t>("ltr")
+        .Attr<int64_t>("mtr")
+        .Arg<ffi::Buffer<ffi::C128>>()   // stacked spectral (..., 3, nlm): [Qlm, Slm, Tlm]
+        .Arg<ffi::Buffer<ffi::F64>>()    // cost (..., 1)
+        .Ret<ffi::Buffer<ffi::F64>>()    // stacked spatial (..., 3, nphi): [Vr, Vt, Vp]
+);
+
+
+
+
 // Rotation apply_real: C128 spectral (..., nlm) -> C128 spectral (..., nlm)
 // This is for a REAL signal on the sphere.
 ffi::Error rotation_apply_real_jax_cpu(int64_t cfg, ffi::Buffer<ffi::C128> x,
