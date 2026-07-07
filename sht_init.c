@@ -252,6 +252,10 @@ static void set_sht_gpu(shtns_cfg shtns, int typ_start)
 	}
 }
 
+int runs_on_gpu(shtns_cfg shtns, int i_var, int i_typ) {
+	return shtns->ftable[i_var][i_typ] == sht_func[i_var][SHT_GPU1][i_typ];
+}
+
 
 /// \internal copy all algos to sht_func array (should be called by set_grid before choosing variants).
 /// if nphi is 1, axisymmetric algorithms are used.

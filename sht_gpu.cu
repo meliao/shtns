@@ -590,6 +590,7 @@ int cushtns_init_gpu(shtns_cfg shtns)
 	double *d_xlm = 0;
 	double *d_x2lm = 0;
 	double *d_clm = 0;
+	double *d_wg_spat = 0;
 	int err_count = 0;
 	int device_id = -1;
 	bool fast_fp64 = true;	// assume GPU has good fp64 performance
@@ -630,6 +631,7 @@ int cushtns_init_gpu(shtns_cfg shtns)
 	const long nlm1 = nlm_calc(LMAX+2, MMAX, MRES);	// for non-ishioka
 	// Allocate the coefficients vectors alm, ...
 	size_t sze = 5*nlat_2*sizeof_real_g/sizeof_real;	// for cos(theta), sin(theta), weights, ...
+	sze += nlat_2 + (CACHE_LINE_GPU/sizeof_real-1);	// for adjoint weights in spatial space
 	if (shtns->kernel_flags & CUSHT_NO_ISHIOKA) {
 		sze += nlm1*sizeof_real_g/sizeof_real + (CACHE_LINE_GPU/sizeof_real-1);		// alm2
 		sze += nlm1 + (CACHE_LINE_GPU/sizeof_real-1);		// glm
@@ -667,9 +669,15 @@ int cushtns_init_gpu(shtns_cfg shtns)
 
 		err_count += gpu_upload_convert(d_ct, shtns->ct, nlat_2, sizeof_real_g);
 		err_count += gpu_upload_convert(((char*)d_ct) +   nlat_2*sizeof_real_g, shtns->wg, nlat_2, sizeof_real_g);
+		d_wg_spat = (double*) (((char*)d_ct) +   nlat_2*sizeof_real_g);
 		err_count += gpu_upload_convert(((char*)d_ct) + 2*nlat_2*sizeof_real_g, shtns->st, nlat_2, sizeof_real_g);
 		err_count += gpu_upload_convert(((char*)d_ct) + 3*nlat_2*sizeof_real_g, shtns->st_1, nlat_2, sizeof_real_g);
 		err_count += gpu_upload_convert(((char*)d_ct) + 4*nlat_2*sizeof_real_g, shtns->wg_adjoint, nlat_2, sizeof_real_g);
+		
+		if (sizeof_real != sizeof_real_g) {		// spatial weighting (for adjoint) requires "real" data type, which may be different from real_g
+			d_wg_spat = (double*) buf;			align_ptr(&buf, nlat_2*sizeof_real, CACHE_LINE_GPU);
+			err_count += gpu_upload_convert(d_wg_spat, shtns->wg, nlat_2, sizeof_real);
+		}
 	}
 
 	shtns->d_xlm = d_xlm;
@@ -678,6 +686,7 @@ int cushtns_init_gpu(shtns_cfg shtns)
 	shtns->d_ct  = d_ct;
 	shtns->d_mx_stdt = d_mx_stdt;
 	shtns->d_mx_van = d_mx_van;
+	shtns->d_wg_adjoint_spat = d_wg_spat;
 
 	err_count += init_cuda_buffer_fft(shtns, device_id, sizeof_real);
 	err_count += init_cuda_program(shtns, gpu_arch_target);
@@ -731,7 +740,7 @@ shtns_cfg cushtns_clone(shtns_cfg shtns, cudaStream_t compute_stream, cudaStream
 	}
 }
 
-void fourier_to_spat_gpu(shtns_cfg shtns, void* q, const int mmax, const long sizeof_real = 8)
+void fourier_to_spat_gpu(shtns_cfg shtns, void* q, const int mmax, const long sizeof_real = 8, char* wg = 0, double scale = 1)
 {
 	const int nphi = shtns->nphi;
 	if (nphi > 1) {
@@ -751,7 +760,7 @@ void fourier_to_spat_gpu(shtns_cfg shtns, void* q, const int mmax, const long si
 		if (shtns->fft_mode & FFT_PHI_CONTIG) {
 			xfft = (char*) shtns->gpu_buf_in;
 			if (shtns->mx_stdt) xfft += shtns->nlm_stride * 2*sizeof_real;	// vector transforms: do not overwrite temporary spectral data stored in gpu_buf_in
-			transpose_cplx_zero_C2R(shtns->comp_stream, q, xfft, shtns->nlat, nphi/2+1, nphi/2, mmax, sizeof_real);		// zero out m>mmax during transpose
+			transpose_cplx_zero_C2R(shtns->comp_stream, q, xfft, shtns->nlat, nphi/2+1, nphi/2, mmax, sizeof_real, wg, scale);		// zero out m>mmax during transpose
 			launchParams.buffer = (void**) &xfft;
 			launchParams.inputBuffer = (void**) &q;
 		} else {
@@ -857,7 +866,7 @@ static void ilegendre(shtns_cfg shtns, const int S, const void *q, void* ql, con
 
 /// Perform SH transform on data that is already on the GPU. d_Qlm and d_Vr are pointers to GPU memory (obtained by cudaMalloc() for instance)
 template<int S, typename real=double>
-void cuda_SH_to_spat(shtns_cfg shtns, std::complex<real>* d_Qlm, real *d_Vr, const long int llim, const int mmax)
+void cuda_SH_to_spat(shtns_cfg shtns, std::complex<real>* d_Qlm, real *d_Vr, long int llim, const int mmax)
 {
 	std::complex<real>* d_qlm = d_Qlm;
 	
@@ -871,7 +880,9 @@ void cuda_SH_to_spat(shtns_cfg shtns, std::complex<real>* d_Qlm, real *d_Vr, con
 		if (d_Vr == (real*) d_Qlm) { printf("ERROR: cuda_SH_to_spat must have distinct in and out fields");	exit(1); }
 	legendre(shtns, S, d_qlm, d_Vr, llim, mmax);
 	if (S==0) profiling_record_time(shtns, 1, shtns->comp_stream);
-	fourier_to_spat_gpu(shtns, d_Vr, mmax, sizeof(real));	// in-place
+	real* wg = (llim & SHTNS_ADJOINT) ? (real*)shtns->d_wg_adjoint_spat : (real*)0;	// weights are stored after cos(theta)
+	fourier_to_spat_gpu(shtns, d_Vr, mmax, sizeof(real), (char*) wg,  (mmax > 0) ? shtns->wg[-2] : 1.0);	// in-place
+	if (wg && (shtns->fft_mode & FFT_PHI_CONTIG)==0) 	apply_weights_kernel<real>(shtns, d_Vr, wg, (mmax > 0) ? shtns->wg[-2] : 1.0);
 	if (S==0) profiling_record_time(shtns, 2, shtns->comp_stream);
 }
 

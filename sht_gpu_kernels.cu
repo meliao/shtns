@@ -47,7 +47,7 @@ bool cuda_error_check(const char* fname, int l)
 /// dim0, dim1 : size in complex numbers !
 /// BLOCK_DIM_Y must be a power of 2 between 1 and 16
 template<int TILE_DIM, int BLOCK_DIM_Y, typename T=double, int MULT=2> __global__ void
-transpose_cplx_zero_C2R_kernel(const T* in, T* out, const int dim0, const int dim1, const int mmax_plan, const int mlim)
+transpose_cplx_zero_C2R_kernel(const T* in, T* out, const int dim0, const int dim1, const int mmax_plan, const int mlim, const T* w = 0, const T scale = 1)
 {
 	__shared__ T shrdMem[TILE_DIM][TILE_DIM+1][MULT];		// avoid shared mem conflicts
 
@@ -62,11 +62,16 @@ transpose_cplx_zero_C2R_kernel(const T* in, T* out, const int dim0, const int di
 	int gx = lx + bx;
 
 	if (gx < dim0) {
+		T f = 1;
+		if (MULT==2 && w) {
+			int it = (gx < dim0/2) ? gx : dim0-1-gx;
+			f = w[it] * scale;
+		}
 		#pragma unroll
 		for (int repeat = 0; repeat < TILE_DIM; repeat += BLOCK_DIM_Y) {
 			int gy_ = gy+repeat;
 			if (gy_ > mlim) break;
-			shrdMem[ly + repeat][lx][ri] = in[MULT*(gy_ * dim0 + gx) + ri];
+			shrdMem[ly + repeat][lx][ri] = in[MULT*(gy_ * dim0 + gx) + ri] * f;
 		}
 	}
 
@@ -131,15 +136,20 @@ transpose_cplx_skip_R2C_kernel(const real* in, real* out, const int dim0, const 
 
 
 /// dim0, dim1 must be multiple of 16.
+/// dim0 = nlat, dim1 = nphi/2+1, mmax_plan = nphi/2, mlim = mmax
 static void
-transpose_cplx_zero_C2R(cudaStream_t stream, const void* in, void* out, const int dim0, const int dim1, const int mmax_plan, int mlim, int sizeof_real = 8)
+transpose_cplx_zero_C2R(cudaStream_t stream, const void* in, void* out, const int dim0, const int dim1, const int mmax_plan, int mlim, int sizeof_real = 8, void* w = 0, double scale = 1)
 {
-	if (sizeof_real==8) {
+	if (sizeof_real==8 || w) {
 		const int tile_dim = 16;
 		const int block_dim_y = 4;		// good performance with 4 (MUST be power of 2 between 1 and 16)
 		dim3 blocks((dim0+tile_dim-1)/tile_dim, (dim1+tile_dim-1)/tile_dim);
 		dim3 threads(tile_dim*2, block_dim_y);
-		transpose_cplx_zero_C2R_kernel<tile_dim, block_dim_y> <<<blocks, threads, 0, stream>>>((double*)in, (double*)out, dim0, dim1, mmax_plan, mlim);
+		if (sizeof_real==8) {
+			transpose_cplx_zero_C2R_kernel<tile_dim, block_dim_y> <<<blocks, threads, 0, stream>>>((double*)in, (double*)out, dim0, dim1, mmax_plan, mlim, (double*) w, scale);
+		} else {
+			transpose_cplx_zero_C2R_kernel<tile_dim, block_dim_y, float> <<<blocks, threads, 0, stream>>>((float*)in, (float*)out, dim0, dim1, mmax_plan, mlim, (float*) w, (float) scale);
+		}
 	} else {
 		const int tile_dim = 32;
 		const int block_dim_y = 8;
@@ -828,3 +838,28 @@ void scal2sphtor_gpu(shtns_cfg shtns, std::complex<real>* d_Vlm, std::complex<re
 	CUDA_ERROR_CHECK;
 }
 
+/// dim0, dim1 : size in complex numbers !
+/// BLOCK_DIM_Y must be a power of 2 between 1 and 16
+template<typename real> __global__ void
+apply_weights_kernel(real* x, const real* wg, const int nlat_2, const int nphi, const int phi_dist, const real scale)
+{
+	const int it = blockDim.x * blockIdx.x + threadIdx.x;
+	int ip = blockDim.y * blockIdx.y + threadIdx.y;
+
+	if (it < nlat_2) {
+		real w = wg[it] * scale;
+		int nlat = nlat_2*2;
+		for (; ip<nphi; ip += blockDim.y*gridDim.y) {
+			x[ip*phi_dist + it]        *= w;
+			x[ip*phi_dist + nlat-1-it] *= w;
+		}
+	}
+}
+
+template<typename real=double>
+void apply_weights_kernel(shtns_cfg shtns, real* x, real* wg, double scale) {
+	const int nlat_2 = shtns->nlat_2;
+	dim3 blocks((nlat_2+MAX_THREADS_PER_BLOCK-1)/MAX_THREADS_PER_BLOCK, shtns->nphi);
+	dim3 threads(MAX_THREADS_PER_BLOCK, 1);
+	apply_weights_kernel <<< blocks, threads, 0, shtns->comp_stream >>> (x, wg, nlat_2, shtns->nphi, shtns->nlat, (real) scale);
+}

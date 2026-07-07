@@ -220,6 +220,9 @@ void adjoint_SHqst_to_spat_ml(shtns_cfg shtns, int im, cplx *Vr, cplx *Vt, cplx 
 void adjoint_spat_to_SH(shtns_cfg shtns, cplx *Qlm, double *Vr) {
 	((pf2l)shtns->ftable[SHT_STD][SHT_TYP_SSY])(shtns, Qlm, Vr, (int)shtns->lmax | SHTNS_ADJOINT);
 
+	#ifdef SHTNS_GPU
+		if (shtns->d_clm && runs_on_gpu(shtns, SHT_STD, SHT_TYP_SSY)) return;	// weights already applied
+	#endif
 	// apply weights for adjoint
 	const double* w = shtns->wg;
 	double f = (shtns->mmax > 0) ? w[-2] : 1.0;
@@ -243,6 +246,9 @@ void adjoint_spat_to_SH(shtns_cfg shtns, cplx *Qlm, double *Vr) {
 void adjoint_spat_to_SHsphtor(shtns_cfg shtns, cplx *Slm, cplx *Tlm, double *Vt, double *Vp) {
 	((pf4l)shtns->ftable[SHT_STD][SHT_TYP_VSY])(shtns, Slm, Tlm, Vt, Vp, (int)shtns->lmax | SHTNS_ADJOINT);
 
+	#ifdef SHTNS_GPU
+		if (shtns->d_clm && runs_on_gpu(shtns, SHT_STD, SHT_TYP_VSY)) return;	// weights already applied
+	#endif
 	// apply weights for adjoint
 	const double* w = shtns->wg;
 	double f = (shtns->mmax > 0) ? w[-2] : 1.0;
@@ -270,6 +276,9 @@ void adjoint_spat_to_SHsphtor(shtns_cfg shtns, cplx *Slm, cplx *Tlm, double *Vt,
 void adjoint_spat_to_SHqst(shtns_cfg shtns, cplx *Qlm, cplx *Slm, cplx *Tlm, double *Vr, double *Vt, double *Vp) {
 	((pf6l)shtns->ftable[SHT_STD][SHT_TYP_3SY])(shtns, Qlm, Slm, Tlm, Vr, Vt, Vp, (int)shtns->lmax | SHTNS_ADJOINT);
 
+	#ifdef SHTNS_GPU
+		if (shtns->d_clm && runs_on_gpu(shtns, SHT_STD, SHT_TYP_3SY)) return;	// weights already applied
+	#endif
 	// apply weights for adjoint
 	const double* w = shtns->wg;
 	double f = (shtns->mmax > 0) ? w[-2] : 1.0;

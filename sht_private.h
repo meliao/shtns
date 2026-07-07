@@ -217,6 +217,7 @@ struct shtns_info {		// MUST start with "int nlm;"
 	cufftHandle cufft_plan;						// the cufft Handle
 	//cufftHandle cufft_plan_float;				// the cufft Handle single precision
 	#endif
+	double* d_wg_adjoint_spat;	// weights for adjoint in spatial space (real data type and not real_g)
 	cudaEvent_t gpu_timer[3];
 	#endif	/* SHTNS_GPU  ===> NOTHING ELSE  IN THE STRUCTURE BEYOND THIS LINE */
 
@@ -686,3 +687,6 @@ void S2D_CSTORE2(double* mem, long idx, long nlat, rnd nr, rnd sr, rnd ni, rnd s
 	vstor(mem + nlat*2, -(2*idx+1), si);
 	vstor(mem + nlat*2, -(2*idx+2), sr);
 }
+
+/// returns 0 if the specified transform (i_var,i_typ) is not scheduled to run on gpu
+int runs_on_gpu(shtns_cfg shtns, int i_var, int i_typ);
