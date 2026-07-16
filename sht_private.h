@@ -40,15 +40,9 @@
 
 #ifdef SHTNS_GPU
 #if SHTNS_GPU == 1
-	#ifdef HAVE_LIBCUFFT
-	#include <cufft.h>
-	#endif
 	/// The warp size is always 32 on cuda devices
 	#define WARPSZE 32
 #elif SHTNS_GPU == 2
-	#ifdef HAVE_LIBROCFFT
-	#include <hipfft.h>
-	#endif
 	/// The warp size is 64 on supported AMD devices
 	#define WARPSZE 64
 	// convert cuda names to hip names.
@@ -56,9 +50,7 @@
 #endif
 #include "shtns_cuda.h"
 
-#ifdef VKFFT_BACKEND
 #include "vkfft/vkFFT.h"
-#endif
 
 #ifdef __cplusplus
 extern "C" {
@@ -210,13 +202,7 @@ struct shtns_info {		// MUST start with "int nlm;"
 	unsigned char nwarp[3];			// third value is for scalar synthesis with sh2ish_fuse, or set to 0 to disable sh2ish
 	unsigned char lspan_a;			// for the record, not actually used.
 	CUmodule gpu_module;			// not sure this is needed
-	#ifdef VKFFT_BACKEND
-		VkFFTApplication vkfft_plan;
-	#endif
-	#if defined(HAVE_LIBCUFFT) || defined(HAVE_LIBROCFFT)
-	cufftHandle cufft_plan;						// the cufft Handle
-	//cufftHandle cufft_plan_float;				// the cufft Handle single precision
-	#endif
+	VkFFTApplication vkfft_plan;
 	double* d_wg_adjoint_spat;	// weights for adjoint in spatial space (real data type and not real_g)
 	cudaEvent_t gpu_timer[3];
 	#endif	/* SHTNS_GPU  ===> NOTHING ELSE  IN THE STRUCTURE BEYOND THIS LINE */

@@ -120,12 +120,7 @@ double cushtns_profiling_read_time(shtns_cfg shtns, double* time_1, double* time
 
 static void destroy_cuda_buffer_fft(shtns_cfg shtns)
 {
-	#if defined(HAVE_LIBCUFFT) || defined(HAVE_LIBROCFFT)
-	if (shtns->nphi > 1) cufftDestroy(shtns->cufft_plan);
-	#endif
-	#ifdef VKFFT_BACKEND
 	deleteVkFFT(&shtns->vkfft_plan);
-	#endif
 	if (shtns->gpu_buf_in) cudaFree(shtns->gpu_buf_in);
 }
 
@@ -144,31 +139,6 @@ static int init_cuda_buffer_fft(shtns_cfg shtns, int cuda_gpu_id, int sizeof_rea
 	int nfft = shtns->nphi;
 	//int nreal = 2*(nfft/2+1);
 	if (nfft > 1) {
-		#if defined(HAVE_LIBCUFFT) || defined(HAVE_LIBROCFFT)
-			cufftResult res = CUFFT_SUCCESS;
-			if (shtns->fft_mode & FFT_THETA_CONTIG) {
-				printf("!!! Use theta-contiguous FFT on GPU !!!\n");
-				long howmany = shtns->nlat_2 * shtns->howmany;		// support batched transforms
-				long dist = shtns->nlat_padded / 2;
-				res = cufftPlanMany(&shtns->cufft_plan, 1, &nfft, &nfft, dist, 1, &nfft, dist, 1, (sizeof_real==4) ? CUFFT_C2C : CUFFT_Z2Z, howmany);
-			} else {
-				printf("WARNING: layout not available on GPU with cuFFT/rocFFT. Try to compile with VkFFT instead.\n");
-				err_count ++;
-				return 1;
-			}
-			if (res != CUFFT_SUCCESS) {
-				printf("cufft init FAILED with error code %d\n", res);
-				err_count ++;
-			}
-			res = cufftSetStream(shtns->cufft_plan, shtns->comp_stream);	// select stream for cufft
-			size_t worksize = 0;
-			cufftGetSize(shtns->cufft_plan, &worksize);
-			#if SHT_VERBOSE > 1
-				printf("cufft work-area size: %ld \t nlat*nphi = %d\n", worksize/sizeof_real, shtns->nlat * shtns->nphi);
-			#endif
-		#endif
-
-		#ifdef VKFFT_BACKEND
 			CUdevice vkfft_device_struct;
 			VkFFTConfiguration config = {};		//zero-initialize configuration
 			if (shtns->fft_mode & FFT_THETA_CONTIG) {
@@ -225,7 +195,6 @@ static int init_cuda_buffer_fft(shtns_cfg shtns, int cuda_gpu_id, int sizeof_rea
 				printf("vkfft init FAILED with error code %d\n", vk_res);
 				err_count ++;
 			}
-		#endif
 	}
 
 	// Allocate working arrays for SHT on GPU:
@@ -744,17 +713,6 @@ void fourier_to_spat_gpu(shtns_cfg shtns, void* q, const int mmax, const long si
 {
 	const int nphi = shtns->nphi;
 	if (nphi > 1) {
-	#ifndef VKFFT_BACKEND
-		cufftResult res = CUFFT_SUCCESS;
-		void* xfft = q;
-		if (2*(mmax+1) <= nphi) {
-			const long nlat = shtns->nlat_padded;
-			cudaMemsetAsync( ((char*)q) + sizeof_real*(mmax+1)*nlat, 0, sizeof_real*(nphi-2*mmax-1)*nlat, shtns->comp_stream );		// zero out m>mmax before fft
-		}
-		res = (sizeof_real==8) ? cufftExecZ2Z(shtns->cufft_plan, (cufftDoubleComplex*) xfft, (cufftDoubleComplex*) q, CUFFT_INVERSE) :
-								 cufftExecC2C(shtns->cufft_plan, (cufftComplex*)       xfft, (cufftComplex*)       q, CUFFT_INVERSE);
-		if (res != CUFFT_SUCCESS) printf("[fourier_to_spat_gpu] cufft error %d\n", res);
-	#else
 		char* xfft;
 		VkFFTLaunchParams launchParams = {};
 		if (shtns->fft_mode & FFT_PHI_CONTIG) {
@@ -773,7 +731,6 @@ void fourier_to_spat_gpu(shtns_cfg shtns, void* q, const int mmax, const long si
 			launchParams.buffer = (void**) &q;
 		}
 		VkFFTAppend(&shtns->vkfft_plan, 1, &launchParams);
-	#endif
 	}
 }
 
@@ -781,13 +738,6 @@ void spat_to_fourier_gpu(shtns_cfg shtns, void* q, const int mmax, const long si
 {
 	const int nphi = shtns->nphi;
 	if (nphi > 1) {
-	#ifndef VKFFT_BACKEND
-		cufftResult res = CUFFT_SUCCESS;
-		void* xfft = q;
-		res = (sizeof_real==8) ? cufftExecZ2Z(shtns->cufft_plan, (cufftDoubleComplex*) q, (cufftDoubleComplex*) xfft, CUFFT_FORWARD) :
-								 cufftExecC2C(shtns->cufft_plan, (cufftComplex*) q, (cufftComplex*) xfft, CUFFT_FORWARD);
-		if (res != CUFFT_SUCCESS) printf("[spat_to_fourier_gpu] cufft error %d\n", res);
-	#else
 		char* xfft;
 		VkFFTLaunchParams launchParams = {};
 		if (shtns->fft_mode & FFT_PHI_CONTIG) {
@@ -803,7 +753,6 @@ void spat_to_fourier_gpu(shtns_cfg shtns, void* q, const int mmax, const long si
 		if (shtns->fft_mode & FFT_PHI_CONTIG) {
 			transpose_cplx_skip_R2C(shtns->comp_stream, xfft, q, nphi/2+1, shtns->nlat, mmax, sizeof_real);		// ignore m > mmax during transpose
 		}
-	#endif
 	}
 }
 
