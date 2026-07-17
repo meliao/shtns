@@ -589,7 +589,7 @@ static void grid_weights(shtns_cfg shtns, double latdir)
 	const int offset_align = (VSIZE2 > 1) ? VSIZE2 : 2;		// at least 2 additional values, stored at offset -1 and -2
 	shtns->wg = VMALLOC(2*(NLAT_2 +overflow+offset_align) * sizeof(double));	// quadrature weights, double precision.
 	shtns->wg += offset_align;	// reserve space before the weight array to store a normalization constant; to keep alignement, we reserve VSIZE2 doubles
-	shtns->wg_adjoint = shtns->wg + NLAT_2 +overflow+1 + offset_align;
+	shtns->wg_adjoint = shtns->wg + NLAT_2 +overflow + offset_align;
 	for (int i=0; i<NLAT_2; i++)	shtns->wg_adjoint[i] = 1.0;		// weights for adjoint synthesis -- all ones
 
 	iylm_fft_norm = 1.0;	// FFT/SHT normalization for zlm (4pi normalized)
