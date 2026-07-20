@@ -1,8 +1,30 @@
 SHTNS CHANGE LOG:
 -----------------
 
+* v3.7.5 (13 Feb 2026)
+	- Python: allows transforms with lmax=1
+	- Fix compilation of python interface with Swig 4.4
+	- Fix compilation on AVX+ machines with clang that led to accuracy test failure
+	- Fix setup.py problem with quotes, mostly arising on MacOS
+
+* v3.7.4  (10 Oct 2025)
+	- Add Julia example
+	- Performance tuning for H100 GPU
+	- Fix compilation on ARM with Neon intrinsics with some compilers
+	- Python: fix installation with pip in some cases
+
+* v3.7.3  (14 Nov 2024)
+	- Python and GPU: support CuPy array in `synth()` and `analys()` methods.
+	- GPU: allow phi-contiguous layout.
+	- Batch transforms: change spatial layout so that batch is the outermost dimension;
+	  `shtns_set_batch()` is renamed to `shtns_set_many()` to mark this change.
+	- new `im_from_lm()` function to recover order from index in array.
+	- Improved accuracy of gauss nodes and weights, and `SH_Zrotate()` function.
+	- GPU: optimizations for MI200 (analysis is much faster now)
+	- Bug fixes
+
 * v3.6.6  (29 Feb 2024)
-    - fix building of python module with cuda support
+	- fix building of python module with cuda support
 
 * v3.6.5  (28 Feb 2024)
 	- Improve accuracy of scalar transforms with large mean (l=0).
@@ -12,7 +34,7 @@ SHTNS CHANGE LOG:
 	- Python module can make use of GPU, with fallback to CPU.
 	- Faster initialization time.
 	- Runtime verbosity control through `SHTNS_VERBOSE` environment variable.
-    - Better discovery of fftw on MacOSX.
+	- Better discovery of fftw on MacOSX.
 
 * v3.6.1  (13 Jul 2023)
 	- Better python module installation, using `pip install shtns` (thanks to all testers!)

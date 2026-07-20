@@ -1942,13 +1942,11 @@ static inline VkFFTResult appendConstantsVkFFT(VkFFTSpecializationConstantsLayou
 								g_pow = (g_pow * sc->raderContainer[i].generator) % sc->raderContainer[i].prime;
 							}
 							if (!strcmp(floatType, "double")) {
-								double* raderFFTKernel = (double*)sc->raderContainer[i].raderFFTkernel;
 								sc->tempLen = sprintf(sc->tempStr, "%.17e%s ", (double)cos(2.0 * g_pow * double_PI / sc->raderContainer[i].prime), LFending);
 								res = VkAppendLine(sc);
 								if (res != VKFFT_SUCCESS) return res;
 							}
 							if (!strcmp(floatType, "float")) {
-								float* raderFFTKernel = (float*)sc->raderContainer[i].raderFFTkernel;
 								sc->tempLen = sprintf(sc->tempStr, "%.8e%s ", (float)cos(2.0 * g_pow * double_PI / sc->raderContainer[i].prime), LFending);
 								res = VkAppendLine(sc);
 								if (res != VKFFT_SUCCESS) return res;
@@ -2013,13 +2011,11 @@ static inline VkFFTResult appendConstantsVkFFT(VkFFTSpecializationConstantsLayou
 								g_pow = (g_pow * sc->raderContainer[i].generator) % sc->raderContainer[i].prime;
 							}
 							if (!strcmp(floatType, "double")) {
-								double* raderFFTKernel = (double*)sc->raderContainer[i].raderFFTkernel;
 								sc->tempLen = sprintf(sc->tempStr, "%.17e%s ", (double)(-sin(2.0 * g_pow * double_PI / sc->raderContainer[i].prime)), LFending);
 								res = VkAppendLine(sc);
 								if (res != VKFFT_SUCCESS) return res;
 							}
 							if (!strcmp(floatType, "float")) {
-								float* raderFFTKernel = (float*)sc->raderContainer[i].raderFFTkernel;
 								sc->tempLen = sprintf(sc->tempStr, "%.8e%s ", (float)(-sin(2.0 * g_pow * double_PI / sc->raderContainer[i].prime)), LFending);
 								res = VkAppendLine(sc);
 								if (res != VKFFT_SUCCESS) return res;
@@ -28752,7 +28748,7 @@ static inline VkFFTResult VkFFTGetRegistersPerThread(VkFFTApplication* app, uint
 		registers_per_thread_per_radix[i] = 0;
 	}
 	registers_per_thread[0] = 0;
-	min_registers_per_thread[0] = -1;
+	min_registers_per_thread[0] = -1ul;
 
 	if (loc_multipliers[2] > 0) {
 		if (loc_multipliers[3] > 0) {
@@ -29632,7 +29628,7 @@ static inline VkFFTResult VkFFTGetRegistersPerThread(VkFFTApplication* app, uint
 							uint64_t max_loc_multipliers_pow2 = 0;
 							uint64_t active_threads_y = max_rhs / 64; //estimate workbalance across CU (assume we have 64 CU)
 							if (active_threads_y == 0) active_threads_y = 1;
-							uint64_t testMinStages = -1;
+							uint64_t testMinStages = -1ul;
 							uint64_t maxRadixMinStages = 1;
 							uint64_t fixMaxCheckRadix2 = 3;
 #if(VKFFT_BACKEND==1)
@@ -30110,7 +30106,7 @@ static inline VkFFTResult VkFFTGetRegistersPerThreadOptimizeShared(uint64_t fft_
 		registers_per_thread_per_radix[i] = 0;
 	}
 	registers_per_thread[0] = 0;
-	min_registers_per_thread[0] = -1;
+	min_registers_per_thread[0] = -1ul;
 
 	for (uint64_t i = 1; i < numStages; i++) {
 		fft_length_copy = fft_length;
@@ -30366,7 +30362,7 @@ static inline VkFFTResult VkFFTOptimizeRaderFFTRegisters(VkFFTRaderContainer* ra
 				}
 			}
 			raderContainer[i].registers_per_thread = 0;
-			raderContainer[i].min_registers_per_thread = -1;
+			raderContainer[i].min_registers_per_thread = -1ul;
 			for (int64_t j = 2; j < 33; j++) {
 				if (raderContainer[i].registers_per_thread_per_radix[j] > 0) {
 					if (raderContainer[i].registers_per_thread_per_radix[j] < raderContainer[i].min_registers_per_thread) {
@@ -30886,7 +30882,7 @@ static inline VkFFTResult VkFFTScheduler(VkFFTApplication* app, VkFFTPlan* FFTPl
 				else {
 					uint64_t registers_per_thread_per_radix[33];
 					uint64_t registers_per_thread = 0;
-					uint64_t min_registers_per_thread = -1;
+					uint64_t min_registers_per_thread = -1ul;
 					uint64_t isGoodSequence = 0;
 					res = VkFFTGetRegistersPerThread(app, tempSequence, 0, max_rhs / tempSequence, axes->specializationConstants.useRader, multipliers, registers_per_thread_per_radix, &registers_per_thread, &min_registers_per_thread, &isGoodSequence);
 					if (res != VKFFT_SUCCESS) return res;
@@ -30963,7 +30959,7 @@ static inline VkFFTResult VkFFTScheduler(VkFFTApplication* app, VkFFTPlan* FFTPl
 					else {
 						uint64_t registers_per_thread_per_radix[33];
 						uint64_t registers_per_thread = 0;
-						uint64_t min_registers_per_thread = -1;
+						uint64_t min_registers_per_thread = -1ul;
 						uint64_t isGoodSequence = 0;
 						res = VkFFTGetRegistersPerThread(app, tempSequence, 0, max_rhs / tempSequence, axes->specializationConstants.useRader, multipliers, registers_per_thread_per_radix, &registers_per_thread, &min_registers_per_thread, &isGoodSequence);
 						if (res != VKFFT_SUCCESS) return res;
@@ -31399,7 +31395,7 @@ static inline VkFFTResult VkFFTScheduler(VkFFTApplication* app, VkFFTPlan* FFTPl
 
 		uint64_t registers_per_thread_per_radix[33];
 		uint64_t registers_per_thread = 0;
-		uint64_t min_registers_per_thread = -1;
+		uint64_t min_registers_per_thread = -1ul;
 		uint64_t isGoodSequence = 0;
 		uint64_t extraSharedMemoryForPow2 = ((app->configuration.sharedMemorySizePow2 < app->configuration.sharedMemorySize) || ((locAxisSplit[k] < maxSingleSizeNonStrided) && ((axis_id == nonStridedAxisId))) || ((locAxisSplit[k] < maxSingleSizeStrided) && ((axis_id != nonStridedAxisId)))) ? 1 : 0;
 
@@ -31488,7 +31484,7 @@ static inline VkFFTResult VkFFTScheduler(VkFFTApplication* app, VkFFTPlan* FFTPl
 					}
 				}
 			}
-			uint64_t new_min_registers = -1;
+			uint64_t new_min_registers = -1ul;
 			for (uint64_t i = 2; i < 33; i++) {
 				if ((registers_per_thread_per_radix[i] > 0) && (registers_per_thread_per_radix[i] < new_min_registers)) new_min_registers = registers_per_thread_per_radix[i];
 				if (registers_per_thread_per_radix[i] > registers_per_thread) {
@@ -31505,7 +31501,7 @@ static inline VkFFTResult VkFFTScheduler(VkFFTApplication* app, VkFFTPlan* FFTPl
 					}
 				}
 			}
-			min_registers_per_thread = (new_min_registers == -1) ? registers_per_thread : new_min_registers;
+			min_registers_per_thread = (new_min_registers == -1ul) ? registers_per_thread : new_min_registers;
 		}
 		if ((maxBatchCoalesced * locAxisSplit[k] / (min_registers_per_thread * registerBoost) > app->configuration.maxThreadsNum) || (axes[k].specializationConstants.useRader && (estimate_rader_threadnum > app->configuration.maxThreadsNum)))
 		{
@@ -31529,7 +31525,7 @@ static inline VkFFTResult VkFFTScheduler(VkFFTApplication* app, VkFFTPlan* FFTPl
 					registers_per_thread_per_radix[i] *= scaleRegistersNum;
 				}
 			}
-			uint64_t new_min_registers = -1;
+			uint64_t new_min_registers = -1ul;
 			for (uint64_t i = 2; i < 33; i++) {
 				if ((registers_per_thread_per_radix[i] > 0) && (registers_per_thread_per_radix[i] < new_min_registers)) new_min_registers = registers_per_thread_per_radix[i];
 			}
@@ -31663,7 +31659,7 @@ static inline VkFFTResult VkFFTScheduler(VkFFTApplication* app, VkFFTPlan* FFTPl
 
 		//final check up on all registers, increase if bigger
 		registers_per_thread = 0;
-		min_registers_per_thread = -1;
+		min_registers_per_thread = -1ul;
 		if (axes[k].specializationConstants.useRaderMult) {
 			registers_per_thread = axes[k].specializationConstants.raderRegisters;
 			min_registers_per_thread = axes[k].specializationConstants.rader_min_registers;
@@ -34260,7 +34256,7 @@ static inline VkFFTResult VkFFTPlanR2CMultiUploadDecomposition(VkFFTApplication*
 		else
 			storageComplexSize = (2 * sizeof(float));
 
-	uint64_t initPageSize = -1;
+	uint64_t initPageSize = -1ul;
 	uint64_t locBufferNum = 1;
 	uint64_t locBufferSize = 0;
 	/*for (uint64_t i = 0; i < app->configuration.bufferNum; i++) {
@@ -34384,9 +34380,9 @@ static inline VkFFTResult VkFFTPlanR2CMultiUploadDecomposition(VkFFTApplication*
 			}
 		}
 	}
-	initPageSize = -1;
+	initPageSize = -1ul;
 	locBufferNum = 1;
-	locBufferSize = -1;
+	locBufferSize = -1ul;
 	{
 		if (inverse) {
 			if ((axis_upload_id == 0) && (app->configuration.numberKernels > 1) && (inverse) && (!app->configuration.performConvolution)) {
@@ -35779,7 +35775,6 @@ static inline VkFFTResult VkFFTPlanAxis(VkFFTApplication* app, VkFFTPlan* FFTPla
 	uint64_t maxSequenceLengthSharedMemory = allowedSharedMemory / complexSize;
 	uint64_t maxSequenceLengthSharedMemoryPow2 = allowedSharedMemoryPow2 / complexSize;
 	uint64_t maxSingleSizeStrided = (app->configuration.coalescedMemory > complexSize) ? allowedSharedMemory / (app->configuration.coalescedMemory) : allowedSharedMemory / complexSize;
-	uint64_t maxSingleSizeStridedPow2 = (app->configuration.coalescedMemory > complexSize) ? allowedSharedMemoryPow2 / (app->configuration.coalescedMemory) : allowedSharedMemoryPow2 / complexSize;
 
 	axis->specializationConstants.stageStartSize = 1;
 	for (uint64_t i = 0; i < axis_upload_id; i++)
@@ -35838,7 +35833,6 @@ static inline VkFFTResult VkFFTPlanAxis(VkFFTApplication* app, VkFFTPlan* FFTPla
 	}
 	else {
 		maxSingleSizeStrided *= axis->specializationConstants.registerBoost;
-		maxSingleSizeStridedPow2 = (uint64_t)pow(2, (uint64_t)log2(maxSingleSizeStrided));
 	}
 
 	axis->specializationConstants.performR2C = FFTPlan->actualPerformR2CPerAxis[axis_id];
@@ -36913,7 +36907,6 @@ static inline VkFFTResult VkFFTPlanAxis(VkFFTApplication* app, VkFFTPlan* FFTPla
 			for (uint64_t i = 0; i < axis->specializationConstants.numRaderPrimes; i++) {
 				if (axis->specializationConstants.raderContainer[i].prime > 0) {
 					axis->specializationConstants.raderContainer[i].raderUintLUToffset = current_offset;
-					uint64_t g_pow = 1;
 					current_offset += axis->specializationConstants.raderContainer[i].prime;
 				}
 			}
@@ -37062,9 +37055,9 @@ static inline VkFFTResult VkFFTPlanAxis(VkFFTApplication* app, VkFFTPlan* FFTPla
 		else
 			storageComplexSize = (2 * sizeof(float));
 
-	uint64_t initPageSize = -1;
+	uint64_t initPageSize = -1ul;
 	uint64_t locBufferNum = 1;
-	uint64_t locBufferSize = -1;
+	uint64_t locBufferSize = -1ul;
 	/*for (uint64_t i = 0; i < app->configuration.bufferNum; i++) {
 		initPageSize += app->configuration.bufferSize[i];
 	}*/
@@ -37172,9 +37165,9 @@ static inline VkFFTResult VkFFTPlanAxis(VkFFTApplication* app, VkFFTPlan* FFTPla
 
 		}
 	}
-	initPageSize = -1;
+	initPageSize = -1ul;
 	locBufferNum = 1;
-	locBufferSize = -1;
+	locBufferSize = -1ul;
 	if (((axis_upload_id == 0) && (!app->useBluesteinFFT[axis_id]) && (app->configuration.isOutputFormatted && (
 		((axis_id == app->firstAxis) && (inverse))
 		|| ((axis_id == app->lastAxis) && (!inverse) && (!app->configuration.performConvolution))
@@ -37274,7 +37267,7 @@ static inline VkFFTResult VkFFTPlanAxis(VkFFTApplication* app, VkFFTPlan* FFTPla
 	VkDescriptorPoolSize descriptorPoolSize = { VK_DESCRIPTOR_TYPE_STORAGE_BUFFER };
 	descriptorPoolSize.descriptorCount = (uint32_t)(axis->specializationConstants.inputBufferBlockNum + axis->specializationConstants.outputBufferBlockNum);
 #endif
-	axis->specializationConstants.convolutionBindingID = -1;
+	axis->specializationConstants.convolutionBindingID = -1ul;
 	if ((axis_id == 0) && (axis_upload_id == 0) && (app->configuration.FFTdim == 1) && (app->configuration.performConvolution)) {
 		axis->specializationConstants.convolutionBindingID = axis->numBindings;
 		axis->specializationConstants.numBuffersBound[axis->numBindings] = axis->specializationConstants.kernelBlockNum;
@@ -40337,7 +40330,7 @@ static inline VkFFTResult initializeVkFFT(VkFFTApplication* app, VkFFTConfigurat
 	if (inputLaunchConfiguration.useRaderUintLUT != 0)	app->configuration.useRaderUintLUT = inputLaunchConfiguration.useRaderUintLUT;
 	if (inputLaunchConfiguration.halfThreads != 0)	app->configuration.halfThreads = inputLaunchConfiguration.halfThreads;
 	if (inputLaunchConfiguration.swapTo3Stage4Step != 0)	app->configuration.swapTo3Stage4Step = inputLaunchConfiguration.swapTo3Stage4Step;
-	if (app->configuration.performDCT > 0) app->configuration.performBandwidthBoost = -1;
+	if (app->configuration.performDCT > 0) app->configuration.performBandwidthBoost = -1ul;
 	if (inputLaunchConfiguration.performBandwidthBoost != 0)	app->configuration.performBandwidthBoost = inputLaunchConfiguration.performBandwidthBoost;
 	if (inputLaunchConfiguration.devicePageSize != 0)	app->configuration.devicePageSize = inputLaunchConfiguration.devicePageSize;
 	if (inputLaunchConfiguration.localPageSize != 0)	app->configuration.localPageSize = inputLaunchConfiguration.localPageSize;

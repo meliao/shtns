@@ -1,0 +1,152 @@
+/* sht_config.cmake.h.in. Hand crafted port of autoheader output. TODO: automate */
+
+/* Define to 1 if you have the `clock_gettime' function. */
+#cmakedefine HAVE_CLOCK_GETTIME @HAVE_CLOCK_GETTIME@
+
+/* Define to 1 if you have the <complex.h> header file. */
+#cmakedefine HAVE_COMPLEX_H @HAVE_COMPLEX_H@
+
+/* Define to 1 if you have the <c_asm.h> header file. */
+#cmakedefine HAVE_C_ASM_H @HAVE_C_ASM_H@
+
+/* Define to 1 if you have the `fftw_cost' function. */
+#cmakedefine HAVE_FFTW_COST @HAVE_FFTW_COST@
+
+/* Define to 1 if you have the `gethrtime' function. */
+#cmakedefine HAVE_GETHRTIME @HAVE_GETHRTIME@
+
+/* Define to 1 if hrtime_t is defined in <sys/time.h> */
+#cmakedefine HAVE_HRTIME_T @HAVE_HRTIME_T@
+
+/* Define to 1 if you have the <intrinsics.h> header file. */
+#cmakedefine HAVE_INTRINSICS_H @HAVE_INTRINSICS_H@
+
+/* Define to 1 if you have the <inttypes.h> header file. */
+#cmakedefine HAVE_INTTYPES_H @HAVE_INTTYPES_H@
+
+/* Define to 1 if you have the `cudart' library (-lcudart). */
+#cmakedefine HAVE_LIBCUDART @HAVE_LIBCUDART@
+
+/* Define to 1 if you have the `cufft' library (-lcufft). */
+#cmakedefine HAVE_LIBCUFFT @HAVE_LIBCUFFT@
+
+/* Define to 1 if HIP language has been enabled */
+#cmakedefine HAVE_HIP @HAVE_HIP@
+
+/* Define to 1 if `hipfft' has been found by find_package(hipfft) */
+#cmakedefine HAVE_LIBHIPFFT @HAVE_LIBHIPFFT@
+
+/* Define to 1 if you have the `fftw3' library (-lfftw3). */
+#cmakedefine HAVE_LIBFFTW3 @HAVE_LIBFFTW3@
+
+/* Define to 1 if you have the `fftw3_omp' library (-lfftw3_omp). */
+#cmakedefine HAVE_LIBFFTW3_OMP @HAVE_LIBFFTW3_OMP@
+
+/* Define to 1 if you have the `m' library (-lm). */
+#cmakedefine HAVE_LIBM @HAVE_LIBM@
+
+/* Define to 1 if the type `long double' works and has more range or precision
+   than `double'. */
+#cmakedefine HAVE_LONG_DOUBLE_WIDER @HAVE_LONG_DOUBLE_WIDER@
+
+/* Define to 1 if you have the `mach_absolute_time' function. */
+#cmakedefine HAVE_MACH_ABSOLUTE_TIME @HAVE_MACH_ABSOLUTE_TIME@
+
+/* Define to 1 if you have the <mach/mach_time.h> header file. */
+#cmakedefine HAVE_MACH_MACH_TIME_H @HAVE_MACH_MACH_TIME_H@
+
+/* Define to 1 if you have the <math.h> header file. */
+#cmakedefine HAVE_MATH_H @HAVE_MATH_H@
+
+/* Define to 1 if you have the <memory.h> header file. */
+#cmakedefine HAVE_MEMORY_H @HAVE_MEMORY_H@
+
+/* Define to 1 if you have the `read_real_time' function. */
+#cmakedefine HAVE_READ_REAL_TIME @HAVE_READ_REAL_TIME@
+
+/* Define to 1 if you have the <stdatomic.h> header file. */
+#cmakedefine HAVE_STDATOMIC_H @HAVE_STDATOMIC_H@
+
+/* Define to 1 if you have the <stdint.h> header file. */
+#cmakedefine HAVE_STDINT_H @HAVE_STDINT_H@
+
+/* Define to 1 if you have the <stdio.h> header file. */
+#cmakedefine HAVE_STDIO_H @HAVE_STDIO_H@
+
+/* Define to 1 if you have the <stdlib.h> header file. */
+#cmakedefine HAVE_STDLIB_H @HAVE_STDLIB_H@
+
+/* Define to 1 if you have the <strings.h> header file. */
+#cmakedefine HAVE_STRINGS_H @HAVE_STRINGS_H@
+
+/* Define to 1 if you have the <string.h> header file. */
+#cmakedefine HAVE_STRING_H @HAVE_STRING_H@
+
+/* Define to 1 if you have the <sys/stat.h> header file. */
+#cmakedefine HAVE_SYS_STAT_H @HAVE_SYS_STAT_H@
+
+/* Define to 1 if you have the <sys/time.h> header file. */
+#cmakedefine HAVE_SYS_TIME_H @HAVE_SYS_TIME_H@
+
+/* Define to 1 if you have the <sys/types.h> header file. */
+#cmakedefine HAVE_SYS_TYPES_H @HAVE_SYS_TYPES_H@
+
+/* Define to 1 if you have the `time_base_to_time' function. */
+#cmakedefine HAVE_TIME_BASE_TO_TIME @HAVE_TIME_BASE_TO_TIME@
+
+/* Define to 1 if you have the <unistd.h> header file. */
+#cmakedefine HAVE_UNISTD_H @HAVE_UNISTD_H@
+
+/* Define if you have the UNICOS _rtc() intrinsic. */
+#cmakedefine HAVE__RTC
+
+/* Define to the address where bug reports for this package should be sent. */
+#cmakedefine PACKAGE_BUGREPORT ""
+
+/* Define to the full name of this package. */
+#cmakedefine PACKAGE_NAME "@PROJECT_NAME@"
+
+/* Define to the full name and version of this package. */
+#cmakedefine PACKAGE_STRING "@PROJECT_NAME@ @PROJECT_VERSION@"
+
+/* Define to the one symbol short name of this package. */
+#cmakedefine PACKAGE_TARNAME "shtns"
+
+/* Define to the home page for this package. */
+#cmakedefine PACKAGE_URL "https://bitbucket.org/nschaeff/shtns"
+
+/* Define to the version of this package. */
+#cmakedefine PACKAGE_VERSION "@PROJECT_VERSION@"
+
+/* I need the transforms compatible with the MagIC code, to speed it up! */
+#cmakedefine SHTNS4MAGIC @SHTNS4MAGIC@
+
+/* Enable the new recurrence proposed by Ishioka (2018) see
+   https://doi.org/10.2151/jmsj.2018-019 (faster) */
+#cmakedefine SHTNS_ISHIOKA @SHTNS_ISHIOKA@
+
+/* Compile the Fortran API */
+#cmakedefine SHT_F77_API @BUILD_FORTRAN@
+
+/* 0:no output, 1:output info to stdout, 2:more output (debug info), 3:also
+   print fftw plans. */
+#define SHT_VERBOSE @SHT_VERBOSE@
+
+/* Define to 1 if you have the ANSI C header files. */
+#cmakedefine STDC_HEADERS @STDC_HEADERS@
+
+/* Define to 1 if you can safely include both <sys/time.h> and <time.h>. */
+#cmakedefine TIME_WITH_SYS_TIME 0
+
+/* I compile with GCC 4 or ICC 14 or later, and I would like fast vectorized
+   code (if SSE2, AVX or MIC is supported) ! */
+#cmakedefine _GCC_VEC_ 1
+
+/* Define to `__inline__' or `__inline' if that's what the C compiler
+   calls it, or to nothing if 'inline' is not supported under any name.  */
+#ifndef __cplusplus
+#cmakedefine inline 0
+#endif
+
+/* Define to `unsigned int' if <sys/types.h> does not define. */
+#cmakedefine size_t 0

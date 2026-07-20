@@ -23,7 +23,7 @@ FEATURES:
   Xeon Phi (KNL), AltiVec VSX, and Neon.
 - **parallel transforms with OpenMP**.
 - **GPU transforms** for nvidia and AMD devices: transparent auto-offload
-  or working with data already on GPU (using cuda or hip).
+  or working with data already on GPU (using cuda, hip, or CuPy).
 - synthesis (inverse transform) at any coordinate (not constrained to a grid).
 - **on-the-fly transforms** : saving memory and bandwidth, they are even faster
   on modern architectures.
@@ -52,6 +52,9 @@ Requirements: FFTW library, and numpy for the python module.
         pip install shtns
 
     or from the source tree with `pip install .` or `python setup.py install --user`
+
+    If fftw is not found you can point to it with SHNTS_LIB_DIR=/path/to/libfftw/
+    For CuPy support, the CUDA_PATH environment variable must be correctly set.
 
 - The **Julia package** is [maintained separately](https://github.com/fgerick/SHTns.jl) and can be installed from julia with
 

@@ -62,7 +62,7 @@
 	#define vstor(mem, idx, v) ((s2d*)(mem))[idx] = v
 	#define vread2 vread
 	#define vstor2 vstor
-	#define vxor2(v,x) veorq_u64(v,x)
+	#define vxor2(v,x) vreinterpretq_f64_u64( veorq_u64 (vreinterpretq_u64_f64(v),vreinterpretq_u64_f64(x)) )
 	inline static v2d v2d_reduce(v2d a, v2d b) { return vpaddq_f64(a,b); }
 	inline static v2d vneg_even_precalc(v2d v) {		// don't use in an intensive loop.
 		v[0] = -v[0];
@@ -229,6 +229,13 @@
 			#endif
 		}
 		#define vdup_even4(v) ((v4d)_mm256_movedup_pd(v))
+		#ifdef __clang__
+			// Clang requires this zext intrinsic, the castpd one does not guarantee zero upper part!
+			#define v2d_to_v4d_zext(a) _mm256_zextpd128_pd256(a)
+		#else
+			// GCC < 10 does not have the zext intrinsic, and GCC >= 10 emits a useless movapd with it
+			#define v2d_to_v4d_zext(a) _mm256_castpd128_pd256(a)
+		#endif
 	#endif
 	#ifdef __AVX512F__
 		#define MIN_ALIGNMENT 64

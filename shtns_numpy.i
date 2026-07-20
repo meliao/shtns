@@ -177,7 +177,7 @@ struct shtns_rot_ {		// describe a rotation matrix
 %extend shtns_info {
 	%exception {
 		shtns_error = 0;	// clear exception
-		$function
+		$action
 		if (shtns_error) {	// test for exception
 			SWIG_exception(shtns_error, shtns_err_msg);		return NULL;
 		}
@@ -203,8 +203,8 @@ struct shtns_rot_ {		// describe a rotation matrix
 	%}
 	%feature("kwargs") shtns_info;
 	shtns_info(int lmax, int mmax=-1, int mres=1, int norm=sht_orthonormal, int nthreads=0) {	// default arguments : mmax, mres and norm
-		if (lmax < 2) {
-			throw_exception(SWIG_ValueError,1,"lmax < 2 not allowed");	return NULL;
+		if (lmax < 1) {
+			throw_exception(SWIG_ValueError,1,"lmax < 1 not allowed");	return NULL;
 		}
 		if (mres <= 0) {
 			throw_exception(SWIG_ValueError,3,"mres <= 0 invalid");	return NULL;
@@ -246,7 +246,7 @@ struct shtns_rot_ {		// describe a rotation matrix
 		if (!(flags & SHT_THETA_CONTIGUOUS))  flags |= SHT_PHI_CONTIGUOUS;	// default to SHT_PHI_CONTIGUOUS.
 		int grd = flags & 255;
 		// avoid slow initialization (which sometimes hangs with python)
-		if ((grd == sht_auto) || (grd == sht_gauss_fly) || (grd == sht_gauss)) {
+		if ((grd == sht_auto) || (grd == sht_gauss)) {
 			grd = sht_quick_init;
 		} else if (grd == sht_reg_dct) grd = sht_reg_fast;
 		flags = (flags &~ 255) | grd;
@@ -486,7 +486,7 @@ struct shtns_rot_ {		// describe a rotation matrix
 	}
 	void SHqst_to_spat_cplx(PyObject *Qlm, PyObject *Slm, PyObject *Tlm, PyObject *Vr, PyObject *Vt, PyObject *Vp) {
 		int n = $self->lmax + 1;
-		if (check_spatial(4,Vr, $self->nspat) && check_spatial(5,Vt, $self->nspat) && check_spatial(6,Vp, $self->nspat)
+		if (check_spectral(4,Vr, $self->nspat) && check_spectral(5,Vt, $self->nspat) && check_spectral(6,Vp, $self->nspat)
 			&& check_spectral(1,Qlm, n*n) && check_spectral(2,Slm, n*n) && check_spectral(3,Tlm, n*n))
 		SHqst_to_spat_cplx($self, PyArray_Data(Qlm), PyArray_Data(Slm), PyArray_Data(Tlm), PyArray_Data(Vr), PyArray_Data(Vt), PyArray_Data(Vp));
 	}
@@ -840,7 +840,7 @@ struct shtns_rot_ {		// describe a rotation matrix
 %extend shtns_rot_ {
 	%exception {
 		shtns_error = 0;	// clear exception
-		$function
+		$action
 		if (shtns_error) {	// test for exception
 			SWIG_exception(shtns_error, shtns_err_msg);		return NULL;
 		}
@@ -848,8 +848,8 @@ struct shtns_rot_ {		// describe a rotation matrix
 
 	%feature("kwargs") shtns_rot_;
 	shtns_rot_(int lmax, int mmax=-1, int norm=0) {	// default arguments : mmax, norm
-		if (lmax < 2) {
-			throw_exception(SWIG_ValueError,1,"lmax < 2 not allowed");	return NULL;
+		if (lmax < 1) {
+			throw_exception(SWIG_ValueError,1,"lmax < 1 not allowed");	return NULL;
 		}
 		if (mmax < 0) mmax = lmax;		// default mmax
 		if (mmax > lmax) {

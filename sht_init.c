@@ -33,6 +33,9 @@
 #include <time.h>		// for the clock() function
 // cycle counter from FFTW
 #include "fftw3/cycle.h"
+#ifdef SHTNS_CMAKE
+	#include "sht_version.h"
+#endif
 
 // chained list of sht_setup : start with NULL
 shtns_cfg sht_data = NULL;
@@ -404,17 +407,37 @@ static void planFFT(shtns_cfg shtns, int layout)
 	#endif
 
 	// default layout:
-	phi_inc = shtns->nlat * howmany;
-	#ifndef SHTNS_GPU
-	if ((layout & SHT_ALLOW_PADDING) && (phi_inc % 64 == 0) && (NPHI * phi_inc > 512) && ((NPHI>1)||(howmany>1)))
-		phi_inc += 8;		// we add some padding, to avoid cache bank conflicts.
-	#elif SHTNS_GPU==2
-	if ((layout & SHT_ALLOW_PADDING) && (phi_inc % 256 == 0) && (NPHI * phi_inc > 4096) && (NPHI>1))
-		phi_inc += 8;           // add pading to avoid memory bank / channel conflicts on AMD GPUs.
-	#endif
+	phi_inc = shtns->nlat;
+	if ((layout & SHT_ALLOW_PADDING) && NPHI>1) {	// handle padding
+		int pad = 0;
+		#ifndef SHTNS_GPU
+		if ((phi_inc % 64 == 0) && (NPHI * phi_inc > 512))
+			pad = 8;			// we add some padding, to avoid cache bank conflicts.
+		#elif SHTNS_GPU==2
+		const long stride_bytes = phi_inc * shtns->sizeof_real;
+		if (NPHI * stride_bytes > 32*1024) {	// if the full fft does not fit in 32 kb (the L1 cache size)
+			if (stride_bytes % 32)	pad = 32 - (stride_bytes % 32);		// always align on 32 bytes
+			if ((stride_bytes+pad) % 8192 == 0) {
+				pad += 64;		// avoid multiple of 8 kb
+			} else {
+				if (NPHI*(stride_bytes+pad) < 8192*1024) {		// full data (including padding) fits in L2
+					if (stride_bytes % 64)  pad = 64 - (stride_bytes % 64);		// align on 64 bytes
+					if ((stride_bytes+pad) % 128 == 0) pad += 64;		// add padding to avoid L2 cache bank / channel / whatever conflicts on AMD GPUs (large impact on performance).
+				} else
+				if ((2*MMAX+1)*stride_bytes < 8192*1024*1.2) {		// if an fft entirely fits in the L2 cache (8 Mb for AMD MI100 and MI200)
+					if ((stride_bytes+pad) % 128 == 0) pad += 32;	// add padding to avoid L2 cache bank / channel / whatever conflicts on AMD GPUs (large impact on performance).
+				}
+			}
+			pad /= shtns->sizeof_real;		// in units of real
+		}
+		#endif
+		const char* env_pad = getenv("SHTNS_PAD");    if (env_pad) pad = atoi(env_pad);		// override default with SHTNS_PAD environment variable
+		phi_inc += pad;
+	}
 	shtns->k_stride_a = 1;		shtns->m_stride_a = phi_inc;		// default strides
 	shtns->nlat_padded = phi_inc;		// stride between phi in spectral domain
-	shtns->nspat = NPHI * phi_inc;		// default spatial size to be allocated for a transform call
+	shtns->nspat = NPHI * phi_inc * howmany;		// default spatial size to be allocated for a transform call
+	shtns->spat_dist = NPHI * phi_inc;
 
 	if (NPHI==1) 	// no FFT needed.
 	{
@@ -427,14 +450,15 @@ static void planFFT(shtns_cfg shtns, int layout)
 	/* NPHI > 1 */
 	theta_inc=1;	// SHT_NATIVE_LAYOUT is the default.
 	if (layout & SHT_PHI_CONTIGUOUS) {
-		if (howmany != 1) shtns_runerr("batch transform not supported for phi-contiguous layout\n");
-		// shtns->howmany MUST be 1!
 		phi_inc=1;  theta_inc=NPHI;
 		shtns->nspat = NPHI * NLAT;		// no padding, no batching.
 		#ifdef SHTNS_GPU
 		if (shtns->mmax == NPHI/2) shtns->nspat += NLAT;		// on GPU, a little bit of extra space is needed for odd NPHI, to store the Fourier coefficients.
 		#endif
 		shtns->nlat_padded = NLAT;
+
+		shtns->spat_dist = shtns->nspat;
+		shtns->nspat *= howmany;
 	}
 
 	if (verbose) {
@@ -459,23 +483,24 @@ static void planFFT(shtns_cfg shtns, int layout)
 	if (layout & SHT_PHI_CONTIGUOUS) {		// out-of-place split dft
 		if ((NLAT & 1) == 0) {
 			if (verbose) printf("(phi-contiguous layout: phi_inc=%d, theta_inc=%d)\n",phi_inc,theta_inc);
-			fftw_iodim dim, many;
+			fftw_iodim dim, many[2];
 			shtns->fft_mode = FFT_PHI_CONTIG_SPLIT | FFT_OOP;
 			if ((layout & SHT_DESTROY_SPAT) == 0) shtns->fft_mode |= FFT_OOP_ANALYS;
-			dim.n = NPHI;    	dim.os = 1;			dim.is = NLAT;		// complex transpose
-			many.n = NLAT/2;	many.os = 2*NPHI;	many.is = 2;
-			shtns->ifftc = fftw_plan_guru_split_dft(1, &dim, 1, &many, ((double*)ShF)+1, (double*)ShF, Sh+NPHI, Sh, shtns->fftw_plan_mode | FFTW_DESTROY_INPUT);
+			dim.n = NPHI;    		dim.os = 1;				dim.is = NLAT;		// complex transpose
+			many[0].n = NLAT/2;		many[0].os = 2*NPHI;	many[0].is = 2;
+			many[1].n = howmany;		many[1].os = shtns->spat_dist;	many[1].is = shtns->spat_dist;
+			shtns->ifftc = fftw_plan_guru_split_dft(1, &dim,  (howmany==1) ? 1 : 2, many, ((double*)ShF)+1, (double*)ShF, Sh+NPHI, Sh, shtns->fftw_plan_mode);
 
 			// legacy analysis fft
 			//dim.n = NPHI;    	dim.is = 1;			dim.os = NLAT;
 			//many.n = NLAT/2;	many.is = 2*NPHI;	many.os = 2;
 			// new internal
-			dim.n = NPHI;    	dim.is = 1;			dim.os = 2;		// split complex, but without global transpose (faster).
-			many.n = NLAT/2;	many.is = 2*NPHI;	many.os = 2*NPHI;
-			shtns->fftc = fftw_plan_guru_split_dft(1, &dim, 1, &many,  Sh+NPHI, Sh, ((double*)ShF)+1, (double*)ShF, shtns->fftw_plan_mode);
+			dim.n = NPHI;    		dim.is = 1;				dim.os = 2;		// split complex, but without global transpose (faster).
+			many[0].n = NLAT/2;		many[0].is = 2*NPHI;	many[0].os = 2*NPHI;
+			shtns->fftc = fftw_plan_guru_split_dft(1, &dim, (howmany==1) ? 1 : 2, many,  Sh+NPHI, Sh, ((double*)ShF)+1, (double*)ShF, shtns->fftw_plan_mode);
 			shtns->k_stride_a = NPHI;		shtns->m_stride_a = 2;
 			shtns->nlat_padded = NLAT;
-			
+
 		/*	if (shtns->nthreads > 1) {
 				fftw_plan_with_nthreads(1);
 				// FOR MKL only:
@@ -503,7 +528,15 @@ static void planFFT(shtns_cfg shtns, int layout)
 		if ((NLAT & 1)==0) {
 			if (verbose) printf("(theta-contiguous layout: phi_inc=%d, theta_inc=%d)\n",phi_inc,theta_inc);
 			shtns->fft_mode = FFT_THETA_CONTIG;
-			shtns->ifftc = fftw_plan_many_dft(1, &nfft, shtns->nlat_2 * howmany, ShF, &nfft, phi_inc/2, 1, ShF, &nfft, phi_inc/2, 1, FFTW_BACKWARD, shtns->fftw_plan_mode);
+			if (howmany==1) {
+				shtns->ifftc = fftw_plan_many_dft(1, &nfft, shtns->nlat_2 * howmany, ShF, &nfft, phi_inc/2, 1, ShF, &nfft, phi_inc/2, 1, FFTW_BACKWARD, shtns->fftw_plan_mode);
+			} else {
+				fftw_iodim dim, many[2];
+				dim.n = NPHI;    		dim.os = shtns->nlat_padded/2;		dim.is = shtns->nlat_padded/2;
+				many[0].n = NLAT/2;		many[0].os = 1;				many[0].is = 1;
+				many[1].n = howmany;	many[1].os = shtns->nlat_padded/2 * NPHI;	many[1].is = shtns->nlat_padded/2 * NPHI;
+				shtns->ifftc = fftw_plan_guru_dft(1, &dim, 2, many, ShF, ShF, FFTW_BACKWARD, shtns->fftw_plan_mode);
+			}
 			shtns->fftc = shtns->ifftc;		// same thing, with m>0 and m<0 exchanged.
 			if ((layout & SHT_DESTROY_SPAT) == 0) {		// to preserve spatial input data, use an out-of-place transform:
 				shtns->fftc = fftw_plan_many_dft(1, &nfft, shtns->nlat_2 * howmany, ShF, &nfft, phi_inc/2, 1, (cplx*)Sh, &nfft, phi_inc/2, 1, FFTW_BACKWARD, shtns->fftw_plan_mode);
@@ -1103,8 +1136,7 @@ shtns_cfg shtns_create(int lmax, int mmax, int mres, enum shtns_norm norm)
 {
 	shtns_cfg shtns, s2;
 
-//	if (lmax < 1) shtns_runerr("lmax must be larger than 1");
-	if (lmax < 2) shtns_runerr("lmax must be at least 2");
+	if (lmax <= 0) shtns_runerr("lmax must be at least 1");
 	if (IS_TOO_LARGE(lmax, shtns->lmax)) shtns_runerr("lmax too large");
 	if (mmax*mres > lmax) shtns_runerr("MMAX*MRES should not exceed LMAX");
 	if (mres <= 0) shtns_runerr("MRES must be > 0");
@@ -1127,7 +1159,7 @@ shtns_cfg shtns_create(int lmax, int mmax, int mres, enum shtns_norm norm)
 		#else
 		shtns->robert_form = 0;		// no Robert form by default.
 		#endif
-		shtns->howmany = 1;		// 1 transform by default. Use shtns_set_batch() to ask for more.
+		shtns->howmany = 1;		// 1 transform by default. Use shtns_set_many() to ask for more.
 		shtns->cpu_timer = -1;		// disable timing by default
 	}
 
@@ -1375,7 +1407,6 @@ int shtns_set_grid_auto(shtns_cfg shtns, enum shtns_type flags, double eps, int 
 	#endif
 	if (shtns->howmany != 1) {		// more constraints apply for batched transforms:
 		if (shtns->nlat & 1) shtns_runerr("Nlat must be even for a batched transform\n");
-		if (flags & SHT_PHI_CONTIGUOUS) shtns_runerr("batch transform not supported for phi-contiguous layout\n");
 	}
 	shtns_unset_grid(shtns);		// release grid if previously allocated.
 	if (nl_order <= 0) nl_order = SHT_DEFAULT_NL_ORDER;
@@ -1555,18 +1586,19 @@ int shtns_set_grid(shtns_cfg shtns, enum shtns_type flags, double eps, int nlat,
  * Currently only theta-contiguous data is allowed.
  * This function must be called before \ref shtns_set_grid or \ref shtns_set_grid_auto, after which the spatial datat layout will be defined
  * by \c shtns->nlat_padded and \c shtns->nspat as:
- * \code data[i_phi*shtns->nlat_padded + i_batch*shtns->nlat + i_theta] \endcode
+ * \code data[(i_batch*shtns->nphi + i_phi)*shtns->nlat_padded + i_theta] \endcode
  * Note that \c shtns->nspat will be the number of spatial points in howmany fields (not in a single field).
  * \param[in] shtns = a plan created by \ref shtns_create that should handle many transforms at once.
  * \param[in] howmany = number of transforms in batch.
  * \param[in] spec_dist = distance between spectral arrays in batch. Spectral data is accessed with \code Qlm[i_batch * spec_dist + lm] \endcode
  * \returns howmany on success, or -1 on failure.
 */
-int shtns_set_batch(shtns_cfg shtns, const int howmany, long spec_dist)
+int shtns_set_many(shtns_cfg shtns, const int howmany, long spec_dist)
 {
 	if (howmany <= 0)	return -1;		// invalid
 	if (spec_dist == 0)  spec_dist = shtns->nlm;
 	if (spec_dist < shtns->nlm) return -1;	// invalid
+	if (shtns->nspat != 0) return -1;		// grid already set!!
 
 	shtns->howmany = howmany;
 	shtns->spec_dist = spec_dist;		// distance between spectral fields.

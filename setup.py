@@ -65,7 +65,10 @@ if sys.platform.startswith('darwin'):    # MacOS specific (thanks to S. Belkner)
     from platform import machine
     libdir.append( "/opt/homebrew/lib" if machine() == 'arm64' else "/usr/local/lib" )      # directory depends on arm64 vs x86-64 !
 if len(libdir)>0:
-    config_cmd.append('LDFLAGS="-L{}"'.format(' -L'.join(libdir)))
+    if 'LDFLAGS' in os.environ:     # keep the system LDFLAGS!
+        config_cmd.append('LDFLAGS={} -L{}'.format(os.environ['LDFLAGS'], ' -L'.join(libdir)))
+    else:
+        config_cmd.append('LDFLAGS=-L{}'.format(' -L'.join(libdir)))
 
 use_openmp = os.environ.get('SHTNS_OPENMP', '1') != '0'   # allows to disable openmp with environment variable SHTNS_OPENMP=0
 if use_openmp:
@@ -109,6 +112,7 @@ class make(build_ext):
         super().run()
 
 setup(name='shtns',
+    version='3.7.5',
     cmdclass={'build_ext': make },
         description='High performance Spherical Harmonic Transform',
         author='Nathanael Schaeffer',
