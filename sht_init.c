@@ -461,6 +461,7 @@ static void planFFT(shtns_cfg shtns, int layout)
 			if (verbose) printf("(phi-contiguous layout: phi_inc=%d, theta_inc=%d)\n",phi_inc,theta_inc);
 			fftw_iodim dim, many;
 			shtns->fft_mode = FFT_PHI_CONTIG_SPLIT | FFT_OOP;
+			if ((layout & SHT_DESTROY_SPAT) == 0) shtns->fft_mode |= FFT_OOP_ANALYS;
 			dim.n = NPHI;    	dim.os = 1;			dim.is = NLAT;		// complex transpose
 			many.n = NLAT/2;	many.os = 2*NPHI;	many.is = 2;
 			shtns->ifftc = fftw_plan_guru_split_dft(1, &dim, 1, &many, ((double*)ShF)+1, (double*)ShF, Sh+NPHI, Sh, shtns->fftw_plan_mode | FFTW_DESTROY_INPUT);

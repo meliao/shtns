@@ -194,6 +194,7 @@ struct shtns_info {		// MUST start with "int nlm;"
 	double* d_mx_van;
 	double* gpu_staging_mem;	// for auto-offload only
 	double* gpu_buf_in;		// inner buffer: can each hold either spectral or spatial fields.
+	void* gpu_buf_oop_fft;
 	size_t nlm_stride, spat_stride;
 	cudaStream_t xfer_stream, comp_stream;		// the cuda streams
 	CUfunction gpu_kernels[4];		// 4 kernels (scalar & vector, synth & analys)

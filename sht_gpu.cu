@@ -122,6 +122,7 @@ static void destroy_cuda_buffer_fft(shtns_cfg shtns)
 {
 	deleteVkFFT(&shtns->vkfft_plan);
 	if (shtns->gpu_buf_in) cudaFree(shtns->gpu_buf_in);
+	if (shtns->gpu_buf_oop_fft) cudaFree(shtns->gpu_buf_oop_fft);
 }
 
 #define CACHE_LINE_GPU 128
@@ -142,7 +143,7 @@ static int init_cuda_buffer_fft(shtns_cfg shtns, int cuda_gpu_id, int sizeof_rea
 			CUdevice vkfft_device_struct;
 			VkFFTConfiguration config = {};		//zero-initialize configuration
 			if (shtns->fft_mode & FFT_THETA_CONTIG) {
-				printf("!!! Use theta-contiguous FFT on GPU !!!\n");
+				printf("!!! Use theta-contiguous FFT on GPU %s!!!\n", (shtns->fft_mode & FFT_OOP_ANALYS) ? "(oop) " : "");
 				long howmany = shtns->nlat_2 * shtns->howmany;		// support batched transforms
 				long dist = shtns->nlat_padded / 2;
 				config.FFTdim = 2; //FFT dimension: 1D, but we use a second dimension to get non-unit strides.
@@ -151,7 +152,10 @@ static int init_cuda_buffer_fft(shtns_cfg shtns, int cuda_gpu_id, int sizeof_rea
 				config.bufferStride[0] = dist;
 				config.bufferStride[1] = dist * nfft;
 				config.omitDimension[0] = 1;		// no FFT on the first dimension.
-				config.doublePrecision = sizeof_real / 8;
+				if (shtns->fft_mode & FFT_OOP_ANALYS) {	// out-of-place transform needed; we will also use it for fourier to spat.
+					config.isInputFormatted = 1;			// use a separate input buffer
+					config.inverseReturnToInputBuffer = 1;
+				}
 				if (2*(shtns->mmax+1) <= nfft) {	// let vkFFT perform the zero-padding (saves memory bandwidth)
 					config.performZeropadding[1] = 1;
 					config.frequencyZeroPadding = 1;
@@ -218,6 +222,12 @@ static int init_cuda_buffer_fft(shtns_cfg shtns, int cuda_gpu_id, int sizeof_rea
 
 	shtns->nlm_stride = nlm_stride;
 	shtns->spat_stride = dual_stride;
+
+	shtns->gpu_buf_oop_fft = 0;
+	if (shtns->fft_mode & FFT_OOP_ANALYS) {
+		err = cudaMalloc((void**)&shtns->gpu_buf_oop_fft, spat_stride * sizeof_real * howmany);
+		if (err != cudaSuccess) { err_count++; CUDA_ERROR_CHECK; }
+	}
 
 	return err_count;
 }
@@ -709,11 +719,12 @@ shtns_cfg cushtns_clone(shtns_cfg shtns, cudaStream_t compute_stream, cudaStream
 	}
 }
 
+/// q is the OUTPUT buffer, the input buffer is determined by flags
 void fourier_to_spat_gpu(shtns_cfg shtns, void* q, const int mmax, const long sizeof_real = 8, char* wg = 0, double scale = 1)
 {
+	char* xfft;
 	const int nphi = shtns->nphi;
 	if (nphi > 1) {
-		char* xfft;
 		VkFFTLaunchParams launchParams = {};
 		if (shtns->fft_mode & FFT_PHI_CONTIG) {
 			xfft = (char*) shtns->gpu_buf_in;
@@ -723,37 +734,52 @@ void fourier_to_spat_gpu(shtns_cfg shtns, void* q, const int mmax, const long si
 			launchParams.inputBuffer = (void**) &q;
 		} else {
 			// THETA_CONTIGUOUS
+			xfft = (char*) q;
+			if (shtns->fft_mode & FFT_OOP_ANALYS) {
+				xfft = (char*) shtns->gpu_buf_oop_fft;
+				launchParams.inputBuffer = (void**) &q;
+			}
+			launchParams.buffer = (void**) &xfft;
 			// rely on vkfft to avoid reading the unused Fourier modes above shtns->mmax
 			if (mmax < shtns->mmax) {	// some zero must be added, only if more than nominal
 				const long nlat = shtns->nlat_padded;
-				cudaMemsetAsync( ((char*)q) + sizeof_real*(mmax+1)*nlat, 0, sizeof_real*(nphi-2*mmax-1)*nlat, shtns->comp_stream );		// zero out m>mmax before fft
+				cudaMemsetAsync( xfft + sizeof_real*(mmax+1)*nlat, 0, sizeof_real*(nphi-2*mmax-1)*nlat, shtns->comp_stream );		// zero out m>mmax before fft
 			}
-			launchParams.buffer = (void**) &q;
 		}
 		VkFFTAppend(&shtns->vkfft_plan, 1, &launchParams);
 	}
 }
 
-void spat_to_fourier_gpu(shtns_cfg shtns, void* q, const int mmax, const long sizeof_real = 8)
+// Returns pointer to Fourier data (theta-contiguous) ready for ilegendre().
+// If FFT_OOP_ANALYS is set, 'q' (d_Vr) is preserved and the Fourier transform is written to an internal dedicated buffer
+// Otherwise, 'q' is overwritten with the Fourier transform (in-place FFT)
+void* spat_to_fourier_gpu(shtns_cfg shtns, void* q, const int mmax, const long sizeof_real = 8)
 {
+	char* xfft;
 	const int nphi = shtns->nphi;
 	if (nphi > 1) {
-		char* xfft;
 		VkFFTLaunchParams launchParams = {};
 		if (shtns->fft_mode & FFT_PHI_CONTIG) {
 			xfft = (char*) shtns->gpu_buf_in;
-			if (shtns->mx_stdt) xfft += shtns->nlm_stride * 2*sizeof_real;	// vector transforms: do not overwrite temporary spectral data stored in gpu_buf_in
+			if (shtns->mx_stdt) xfft += shtns->nlm_stride * 2*sizeof_real;	// transforms vectoriels : ne pas écraser les données spectrales temporaires dans gpu_buf_in
 			launchParams.buffer = (void**) &xfft;
-			launchParams.inputBuffer = (void**) &q;			
+			launchParams.inputBuffer = (void**) &q;
 		} else {
 			// THETA_CONTIGUOUS
 			launchParams.buffer = (void**) &q;
+			if (shtns->fft_mode & FFT_OOP_ANALYS) {
+				xfft = (char*) shtns->gpu_buf_oop_fft;
+				launchParams.buffer = (void**) &xfft;
+				launchParams.inputBuffer = (void**) &q;
+			}
 		}
-		VkFFTAppend(&shtns->vkfft_plan, -1, &launchParams);
+		VkFFTAppend(&shtns->vkfft_plan, -1, &launchParams);		// R2C : lit q, écrit xfft -- q intact à ce stade
+		if (shtns->fft_mode & FFT_OOP_ANALYS)  q = shtns->gpu_buf_oop_fft;
 		if (shtns->fft_mode & FFT_PHI_CONTIG) {
-			transpose_cplx_skip_R2C(shtns->comp_stream, xfft, q, nphi/2+1, shtns->nlat, mmax, sizeof_real);		// ignore m > mmax during transpose
+			transpose_cplx_skip_R2C(shtns->comp_stream, xfft, q, nphi/2+1, shtns->nlat, mmax, sizeof_real);		// ignore m > mmax
 		}
 	}
+	return q;
 }
 
 /************************
@@ -827,7 +853,8 @@ void cuda_SH_to_spat(shtns_cfg shtns, std::complex<real>* d_Qlm, real *d_Vr, lon
 		sh2ishioka_gpu(shtns, d_Qlm, d_qlm, llim, mmax, S);
 	} else
 		if (d_Vr == (real*) d_Qlm) { printf("ERROR: cuda_SH_to_spat must have distinct in and out fields");	exit(1); }
-	legendre(shtns, S, d_qlm, d_Vr, llim, mmax);
+	real* qout = ((shtns->fft_mode & (FFT_OOP_ANALYS|FFT_PHI_CONTIG)) == FFT_OOP_ANALYS) ? (real*) shtns->gpu_buf_oop_fft : d_Vr;	// oop-analysis and not phi-contig
+	legendre(shtns, S, d_qlm, qout, llim, mmax);
 	if (S==0) profiling_record_time(shtns, 1, shtns->comp_stream);
 	real* wg = (llim & SHTNS_ADJOINT) ? (real*)shtns->d_wg_adjoint_spat : (real*)0;	// weights are stored after cos(theta)
 	fourier_to_spat_gpu(shtns, d_Vr, mmax, sizeof(real), (char*) wg,  (mmax > 0) ? shtns->wg[-2] : 1.0);	// in-place
@@ -848,15 +875,15 @@ void cuda_spat_to_SH(shtns_cfg shtns, real *d_Vr, std::complex<real>* d_Qlm, int
 	if (sizeof(real) != shtns->sizeof_real) { printf("ERROR: SHTns plan not prepared for fp%ld data\n", sizeof(real)*8);	exit(1); }
 
 	if (S==0) profiling_record_time(shtns, 0, shtns->comp_stream);
-	spat_to_fourier_gpu(shtns, d_Vr, mmax, sizeof(real));
+	real* d_Vf = (real*) spat_to_fourier_gpu(shtns, d_Vr, mmax, sizeof(real));		// == d_Vr except when FFT_OOP_ANALYS is set
 	if (S==0) profiling_record_time(shtns, 1, shtns->comp_stream);
 	if (S==0) {
-		std::complex<real>* d_Qlm_ish = (std::complex<real>*) shtns->gpu_buf_in;
-		ilegendre(shtns, S, d_Vr, d_Qlm_ish, llim, no_weights);
+		std::complex<real>* d_Qlm_ish = (std::complex<real>*) shtns->gpu_buf_in;	// gpu_buf_in is free to reuse: xfft already consumed.
+		ilegendre(shtns, S, d_Vf, d_Qlm_ish, llim, no_weights);
 		ishioka2sh_gpu(shtns, d_Qlm_ish, d_Qlm, llim, mmax, S, no_weights);
 	} else {
-		if (d_Vr == (real*) d_Qlm) { printf("ERROR: cuda_spat_to_SH must have distinct in and out fields");	exit(1); }
-		ilegendre(shtns, S, d_Vr, d_Qlm, llim, no_weights);
+		if (d_Vf == (real*) d_Qlm) { printf("ERROR: cuda_spat_to_SH must have distinct in and out fields");	exit(1); }
+		ilegendre(shtns, S, d_Vf, d_Qlm, llim, no_weights);
 	}
 	if (S==0) profiling_record_time(shtns, 2, shtns->comp_stream);
 }
