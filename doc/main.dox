@@ -5,18 +5,17 @@
  *
  * Main features :
  * - <b>\link bench blazingly fast\endlink</b>.
- * - distributed under the open source \link license CeCILL License\endlink (GPL compatible).
  * - both <b>scalar and \link vsh vector transforms\endlink</b>.
  * - backward and forward (synthesis and analysis) functions.
  * - flexible truncation (degree, order, azimuthal periodicity).
  * - spatial data can be stored in latitude-major or longitude-major arrays.
  * - various conventions (normalization and Condon-Shortley phase).
- * - can be used from <b>Fortran, c/c++, Python, and Java</b> programs.
- * - a highly efficient Gauss algorithm working with <b>Gauss nodes</b> (based on Gauss-Legendre quadrature).
+ * - can be used from <b>Fortran, c/c++, Python, <a href="https://github.com/fgerick/SHTns.jl">Julia</a>, and Java</b> programs.
+ * - highly efficient Gauss algorithm working with <b>Gauss nodes</b> (based on Gauss-Legendre quadrature).
  * - support for <b>regular grids</b> (but they require twice the number of nodes than Gauss grid).
  * - support for SSE2, SSE3 and <b>AVX, AVX2, AVX-512</b> vectorization, as well as Xeon Phi (KNL), AltiVec VSX, and Neon.
  * - <b>parallel transforms with OpenMP</b>.
- * - <b>\link gpu GPU transforms\endlink</b> for nvidia and AMD devices: transparent auto-offload, or working with data already on GPU (using cuda or hip).
+ * - <b>\link gpu GPU transforms\endlink</b> for nvidia and AMD devices: transparent auto-offload, or working with data already on GPU (using cuda, hip, or CuPy).
  * - synthesis (inverse transform) at any coordinate (not constrained to a grid) useful for rendering purposes.
  * - <b>on-the-fly transforms</b> : saving memory and bandwidth, they are even faster on modern architecture.
  * - accurate up to spherical harmonic degree l=16383 (at least).

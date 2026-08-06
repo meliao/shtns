@@ -812,7 +812,7 @@ int main(int argc, char *argv[])
 		if (strcmp(name,"nogpu") == 0) layout_opts &= ~SHT_ALLOW_GPU;		// Disable gpu.
 		if (strcmp(name,"float") == 0) layout_opts |= SHT_FP32;		// use float instead of double
 		if (strcmp(name,"accuracy") == 0) accuracy_test = 1;			// Perform an accuracy test instead of a speed test.
-		if (strcmp(name,"batch") == 0) { batch = -1;  layout = SHT_THETA_CONTIGUOUS; }	// Perform several transforms together, this implies a specific layout.
+		if (strcmp(name,"batch") == 0) batch = -1;		// Perform several transforms together.
 		if (strcmp(name,"noltr") == 0) noltr = 1;
 	}
 
@@ -826,7 +826,7 @@ int main(int argc, char *argv[])
 	NLM = ((shtns->nlm + 3)/4) *4;		// align on 64 bytes (cache line)
 	if (batch == -1) {
 		batch = SHT_ITER;		SHT_ITER = 1;
-		int r = shtns_set_batch(shtns, batch, NLM);
+		int r = shtns_set_many(shtns, batch, NLM);
 		if (r<0) printf("ERROR batch\n");
 	}
 	shtns_set_grid_auto(shtns, shtmode | layout | layout_opts, polaropt, nlorder, &NLAT, &NPHI);
@@ -1093,6 +1093,7 @@ int main(int argc, char *argv[])
 	}
 
 	if (adjoint) {		// test adjoint
+		const double eps = (layout_opts & SHT_FP32) ? 3e-6: 1e-13;
 		double*	Th = (double *) shtns_malloc( shtns->nspat * sizeof(double));
 
 		srand( time(0) );
@@ -1111,7 +1112,7 @@ int main(int argc, char *argv[])
 		}
 		double relerr1 = (dot1_spat-dot1_ref_spec)/dot1_ref_spec;
 		printf("** [ADJOINT ANALYSIS] dot product (spectral) = %g,  adjoint dot product (spatial) = %g,  relative error = %g   ", dot1_ref_spec, dot1_spat, relerr1);
-		if (fabs(relerr1) > 1e-13*LMAX) printf(COLOR_ERR "**** ERROR ****" COLOR_END "\n"); else printf(COLOR_OK "OK" COLOR_END "\n");
+		if (fabs(relerr1) > eps*LMAX) printf(COLOR_ERR "**** ERROR ****" COLOR_END "\n"); else printf(COLOR_OK "OK" COLOR_END "\n");
 
 		SH_to_spat(shtns, Tlm, Th);
 		double dot_ref_spat = 0.0;		// reference dot product in spatial space
@@ -1127,7 +1128,7 @@ int main(int argc, char *argv[])
 		}
 		double relerr = (dot_spec-dot_ref_spat)/dot_ref_spat;
 		printf("** [ADJOINT SYNTHESIS] dot product (spatial) = %g,  adjoint dot product (spectral) = %g,  relative error = %g   ", dot_ref_spat, dot_spec, relerr);
-		if (fabs(relerr) > 1e-13*LMAX) printf(COLOR_ERR "**** ERROR ****" COLOR_END "\n"); else printf(COLOR_OK "OK" COLOR_END "\n");
+		if (fabs(relerr) > eps*LMAX) printf(COLOR_ERR "**** ERROR ****" COLOR_END "\n"); else printf(COLOR_OK "OK" COLOR_END "\n");
 
 		if (vector) {
 			cplx* Xlm = (cplx *) shtns_malloc( NLM*batch * sizeof(cplx) );
@@ -1153,7 +1154,7 @@ int main(int argc, char *argv[])
 			}
 			double relerr1 = (dot1_spat-dot1_ref_spec)/dot1_ref_spec;
 			printf("** [ADJOINT VECTOR ANALYSIS] dot product = %g,  adjoint dot product = %g,  relative error = %g   ", dot1_ref_spec, dot1_spat, relerr1);
-			if (fabs(relerr1) > 1e-13*LMAX) printf(COLOR_ERR "**** ERROR ****" COLOR_END "\n"); else printf(COLOR_OK "OK" COLOR_END "\n");
+			if (fabs(relerr1) > eps*LMAX) printf(COLOR_ERR "**** ERROR ****" COLOR_END "\n"); else printf(COLOR_OK "OK" COLOR_END "\n");
 
 			SHsphtor_to_spat(shtns, Slm, Tlm, Sh, Th);
 			double dot_ref_spat = 0.0;		// reference dot product in spatial space
@@ -1171,7 +1172,7 @@ int main(int argc, char *argv[])
 			}
 			double relerr = (dot_spec-dot_ref_spat)/dot_ref_spat;
 			printf("** [ADJOINT VECTOR SYNTHESIS] dot product = %g,  adjoint dot product = %g,  relative error = %g   ", dot_ref_spat, dot_spec, relerr);
-			if (fabs(relerr) > 1e-13*LMAX) printf(COLOR_ERR "**** ERROR ****" COLOR_END "\n"); else printf(COLOR_OK "OK" COLOR_END "\n");
+			if (fabs(relerr) > eps*LMAX) printf(COLOR_ERR "**** ERROR ****" COLOR_END "\n"); else printf(COLOR_OK "OK" COLOR_END "\n");
 		}
 	}
 

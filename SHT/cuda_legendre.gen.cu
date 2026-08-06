@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2010-2023 Centre National de la Recherche Scientifique.
+ * Copyright (c) 2010-2026 Centre National de la Recherche Scientifique.
  * written by Nathanael Schaeffer (CNRS, ISTerre, Grenoble, France).
  * 
  * nathanael.schaeffer@univ-grenoble-alpes.fr
@@ -30,7 +30,6 @@
 // NF_A : number of fields treated together for analysis
 // LSPAN_A : number of SH degrees treated together (analysis)
 // NW_S : number of spatial points per thread (synthesis)
-// MPOS_SCALE : scale factor for analysis (used once)
 // NLAT_2 : half the number of latidunal points, should be equal to the nlat_2 kernel parameter
 
 // TODO: some parameters can be made compile-time constants!
@@ -55,6 +54,131 @@
 	#define _ballot(p) __ballot_sync(0xFFFFFFFF, p)
 	#define _syncwarp __syncwarp()
 	#define _syncwarp_fence __syncwarp()
+#endif
+
+#if defined(__gfx908__) || defined(__gfx90a__)
+// better shfl_xor operating on 32bit registers only
+template <unsigned XOR_MASK>
+inline __device__ int shfl_xor_b32(int v)
+{
+	if (XOR_MASK==0) return v;
+	else if (XOR_MASK<4) {
+		return __builtin_amdgcn_mov_dpp(v, (0^XOR_MASK) | ((1^XOR_MASK)<<2) | ((2^XOR_MASK)<<4) | ((3^XOR_MASK)<<6),
+			0xF, 0xF, 1);
+	} else if (XOR_MASK==0x8) {
+		return __builtin_amdgcn_mov_dpp(v, 0x128, 0xF, 0xF, 1);		// row rotate right by 8 threads within row (group of 16)
+	} else if (XOR_MASK==0xF) {
+		return __builtin_amdgcn_mov_dpp(v, 0x140, 0xF, 0xF, 1);		// reverse within row (group of 16)
+	} else if (XOR_MASK==0x7) {
+		return __builtin_amdgcn_mov_dpp(v, 0x141, 0xF, 0xF, 1);		// reverse within half-row (group of 8)
+	} else if (XOR_MASK<32) {
+		// ds_swizzle_b32: xor_mask is encoded into instruction, saves instructions compared to next case
+		return __builtin_amdgcn_ds_swizzle(v, (XOR_MASK << 10) | 31);
+	} else
+		return __builtin_amdgcn_ds_bpermute((threadIdx.x ^ XOR_MASK)*4, v);
+	//	return __shfl_xor(v,XOR_MASK);		// emit ds_bpermute_b32, with lots of instructions to compute lanes.
+}
+
+// better broadcast operating on 32bit registers only. NGROUP must be a power of 2.
+template <unsigned LANE_ID, unsigned NGROUP=64>
+inline __device__ int broadcast_b32(int v)
+{
+	static_assert(LANE_ID < NGROUP, "LANE_ID must be less than NGROUP.");
+	if (NGROUP==1) return v;
+	else if (NGROUP<=4) {		// NGROUP==2 or 4
+		return __builtin_amdgcn_mov_dpp(v, (LANE_ID) | ((LANE_ID)<<2) | ((LANE_ID+4-NGROUP)<<4) | ((LANE_ID+4-NGROUP)<<6),
+			0xF, 0xF, 1);
+#ifdef __gfx90a__
+	} else if (NGROUP==16) {
+		return __builtin_amdgcn_mov_dpp(v, 0x150 + LANE_ID, 0xF, 0xF, 1);		// broadcast within row (group of 16), only for MI200
+#endif
+	} else if (NGROUP<=32) {
+		// ds_swizzle_b32: broadcast lane encoded into instruction, saves instructions compared to next case
+		return __builtin_amdgcn_ds_swizzle(v, (LANE_ID << 5) | (32-NGROUP));
+	} else if (NGROUP==64) {
+		//return __builtin_amdgcn_readlane(v, LANE_ID);
+		return __builtin_amdgcn_ds_bpermute(LANE_ID*4, v);
+	} else
+		return __shfl(v,LANE_ID, NGROUP);		// emit ds_bpermute_b32, good for broadcast
+}
+
+// better shfl_down operating on 32bit registers only. NGROUP must be a power of 2.
+// WARNING: threads that read out of bounds (group) are undefined (NOT like nvidia cuda __shfl_down which specifies that those lanes are unchanged)
+template <unsigned NSHIFT, unsigned NGROUP=64>
+inline __device__ int shfl_down_b32(int v)
+{
+	static_assert(NSHIFT < NGROUP, "NSHIFT must be less than NGROUP.");
+	if ((NGROUP==1) || (NSHIFT==0)) return v;
+	else if (NGROUP<=4) {
+		return __builtin_amdgcn_mov_dpp(v, NSHIFT | (((NSHIFT<3) ? 1+NSHIFT : 1) <<2) | (3<<4) | (3<<6),
+			0xF, 0xF, 1);
+	} else if (NGROUP<=16) {	// shift crosses group boundary for NGROUP==8
+		return __builtin_amdgcn_mov_dpp(v, 0x100 | NSHIFT, 0xF, 0xF, 0);
+	} else if ((NGROUP<=64) && (NSHIFT==1)) {
+		return __builtin_amdgcn_mov_dpp(v, 0x130, 0xF, 0xF, 0);		// shift crosses group boundary for NGROUP<64
+	} else if (NGROUP==32) {
+		// ds_swizzle_b32 in rotate mode: upper lanes are filled with lower lanes
+		return __builtin_amdgcn_ds_swizzle(v, 0xC000 | (NSHIFT << 5));
+	} else
+		return __builtin_amdgcn_ds_bpermute((threadIdx.x + NSHIFT)*4, v);	// rotate: fill upper lanes with lower ones
+	//return __shfl_down(v,NSHIFT,NGROUP);		// emit ds_bpermute_b32, with lots of instructions to compute lanes exactly as cuda __shfl_down() does.
+}
+
+template <unsigned XOR_MASK>
+inline __device__ double shfl_xor_(double v) {
+	union {double d; int i[2];};		// allow access to the 2 words forming the double separately
+	d = v;
+	i[0] = shfl_xor_b32<XOR_MASK>(i[0]);		// shuffle
+	i[1] = shfl_xor_b32<XOR_MASK>(i[1]);		// shuffle
+	return d;
+}
+template <unsigned XOR_MASK>
+inline __device__ float shfl_xor_(float v) {
+	return __int_as_float( shfl_xor_b32<XOR_MASK>( __float_as_int(v) ) );
+}
+template <unsigned XOR_MASK>
+inline __device__ int shfl_xor_(int v) {
+	return shfl_xor_b32<XOR_MASK>(v);
+}
+
+template <unsigned NSHIFT, unsigned NGROUP=64>
+inline __device__ float shfl_down_(float v) {
+	return __int_as_float( shfl_down_b32<NSHIFT, NGROUP>( __float_as_int(v) ) );
+}
+template <unsigned NSHIFT, unsigned NGROUP=64>
+inline __device__ int shfl_down_(int v) {
+	return shfl_down_b32<NSHIFT, NGROUP>( v );
+}
+template <unsigned NSHIFT, unsigned NGROUP=64>
+inline __device__ double shfl_down_(double v)
+{
+	union {double d; int i[2];};		// allow access to the 2 words forming the double separately
+	d = v;
+	i[0] = shfl_down_b32<NSHIFT, NGROUP>(i[0]);		// shuflle first half
+	i[1] = shfl_down_b32<NSHIFT, NGROUP>(i[1]);		// and second half
+	return d;
+}
+
+template <unsigned LANE_ID, unsigned NGROUP=64>
+inline __device__ int bcast_(int v) {
+	return broadcast_b32<LANE_ID, NGROUP>(v);
+}
+template <unsigned LANE_ID, unsigned NGROUP=64, class T>
+inline __device__ T bcast_(T v) {
+	const int NINT = (sizeof(T)+3)/4;
+	union {T d; int i[NINT];};
+	d = v;
+	for (int k=0; k<NINT; k++)
+		i[k] = broadcast_b32<LANE_ID, NGROUP>(i[k]);		// shuflle
+	return d;
+}
+
+#undef shfl_xor
+#define shfl_xor(v,xor_mask) shfl_xor_<xor_mask>(v)
+#undef shfl
+#define shfl(v,lane,group) bcast_<lane,group>(v)
+#undef shfl_down
+#define shfl_down(v,shift,group) shfl_down_<shift,group>(v)
 #endif
 
 #ifdef __gfx90a__
@@ -84,6 +208,9 @@ __device__ __forceinline__ void atomicAdd_sht(float* address, float val) {
 #endif
 #endif
 
+__device__ __forceinline__  double2 make_real2(double a, double b) {	return make_double2(a,b);	}
+__device__ __forceinline__  float2  make_real2(float a,  float b)  {	return make_float2 (a,b);	}
+
 __device__ __forceinline__ bool polar_skip_sint(double sint, int llim, int m)
 {
 	// polar optimization (see Reinecke 2013, section 3.3)
@@ -98,26 +225,26 @@ __device__ __forceinline__ bool polar_skip_sint(float sint, int llim, int m) {
 	return false;
 }
 
-__device__ __forceinline__ bool polar_skip_sint2(double sint2, int llim, int m)
+__device__ __forceinline__ bool polar_skip_cost(double cost, int llim, int m)
 {
 	// polar optimization (see Reinecke 2013, section 3.3) -- squared
 	int mm = m - ((LMAX > 10350) ? max(80, llim>>7) : 80);
-	return (mm>0) && (mm*mm > (int) (sint2*(llim*llim)));
+	return (mm>0) && (mm*mm > (int) ((1.-cost*cost)*(llim*llim)));
 }
-__device__ __forceinline__ bool polar_skip_sint2(float sint2, int llim, int m) {
+__device__ __forceinline__ bool polar_skip_cost(float cost, int llim, int m) {
 	return false;
 }
 
 /// requirements : blockSize must be 1 in the y- and z-direction and BLKSZE_S in the x-direction.
 /// llim MUST BE <= 1800, unless HI_LLIM=1
 template<int S> __global__
-#if NLAT_2<=64 && defined(__gfx90a__)
-__launch_bounds__(64, 1)	// leads to better performance for small transforms on MI250
+#if WARPSZE == 64
+__launch_bounds__((BLKSZE_S<BLKSZE_SH2ISH) ? BLKSZE_SH2ISH : BLKSZE_S, 3)	// leads to better performance for small transforms on AMD MI250
 #endif
 void leg_m_kernel(
 	const real_g* __restrict__ al, const real_g* __restrict__ ct, const real* __restrict__ ql, real *q,
 	const int llim, const int nlat_2, const int nphi, const int m_inc,
-	const int ql_dist, const int q_dist
+	const int ql_dist, const int q_dist, const bool m0_x2_adjoint
 #if BLKSZE_SH2ISH > 0
 	,const real* __restrict__ xlm
 #endif
@@ -137,7 +264,11 @@ void leg_m_kernel(
 	const int k_inc = 2;
   #endif
 
+  #if defined(__CUDA_ARCH__) && __CUDA_ARCH__ >= 900
+	const int LSPAN = BLOCKSIZE;	// full block load on H100 works faster
+  #else
 	const int LSPAN = (WARPSZE==32 && BLOCKSIZE >= 2*WARPSZE) ? BLOCKSIZE/2 : WARPSZE;		// always WARPSZE for amd
+  #endif
 	static_assert(LSPAN <= BLOCKSIZE, "LSPAN must not exceed BLOCKSIZE");
 	static_assert(LSPAN % 4 == 0, "LSPAN must be a multiple of 4");
 	__shared__ real_g ak[LSPAN];
@@ -387,14 +518,13 @@ void leg_m_kernel(
 				  #if SHT_HI_PREC & 1
 					if (S==0)	{	north += mean[f];	south += mean[f];	}		// mean added at the very end for improved accuracy when mean >> std
 				  #endif
+					if (m0_x2_adjoint) {  north += north;	south += south;	 }		// multiply by 2 for some normalizations
 				  #ifndef LAYOUT_REAL_FFT
 					q[it*k_inc              + (b*NFIELDS+f)*q_dist] = north;
 					q[(nlat_2*2-1-it)*k_inc + (b*NFIELDS+f)*q_dist] = south;
 				  #else
-					q[it*k_inc              + (b*NFIELDS+f)*q_dist] = north;
-					q[it*k_inc +1           + (b*NFIELDS+f)*q_dist] = 0;
-					q[(m_inc-1-it)*k_inc    + (b*NFIELDS+f)*q_dist] = south;
-					q[(m_inc-1-it)*k_inc +1 + (b*NFIELDS+f)*q_dist] = 0;
+					*((real2*)(q+it*k_inc           + (b*NFIELDS+f)*q_dist)) = make_real2(north, (real)0);
+					*((real2*)(q+(m_inc-1-it)*k_inc + (b*NFIELDS+f)*q_dist)) = make_real2(south, (real)0);
 				  #endif
 				}
 			}
@@ -479,18 +609,6 @@ void leg_m_kernel(
 				}
 			}
 
-	#ifdef LEG_ISHIOKA
-		#pragma unroll
-		for (int i=0; i<NW; i++) {	COST(i,j) = ct2[i];		ct2[i] *= ct2[i];	}	// cos(theta)^2
-		#pragma unroll
-		for (int i=0; i<NW; i++) 	y1[i] = 1 - ct2[i];		// y1 = sin(theta)^2
-	#else
-		#pragma unroll
-		for (int i=0; i<NW; i++) 	y1[i] = 1 - ct2[i]*ct2[i];		// y1 = sin(theta)^2
-	#endif
-		#pragma unroll
-		for (int i=0; i<NW; i++) 	y0[i] = 1;
-
 		#pragma unroll
 		for (int i=0; i<NW; i++) {
 			#pragma unroll
@@ -502,11 +620,11 @@ void leg_m_kernel(
 
 		bool skip_block = false;
 		if (NLAT_2 > BLOCKSIZE*NW) {	// polar optimization
-			if (j == BLOCKSIZE-1)	skip_block = polar_skip_sint2(y1[NW-1], llim, m);
+			if (j == BLOCKSIZE-1)	skip_block = polar_skip_cost(ct2[NW-1], llim, m);
 			#if WARPSZE==32
 			if (BLOCKSIZE == WARPSZE) skip_block = _any(skip_block);	// get largest value in block/warp
 			#else
-			if (BLOCKSIZE == WARPSZE) skip_block = shfl(skip_block,WARPSZE-1);	// get largest value in block/warp
+			if (BLOCKSIZE == WARPSZE) skip_block = shfl(skip_block,WARPSZE-1,WARPSZE);	// get largest value in block/warp
 			#endif
 			else {
 				__shared__ volatile int xx;
@@ -517,6 +635,14 @@ void leg_m_kernel(
 		} else if (BLOCKSIZE > WARPSZE) { __syncthreads(); } else { _syncwarp; }
 		// at this point, block is in sync (consistent view of shared memory).
 	if (!skip_block) {
+
+		#ifdef LEG_ISHIOKA
+			#pragma unroll
+			for (int i=0; i<NW; i++) {	COST(i,j) = ct2[i];		ct2[i] *= ct2[i];	}	// cos(theta)^2
+		#endif
+		#pragma unroll
+		for (int i=0; i<NW; i++) 	y0[i] = 1;
+
 		#if HI_LLIM==1
 		int ny = 0;		// only used for HI_LLIM
 		#else
@@ -524,38 +650,44 @@ void leg_m_kernel(
 		#endif
 		{	// compute sin(theta)^(m-S)
 			l = (S==1 && ROBERT_FORM) ? m : m-S;		// multiply vectors by sin(theta) with robert_form
-			if (l&1) {	// square-root needed
+			if (S==0 || l!=0) {
 				#pragma unroll
-				for (int i=0; i<NW; i++)	y0[i] = sqrt(y1[i]);
-			}
-			l >>= 1;
-			#if HI_LLIM==1
-			int nsint = 0;
-			#endif
-			do {
+				for (int i=0; i<NW; i++) {
+					const int it = BLOCKSIZE*NW * blockIdx.x + ((HI_LLIM) ? NW*j+i : j+i*BLOCKSIZE);
+					y1[i] = (it < nlat_2) ? ct[it + 2*nlat_2] : 0;		// sin(theta)
+				}
 				if (l&1) {
 					#pragma unroll
-					for (int i=0; i<NW; i++) y0[i] *= y1[i];
+					for (int i=0; i<NW; i++) y0[i] = y1[i];
+				}
+				#if HI_LLIM==1
+				int nsint = 0;
+				#endif
+				while( l >>= 1 ) {
+					#pragma unroll
+					for (int i=0; i<NW; i++) y1[i] *= y1[i];
 					#if HI_LLIM==1
-						ny += nsint;
-						if (y0[NW-1] < (SHT_ACCURACY+1/SHT_SCALE_FACTOR)) {
+						nsint += nsint;
+						if (y1[NW-1] < 1/SHT_SCALE_FACTOR) {
+							nsint--;
 							#pragma unroll
-							for (int i=0; i<NW; i++) y0[i] *= SHT_SCALE_FACTOR;
-							ny--;
+							for (int i=0; i<NW; i++) y1[i] *= SHT_SCALE_FACTOR;
 						}
 					#endif
-				}
-				#pragma unroll
-				for (int i=0; i<NW; i++) y1[i] *= y1[i];
-				#if HI_LLIM==1
-					nsint += nsint;
-					if (y1[NW-1] < 1/SHT_SCALE_FACTOR) {
-						nsint--;
+					if (l&1) {
 						#pragma unroll
-						for (int i=0; i<NW; i++) y1[i] *= SHT_SCALE_FACTOR;
+						for (int i=0; i<NW; i++) y0[i] *= y1[i];
+						#if HI_LLIM==1
+							ny += nsint;
+							if (y0[NW-1] < (SHT_ACCURACY+1/SHT_SCALE_FACTOR)) {
+								#pragma unroll
+								for (int i=0; i<NW; i++) y0[i] *= SHT_SCALE_FACTOR;
+								ny--;
+							}
+						#endif
 					}
-				#endif
-			} while(l >>= 1);
+				}
+			}
 		}
 
 	#ifdef LEG_ISHIOKA
@@ -830,6 +962,23 @@ void leg_m_kernel(
 	}
 
 	#ifndef LAYOUT_REAL_FFT
+	  #if HI_LLIM==1 && NW_S==2
+		const int ofs_m1 = im*m_inc;
+		const int ofs_m2 = (nphi-im)*m_inc;
+		#pragma unroll
+		for (int i=0; i<NW; i+=2) {
+			const int it = BLOCKSIZE*NW * blockIdx.x + NW*j+i;
+			if (it < nlat_2) {
+				#pragma unroll
+				for (int f=0; f<NFIELDS; f++) {
+					*((real2*)(q+ofs_m1 + it*k_inc              + (b*NFIELDS+f)*q_dist)) = make_real2(roi[f][i]-rei[f][i+1], roi[f][i+1]+rei[f][i]);
+					*((real2*)(q+ofs_m2 + it*k_inc              + (b*NFIELDS+f)*q_dist)) = make_real2(roi[f][i]+rei[f][i+1], roi[f][i+1]-rei[f][i]);
+					*((real2*)(q+ofs_m1 + (nlat_2*2-2-it)*k_inc + (b*NFIELDS+f)*q_dist)) = make_real2(rer[f][i+1]-ror[f][i], rer[f][i]+ror[f][i+1]);
+					*((real2*)(q+ofs_m2 + (nlat_2*2-2-it)*k_inc + (b*NFIELDS+f)*q_dist)) = make_real2(rer[f][i+1]+ror[f][i], rer[f][i]-ror[f][i+1]);
+				}
+			}
+		}
+	  #else
 		#pragma unroll
 		for (int i=0; i<NW; i++) {
 			const real sgn = (HI_LLIM && NW>1) ? (i^1)-i : (j^1)-j; 	//(it^1) - it;	// 1 - 2*(j&1);		// 1 for even j, -1 for odd j.
@@ -845,6 +994,7 @@ void leg_m_kernel(
 				}
 			}
 		}
+	  #endif
 	#else
 		#pragma unroll
 		for (int f=0; f<NFIELDS; f++) {
@@ -853,10 +1003,8 @@ void leg_m_kernel(
 			for (int i=0; i<NW; i++) {
 				const int it = BLOCKSIZE*NW * blockIdx.x + ((HI_LLIM) ? NW*j+i : j+i*BLOCKSIZE);
 				if (it < nlat_2) {
-					q[ofs + it*k_inc] 			  = roi[f][i];	// north, real
-					q[ofs + it*k_inc+1]			  = rei[f][i];	// north, imag
-					q[ofs + (m_inc-it-1)*k_inc]	  = rer[f][i];	// south, real
-					q[ofs + (m_inc-it-1)*k_inc+1] = ror[f][i];	// south, imag
+					*((real2*)(q+ofs + it*k_inc)) = 			make_real2(roi[f][i], rei[f][i]);	// north, real+imag
+					*((real2*)(q+ofs + (m_inc-it-1)*k_inc)) =	make_real2(rer[f][i], ror[f][i]);	// south, real+imag
 				}
 			}
 		}
@@ -872,10 +1020,8 @@ void leg_m_kernel(
 #endif
 
 template<int S> __global__
-#ifdef __gfx90a__
-__launch_bounds__(64,1)
-#endif
-void ileg_m_kernel(const real_g* __restrict__ al, const real_g* __restrict__ ct, const real* __restrict__ q, real *ql, const int llim, 
+__launch_bounds__(BLKSZE_A,1)
+void ileg_m_kernel(const real_g* __restrict__ al, const real_g* __restrict__ wg, const real_g* __restrict__ ct, const real* __restrict__ q, real *ql, const int llim, 
 	const int nlat_2, const int nphi, const int m_inc, const int q_dist, const int ql_dist, const real w_norm
 #if BLKSZE_SH2ISH > 0
 	//, const real* __restrict__ xlm
@@ -896,14 +1042,15 @@ void ileg_m_kernel(const real_g* __restrict__ al, const real_g* __restrict__ ct,
 	static_assert( ((WARPSZE >= BLOCKSIZE/LSPAN) ? (WARPSZE % (BLOCKSIZE/LSPAN)) : ((BLOCKSIZE/LSPAN) % WARPSZE)) == 0, "WARPSZE and BLOCKSIZE/LSPAN must be multiples");
 	static_assert((LSPAN % 4) == 0, "LSPAN must be a multiple of 4");
 
-	const int padding = 2;		// padding = 0 is very bad for performance (shared-memory bank conflicts).
-	const int l_inc = BLOCKSIZE+padding;
-	__shared__ real_g ak[LSPAN+2];	// cache
+	__shared__ real_g ak[WARPSZE];	// cache
   #ifdef ILEG_ISHIOKA
+	const int padding = WARPSZE/16;		// padding = 0 is very bad for performance (shared-memory bank conflicts).
 	const int NROWS = M0_ONLY ? ( (LSPAN>4*NFIELDS) ? LSPAN/2 : 2*NFIELDS ) : ( (LSPAN>8*NFIELDS) ? LSPAN/2 : 4*NFIELDS );
   #else
+	const int padding = 2;		// padding = 0 is very bad for performance (shared-memory bank conflicts).
 	const int NROWS = M0_ONLY ? ( (LSPAN>2*NFIELDS) ? LSPAN : 2*NFIELDS ) : ( (LSPAN>4*NFIELDS) ? LSPAN : 4*NFIELDS );
   #endif
+	const int l_inc = BLOCKSIZE+padding;
 	__shared__ real yl[NROWS*l_inc - padding];		// yl is also used for even/odd computation.
 
 	real_g cost = (it < nlat_2) ? ct[it] : 0;
@@ -911,8 +1058,6 @@ void ileg_m_kernel(const real_g* __restrict__ al, const real_g* __restrict__ ct,
 
 	if (im == 0) {
 		const int NW = NFIELDS*LSPAN;
-		// re-assign each thread an l (transposed view)
-		const int ll = (j % (BLOCKSIZE/NFIELDS)) / (BLOCKSIZE/NW);
 		real my_reo[NW];			// in registers
 
 		q += b*NFIELDS*q_dist;
@@ -923,7 +1068,7 @@ void ileg_m_kernel(const real_g* __restrict__ al, const real_g* __restrict__ ct,
 			#pragma unroll
 			for (int f=0; f<NFIELDS; f++) my_reo[f] = 0;	// first, we use my_reo to store the mean of each field, as NW >= NFIELDS
 			for (int k=j; k<nlat_2; k+=BLOCKSIZE) {
-				real w = ct[nlat_2 +k];
+				real w = wg[k];
 			  #ifndef LAYOUT_REAL_FFT
 				#pragma unroll
 				for (int f=0; f<NFIELDS; f++)	my_reo[f] += w * (q[k + f*q_dist]  +  q[nlat_2*2-1 - k + f*q_dist]);
@@ -945,13 +1090,13 @@ void ileg_m_kernel(const real_g* __restrict__ al, const real_g* __restrict__ ct,
 				}
 				// TODO: could be optimized once everything is in a warp, can be distributed among NFIELDS.
 				if (BLOCKSIZE > WARPSZE) {	__syncthreads(); } else { _syncwarp_fence; }
-				if (it<NFIELDS)  ql[llim+1  + (b*NFIELDS+it)*ql_dist] = yl[it*l_inc];		// store the mean for future assembly, in ishioka2sh_kernel()
+				if (w_norm != 0 && it<NFIELDS)  ql[llim+1  + (b*NFIELDS+it)*ql_dist] = yl[it*l_inc];		// store the mean for future assembly, in ishioka2sh_kernel()
 				#pragma unroll
 				for (int f=0; f<NFIELDS; f++) my_reo[f] = yl[f*l_inc] * w_norm;
 		}
 	#endif
 
-		if (j < LSPAN+2) ak[j] = al[j];
+		if (j < 2) ak[j] = al[j];
 
 		#pragma unroll
 		for (int f=0; f<NFIELDS; f++) {
@@ -975,47 +1120,69 @@ void ileg_m_kernel(const real_g* __restrict__ al, const real_g* __restrict__ ct,
 		}
 		if (BLOCKSIZE > WARPSZE) {	__syncthreads(); } else { _syncwarp_fence; }
 
-		y0 = (it < nlat_2) ? ct[it + nlat_2] : 0;		// weights are stored just after ct.
+		y0 = (it < nlat_2) ? wg[it] : 0;	// quadrature weights
 		if (S==1)  y1 = (it < nlat_2) ? ct[it + 3*nlat_2] : 0;		// 1/sin(theta)
 	#ifdef ILEG_ISHIOKA
 		cost *= cost;	// ct2
 	#endif
 
+	#if (WARPSZE == 32)  ||  !defined( ILEG_ISHIOKA )
+		const int NACC = 4;		// number of independent accumulators per NFIELD. 4 is good for V100
+		// re-assign each thread an l (transposed view)
+		const int ll = (j % (BLOCKSIZE/NFIELDS)) / (BLOCKSIZE/NW);
+	#else	/* WARPSZE == 64 */
+		const int NACC = 2;
+		const int ll = j % LSPAN;
+		const bool write = (BLOCKSIZE == LSPAN*NFIELDS) ? true : ((j % (BLOCKSIZE/NFIELDS)) < LSPAN);
+	#endif
+
 		// transpose reo to my_reo
 		#pragma unroll
 		for (int k=0; k<NW; k++) {
+		  #if (WARPSZE == 32)  ||  !defined( ILEG_ISHIOKA )
 			int it = j % (BLOCKSIZE/NW) + k*(BLOCKSIZE/NW);
 			my_reo[k] = yl[(2*f0  + (ll&1))*l_inc + it];
+		  #else /* WAPRSZE == 64 */
+			const int ofs = (2*f0+((ll&1)^(k%NACC)))*l_inc + (((j/(LSPAN))*NW) % BLOCKSIZE);
+			my_reo[k] = yl[ofs + (k/NACC)*NACC + j%NACC];		// all lanes have different ordering. Less bank conflicts?
+		  #endif
 		}
+
+
 		if (S==1) y0 *= (ROBERT_FORM) ? y1*y1 : y1;
 	  #ifdef ILEG_ISHIOKA
 		y1 = (ak[1]*cost + ak[0]) * y0;
 	  #else
 		y1 = (ak[1]*cost) * y0;
 	  #endif
-		if (WARPSZE < LSPAN+2  &&  j<LSPAN+2-WARPSZE)	ak[WARPSZE+j] = al[WARPSZE+j];		// sometimes a bit more than a warp is needed
-
 		al+=2;
+		if (BLOCKSIZE > WARPSZE) {	__syncthreads(); } else { _syncwarp_fence; }	// wait for all threads to have read ak before overwriting it!
+		if (LSPAN==BLOCKSIZE || j<LSPAN) ak[j] = al[j];
+
 		int l = 0;
 		do {
 			if (BLOCKSIZE > WARPSZE) {	__syncthreads(); } else { _syncwarp_fence; }
 			#ifdef ILEG_ISHIOKA
 				#pragma unroll
 				for (int k=0; k<LSPAN/2; k+=2) {		// compute a block of the matrix, write it in shared mem.
-					real_g c0 = ak[2*k+3]*cost + ak[2*k+2];
-					real_g c1 = ak[2*k+5]*cost + ak[2*k+4];
+					real_g c0 = ak[2*k+1]*cost + ak[2*k];
+					real_g c1 = ak[2*k+3]*cost + ak[2*k+2];
 					yl[k*l_inc +j]     = y0;		// l and l+1
 					yl[(k+1)*l_inc +j] = y1;		// l+2 and l+3
 					y0 += c0 * y1;
 					y1 += c1 * y0;
 				}
 				// re-assign each thread an l (transpose)
+			  #if (WARPSZE == 32)  ||  !defined( ILEG_ISHIOKA )
 				const int itl = (ll >> 1)*l_inc + j % (BLOCKSIZE/NW);
+			  #else
+				const int itl = (ll>>1)*l_inc + (((j/LSPAN)*NW) % BLOCKSIZE) + j%NACC;
+			  #endif
 			#else
 				#pragma unroll
 				for (int k=0; k<LSPAN; k+=2) {		// compute a block of the matrix, write it in shared mem.
-					real_g c0 = ak[k+2]*cost;
-					real_g c1 = ak[k+3]*cost;
+					real_g c0 = ak[k]*cost;
+					real_g c1 = ak[k+1]*cost;
 					yl[k*l_inc +j]     = y0;		// l
 					yl[(k+1)*l_inc +j] = y1;		// l+1
 					y0 += c0 * y1;
@@ -1027,8 +1194,10 @@ void ileg_m_kernel(const real_g* __restrict__ al, const real_g* __restrict__ ct,
 
 			if (BLOCKSIZE > WARPSZE) {	__syncthreads(); } else { _syncwarp_fence; }
 
-			const int NACC = 4;		// number of independent accumulators per NFIELD. 4 is good for V100
-			real qll[NACC];		// accumulators
+			real qll[NACC];		// accumulators (2 or 4)
+
+		#if (WARPSZE == 32)  ||  !defined( ILEG_ISHIOKA )
+
 			#pragma unroll
 			for (int a=0; a<NACC; a++) 	qll[a] = my_reo[a] * yl[itl + a*(BLOCKSIZE/NW)];	// first element of sum
 			const int ql_ofs = (l+ll) + (b*NFIELDS+f0)*ql_dist;		// compute destination ofset in parallel with reduce!
@@ -1039,7 +1208,7 @@ void ileg_m_kernel(const real_g* __restrict__ al, const real_g* __restrict__ ct,
 			}
 
 			al += LSPAN;
-			if (j<LSPAN) ak[j+2] = al[j];
+			if (LSPAN==BLOCKSIZE || j<LSPAN) ak[j] = al[j];
 
 			if (NACC > 1) {		// reduce the NACC independent accumulators
 				#pragma unroll
@@ -1051,13 +1220,48 @@ void ileg_m_kernel(const real_g* __restrict__ al, const real_g* __restrict__ ct,
 				}
 			}
 
-			static_assert(BLOCKSIZE/NW <= WARPSZE, "Block size must not exceed LSPAN*NFIELDS*WARPSZE");
+			static_assert(BLOCKSIZE/NW <= 16, "Block size must not exceed 16*NW");
 			// reduce_add within same l is in same warp too:
-				#pragma unroll
-				for (int ofs = BLOCKSIZE/(NW*2); ofs > 0; ofs>>=1) {
-					qll[0] += shfl_down(qll[0], ofs, BLOCKSIZE/NW);
+				if (BLOCKSIZE/NW > 8) qll[0] += shfl_down(qll[0], 8, 16);
+				if (BLOCKSIZE/NW > 4) qll[0] += shfl_down(qll[0], 4, 8);
+				if (BLOCKSIZE/NW > 2) qll[0] += shfl_down(qll[0], 2, 4);
+				if (BLOCKSIZE/NW > 1) qll[0] += shfl_down(qll[0], 1, 2);
+
+			const bool write = ((j % (BLOCKSIZE/NW)) == 0);
+
+		#else	/* WARPSZE == 64 */
+
+				{	real y = yl[itl];
+					#pragma unroll
+					for (int a=0; a<NACC; a++)  qll[a] = my_reo[a] * y;
 				}
-				if ( ((j % (BLOCKSIZE/NW)) == 0) && ((l+ll)<=llim) ) {	// write result
+				const int ql_ofs = (l+ll) + (b*NFIELDS+f0)*ql_dist;		// compute destination ofset in parallel with reduce!
+				#pragma unroll
+				for (int k=NACC; k<NW; k+=NACC) {		// accumulate in NACC separate accumulators
+					real y = yl[itl + k];
+					#pragma unroll
+					for (int a=0; a<NACC; a++) qll[a] += my_reo[k+a] * y;
+				}
+
+				al += LSPAN;
+				if (LSPAN==BLOCKSIZE || j<LSPAN) ak[j] = al[j];	// loading after accumulation is more efficient
+
+				// reduce the NACC independent accumulators, which are shuffled accross lanes so that they share the same y above
+				if (NACC>1) qll[0] += shfl_xor(qll[1],1);
+				if (NACC==4) {
+					qll[NACC-2] += shfl_xor(qll[NACC-1],1);
+					qll[0]      += shfl_xor(qll[NACC-2],2);
+				}
+
+				static_assert(BLOCKSIZE/NW <= 8, "Blocksize must not exceed 8*NW");
+					// reduce_add within same l is in same warp too:
+					if (BLOCKSIZE/NW > 4) qll[0] += shfl_down(qll[0], 4*LSPAN, 8*LSPAN);
+					if (BLOCKSIZE/NW > 2) qll[0] += shfl_down(qll[0], 2*LSPAN, 4*LSPAN);
+					if (BLOCKSIZE/NW > 1) qll[0] += shfl_down(qll[0],   LSPAN, 2*LSPAN);
+
+		#endif
+
+				if ( write && ((l+ll)<=llim) ) {	// write result
 					#if NLAT_2 <= BLKSZE_A
 						// no atomicAdd needed if (nlat_2 <= BLOCKSIZE), which can be decided before compilation
 						#ifndef ILEG_ISHIOKA
@@ -1076,28 +1280,24 @@ void ileg_m_kernel(const real_g* __restrict__ al, const real_g* __restrict__ ct,
 #if M0_ONLY==0
 	else {	// im > 0
 		const int NW = NFIELDS*LSPAN*2;
-		// re-assign each thread an l (transposed view)
-		const int ll = (j % (BLOCKSIZE/NFIELDS)) / (BLOCKSIZE/NW);		// actualy ll = 2*l + (imag ? 1 : 0)
 		real my_reo[NW];			// in registers
 		const int m = im*MRES;
-		y0 = cost * cost;			// cos(theta)^2
 		int l = (im*(2*(LMAX+1)-MRES-m))>>1;
-		y1 = 1 - y0;		// sin(theta)^2
 	  #ifdef ILEG_ISHIOKA
 		al += l+m;
 	  #else
 		al += im*(LMAX+3) - (m*(im-1))/2;
 	  #endif
-		if (j < LSPAN+2) ak[j] = al[j];
+		if (j < 2) ak[j] = al[j];
 		ql += 2*(l + S*im);	// allow vector transforms where llim = lmax+1
 
 		#if NLAT_2 > BLKSZE_A
 		{	// polar optimization
-			bool skip_block = (j == BLOCKSIZE-1) ? polar_skip_sint2(y1, llim, m) : false;
+			bool skip_block = (j == BLOCKSIZE-1) ? polar_skip_cost(cost, llim, m) : false;
 			#if WARPSZE == 32
 			if (BLOCKSIZE == WARPSZE) skip_block = _any(skip_block);	// get largest value in block/warp
 			#else
-			if (BLOCKSIZE == WARPSZE) skip_block = shfl(skip_block,WARPSZE-1);	// get largest value in block/warp
+			if (BLOCKSIZE == WARPSZE) skip_block = shfl(skip_block,WARPSZE-1,WARPSZE);	// get largest value in block/warp
 			#endif
 			else {
 				__shared__ volatile int xx;
@@ -1148,30 +1348,54 @@ void ileg_m_kernel(const real_g* __restrict__ al, const real_g* __restrict__ ct,
 		  #endif
 		}
 
-		const int ofs = (4*f0+(ll&3))*l_inc + j % (BLOCKSIZE/NW);
+		//const int NW = NFIELDS*LSPAN*2;
+		#if WARPSZE == 32
+			const int ll = (j % (BLOCKSIZE/NFIELDS)) / (BLOCKSIZE/NW);		// actualy ll = 2*l + (imag ? 1 : 0)
+			const int ofs = (4*f0+(ll&3))*l_inc + j % (BLOCKSIZE/NW);
+			#ifndef __gfx90a__
+				const int NACC = 2;		// number of independent accumulators (2 is the sweetspot for V100).
+			#else
+				const int NACC = 4;		// number of independent accumulators (4 is the sweetspot for MI200 / CDNA2).
+			#endif
+		#else
+			const int ll = (j % (2*LSPAN));		// actualy ll = 2*l + (imag ? 1 : 0)
+			const bool write = (BLOCKSIZE == 2*LSPAN*NFIELDS) ? true : ((j % (BLOCKSIZE/NFIELDS)) < 2*LSPAN);
+			#ifdef ILEG_ISHIOKA
+				const int NACC = 4;		// influences the register layout in order to minimize shared memory loads				
+			#else
+				const int NACC = 2;		// Ishioka recurrence required for NACC=4
+			#endif
+		#endif
+
 		if (BLOCKSIZE > WARPSZE) {	__syncthreads(); } else { _syncwarp_fence; }
+
 			// transpose yl to my_reo (registers)
+
 			#pragma unroll
 			for (int k=0; k<NW; k++) {
-				my_reo[k] = yl[ofs + k*(BLOCKSIZE/NW)];
+				#if WARPSZE == 32
+					my_reo[k] = yl[ofs + k*(BLOCKSIZE/NW)];
+				#else
+					const int ofs = (4*f0+((ll&3)^(k%NACC)))*l_inc + (((j/(2*LSPAN))*NW) % BLOCKSIZE);
+					my_reo[k] = yl[ofs + (k/NACC)*NACC + j%NACC];		// all lanes have different ordering. Less bank conflicts?
+				#endif
 			}
 
+		y1 = (it < nlat_2) ? ct[it + 2*nlat_2] : 0;		// sin(theta)
 	  #ifdef ILEG_ISHIOKA
-		cost = y0;		// cos(theta)^2
+		cost *= cost;		// cos(theta)^2
 	  #endif
 		#if HI_LLIM==1
 		int ny = 0;
 		#endif
 		{	// compute sin(theta)^(m-S)
-			y0 = MPOS_SCALE;	// y0
+			y0 = 1.0;	// y0
 			l = m - S;		// exponent of sin(theta)
 			if (ROBERT_FORM && S==1) {
-				if (MRES==1 && l==0) {
-					y0 *= rsqrt(y1);	// division by sin(theta) only for m=1 in Robert form
+				if (MRES==1 && l==0) {		// division by sin(theta) only for m=1 in Robert form (incorrect at the poles)
+					if (it < nlat_2) y0 = ct[it + 3*nlat_2];		// 1/sin(theta)
 				} else --l;		// otherwise we just reduce the exponent of sin(theta)^l
 			}
-			if (l&1) y0 *= sqrt(y1);	// sqrt only computed when needed
-			l>>=1;
 			#if HI_LLIM==1
 			int nsint = 0;
 			#endif
@@ -1197,18 +1421,29 @@ void ileg_m_kernel(const real_g* __restrict__ al, const real_g* __restrict__ ct,
 			} while(l >>= 1);
 		}
 
-		if (it < nlat_2)     y0 *= ct[it + nlat_2];		// include quadrature weights.
+		if (it < nlat_2)     y0 *= wg[it];		// include quadrature weights.
 	  #ifdef ILEG_ISHIOKA
 		y1 = (ak[1]*cost + ak[0]) * y0;
 	  #else
 		y1 = ak[1]*cost * y0;
 	  #endif
 
-		l=m;		al+=2+LSPAN;
+		l=m;		al+=2;		int k0 = 0;
+		if (BLOCKSIZE > WARPSZE) {	__syncthreads(); } else { _syncwarp_fence; }	// wait for all threads to have read ak before overwriting it!
+		if ((BLOCKSIZE==WARPSZE  ||  j<WARPSZE) && (l+j<=llim))  ak[j] = al[j];
+		al += WARPSZE;
 	  #ifdef ILEG_ISHIOKA
-		const int itl = (ll>>2)*l_inc + (j % (BLOCKSIZE/NW));		// transposed work (at given l)
+	    #if WARPSZE == 32
+			const int itl = (ll>>2)*l_inc + (j % (BLOCKSIZE/NW));		// transposed work (at given l)
+		#else
+			const int itl = (ll>>2)*l_inc + (((j/(2*LSPAN))*NW) % BLOCKSIZE) + j%NACC;		// transposed work (at given l)
+		#endif
 	  #else
-		const int itl = (ll>>1)*l_inc + (j % (BLOCKSIZE/NW));		// transposed work (at given l)
+	    #if WARPSZE == 32
+			const int itl = (ll>>1)*l_inc + (j % (BLOCKSIZE/NW));		// transposed work (at given l)
+		#else
+			const int itl = (ll>>1)*l_inc + (((j/(2*LSPAN))*NW) % BLOCKSIZE) + j%NACC;		// transposed work (at given l)
+		#endif
 	  #endif
 	#if HI_LLIM==1
 		static_assert(BLOCKSIZE == WARPSZE, "with HI_LLIM, block size must equal warp size");
@@ -1227,8 +1462,8 @@ void ileg_m_kernel(const real_g* __restrict__ al, const real_g* __restrict__ ct,
 		  #ifdef ILEG_ISHIOKA
 			#pragma unroll 4
 			for (int k=0; k<LSPAN/2; k+=2) {		// compute a block of the matrix, write it in shared mem.
-				real_g c0 = ak[2*k+3]*cost + ak[2*k+2];
-				real_g c1 = ak[2*k+5]*cost + ak[2*k+4];
+				real_g c0 = ak[k0 + 2*k+1]*cost + ak[k0 + 2*k];
+				real_g c1 = ak[k0 + 2*k+3]*cost + ak[k0 + 2*k+2];
 					if (fabs(y0) > SHT_ACCURACY*SHT_SCALE_FACTOR + 1)
 					{	// rescale when value is significant
 						++ny;
@@ -1243,8 +1478,8 @@ void ileg_m_kernel(const real_g* __restrict__ al, const real_g* __restrict__ ct,
 		  #else
 			#pragma unroll 4
 			for (int k=0; k<LSPAN; k+=2) {		// compute a block of the matrix, write it in shared mem.
-				real_g c0 = ak[k+2]*cost;
-				real_g c1 = ak[k+3]*cost;
+				real_g c0 = ak[k0 + k]*cost;
+				real_g c1 = ak[k0 + k+1]*cost;
 					if (fabs(y0) > SHT_ACCURACY*SHT_SCALE_FACTOR + 1)
 					{	// rescale when value is significant
 						++ny;
@@ -1257,24 +1492,26 @@ void ileg_m_kernel(const real_g* __restrict__ al, const real_g* __restrict__ ct,
 				y1 += c1 * y0;
 			}
 		  #endif
+			k0 += LSPAN;
 
 			y_zero = _ballot(ny);	// at this point block is in sync (consistent view of shared memory).
 
-			if (j<LSPAN) ak[j+2] = al[j];
+			if (k0==WARPSZE) {
+				if ((BLOCKSIZE==WARPSZE  ||  j<WARPSZE) && (l+j+LSPAN<=llim))  ak[j] = al[j];
+				al+=WARPSZE;	k0=0;
+			}
 
 			if (y_zero + 1 != 0) {		// when all y are zero (all bits set -- independent of size), we can skip this.
-				#ifndef __gfx90a__
-				const int NACC = 2;		// number of independent accumulators (2 is the sweetspot for V100).
-				#else
-				const int NACC = 4;		// number of independent accumulators (4 is the sweetspot for MI200 / CDNA2).
-				#endif
-				real qlri[NACC];		// accumulators
+
+				real qlri[NACC];		// accumulators (NACC can be 1, 2 or 4)
+
+			#if WARPSZE == 32
 
 				#pragma unroll
 				for (int a=0; a<NACC; a++) {	// NACC independent accumulators
 					qlri[a]   = my_reo[a]   * yl[itl + a*(BLOCKSIZE/NW)];
 				}
-				const int ql_ofs = 2*l+ll + (b*NFIELDS+f0)*ql_dist;		// compute destination ofset in parallel with reduce!
+				const int ql_ofs = 2*l+ll + (b*NFIELDS+f0)*ql_dist;		// compute destination offset in parallel with reduce!
 				#pragma unroll
 				for (int k=NACC; k<NW; k+=NACC) {		// accumulate in NACC separate accumulators
 					#pragma unroll
@@ -1289,13 +1526,43 @@ void ileg_m_kernel(const real_g* __restrict__ al, const real_g* __restrict__ ct,
 					for (int a=2; a<NACC; a+=2) 	qlri[0] += qlri[a];
 				}
 
-				static_assert(BLOCKSIZE/NW <= WARPSZE, "Blocksize must not exceed 2*LSPAN*WARPSZE");
+				static_assert(BLOCKSIZE/NW <= 8, "Blocksize must not exceed 8*NW");
 					// reduce_add within same l is in same warp too:
+					if (BLOCKSIZE/NW > 4) qlri[0] += shfl_down(qlri[0], 4, 8);
+					if (BLOCKSIZE/NW > 2) qlri[0] += shfl_down(qlri[0], 2, 4);
+					if (BLOCKSIZE/NW > 1) qlri[0] += shfl_down(qlri[0], 1, 2);
+					
+				const bool write = ((j % (BLOCKSIZE/NW)) == 0);
+
+			#else  /* WARPSZE == 64 : avoids shared memory bank conflicts on AMD */
+
+				{	real y = yl[itl];
 					#pragma unroll
-					for (int ofs = BLOCKSIZE/(NW*2); ofs > 0; ofs>>=1) {
-						qlri[0] += shfl_down(qlri[0], ofs, BLOCKSIZE/NW);
-					}
-					if ( ((j % (BLOCKSIZE/NW)) == 0) && ((l+(ll>>1))<=llim) ) {	// write result
+					for (int a=0; a<NACC; a++)  qlri[a] = my_reo[a] * y;
+				}
+				#pragma unroll
+				for (int k=NACC; k<NW; k+=NACC) {		// accumulate in NACC separate accumulators
+					real y = yl[itl + k];
+					#pragma unroll
+					for (int a=0; a<NACC; a++) qlri[a] += my_reo[k+a] * y;
+				}
+
+				const int ql_ofs = 2*l+ll + (b*NFIELDS+f0)*ql_dist;		// compute destination offset in parallel with reduce!
+				// reduce the NACC independent accumulators, which are shuffled accross lanes so that they share the same y above
+				if (NACC>1) qlri[0] += shfl_xor(qlri[1],1);
+				if (NACC==4) {
+					qlri[NACC-2] += shfl_xor(qlri[NACC-1],1);
+					qlri[0]      += shfl_xor(qlri[NACC-2],2);
+				}
+
+				static_assert(BLOCKSIZE/NW <= 4, "Blocksize must not exceed 4*NW");
+					// reduce_add within same l is in same warp too:
+					if (BLOCKSIZE/NW > 2) qlri[0] += shfl_down(qlri[0], 4*LSPAN, 8*LSPAN);
+					if (BLOCKSIZE/NW > 1) qlri[0] += shfl_down(qlri[0], 2*LSPAN, 4*LSPAN);
+
+			#endif
+
+					if ( write && ((l+(ll>>1))<=llim) ) {	// write result
 						#if NLAT_2 <= BLKSZE_A
 							// no atomicAdd needed if (nlat_2 <= BLOCKSIZE), which can be decided before compilation
 							ql[ql_ofs]   = qlri[0];
@@ -1306,7 +1573,6 @@ void ileg_m_kernel(const real_g* __restrict__ al, const real_g* __restrict__ ct,
 			}
 
 			l+=LSPAN;
-			al += LSPAN;
 		}
 	#endif
 
@@ -1315,8 +1581,8 @@ void ileg_m_kernel(const real_g* __restrict__ al, const real_g* __restrict__ ct,
 		  #ifdef ILEG_ISHIOKA
 			#pragma unroll 4
 			for (int k=0; k<LSPAN/2; k+=2) {		// compute a block of the matrix, write it in shared mem.
-				real_g c0 = ak[2*k+3]*cost + ak[2*k+2];
-				real_g c1 = ak[2*k+5]*cost + ak[2*k+4];
+				real_g c0 = ak[k0 + 2*k+1]*cost + ak[k0 + 2*k];
+				real_g c1 = ak[k0 + 2*k+3]*cost + ak[k0 + 2*k+2];
 				yl[k*l_inc +j]     = y0;		// l and l+1
 				yl[(k+1)*l_inc +j] = y1;		// l+2 and l+3
 				y0 += c0 * y1;
@@ -1325,33 +1591,28 @@ void ileg_m_kernel(const real_g* __restrict__ al, const real_g* __restrict__ ct,
 		  #else
 			#pragma unroll 4
 			for (int k=0; k<LSPAN; k+=2) {		// compute a block of the matrix, write it in shared mem.
-				real_g c0 = ak[k+2]*cost;
-				real_g c1 = ak[k+3]*cost;
+				real_g c0 = ak[k0 + k]*cost;
+				real_g c1 = ak[k0 + k+1]*cost;
 				yl[k*l_inc +j]     = y0;		// l and l+1
 				yl[(k+1)*l_inc +j] = y1;		// l+2 and l+3
 				y0 += c0 * y1;
 				y1 += c1 * y0;
 			}
 		  #endif
+			k0 += LSPAN;
 
 			if (BLOCKSIZE > WARPSZE) {	__syncthreads(); } else { _syncwarp_fence; }
 			// at this point block is in sync (consistent view of shared memory).
-				#if WARPSZE==64
-				if (j<LSPAN) ak[j+2] = al[j];	// on AMD, loading after this point kills performance
-				#endif
 
-				#ifndef __gfx90a__
-				const int NACC = 2;		// number of independent accumulators (2 is the sweetspot for V100).
-				#else
-				const int NACC = 4;		// number of independent accumulators (4 is the sweetspot for MI200 / CDNA2).
-				#endif
-				real qlri[NACC];		// accumulators
+				real qlri[NACC];		// accumulators (NACC can be 1, 2 or 4)
+
+			#if WARPSZE == 32
 
 				#pragma unroll
 				for (int a=0; a<NACC; a++) {	// NACC independent accumulators
 					qlri[a]   = my_reo[a]   * yl[itl + a*(BLOCKSIZE/NW)];
 				}
-				const int ql_ofs = 2*l+ll + (b*NFIELDS+f0)*ql_dist;		// compute destination ofset in parallel with reduce!
+				const int ql_ofs = 2*l+ll + (b*NFIELDS+f0)*ql_dist;		// compute destination offset in parallel with reduce!
 				#pragma unroll
 				for (int k=NACC; k<NW; k+=NACC) {		// accumulate in NACC separate accumulators
 					#pragma unroll
@@ -1360,9 +1621,6 @@ void ileg_m_kernel(const real_g* __restrict__ al, const real_g* __restrict__ ct,
 					}
 				}
 
-				#if WARPSZE==32
-				if (j<LSPAN) ak[j+2] = al[j];	// on nvidia, loading after accumulation is more efficient
-				#endif
 				if (NACC>1) {	// reduce the NACC independent accumulators
 					#pragma unroll
 					for (int a=0; a<NACC; a+=2) 	qlri[a] += qlri[a+1];
@@ -1370,13 +1628,48 @@ void ileg_m_kernel(const real_g* __restrict__ al, const real_g* __restrict__ ct,
 					for (int a=2; a<NACC; a+=2) 	qlri[0] += qlri[a];
 				}
 
-				static_assert(BLOCKSIZE/NW <= WARPSZE, "Blocksize must not exceed 2*LSPAN*WARPSZE");
+				static_assert(BLOCKSIZE/NW <= 8, "Blocksize must not exceed 8*NW");
 					// reduce_add within same l is in same warp too:
+					if (BLOCKSIZE/NW > 4) qlri[0] += shfl_down(qlri[0], 4, 8);
+					if (BLOCKSIZE/NW > 2) qlri[0] += shfl_down(qlri[0], 2, 4);
+					if (BLOCKSIZE/NW > 1) qlri[0] += shfl_down(qlri[0], 1, 2);
+
+				const bool write = ((j % (BLOCKSIZE/NW)) == 0);
+
+			#else  /* WARPSZE == 64 : avoids shared memory bank conflicts on AMD */
+
+				{	real y = yl[itl];
 					#pragma unroll
-					for (int ofs = BLOCKSIZE/(NW*2); ofs > 0; ofs>>=1) {
-						qlri[0] += shfl_down(qlri[0], ofs, BLOCKSIZE/NW);
-					}
-					if ( ((j % (BLOCKSIZE/NW)) == 0) && ((l+(ll>>1))<=llim) ) {	// write result
+					for (int a=0; a<NACC; a++)  qlri[a] = my_reo[a] * y;
+				}
+				#pragma unroll
+				for (int k=NACC; k<NW; k+=NACC) {		// accumulate in NACC separate accumulators
+					real y = yl[itl + k];
+					#pragma unroll
+					for (int a=0; a<NACC; a++) qlri[a] += my_reo[k+a] * y;
+				}
+
+				const int ql_ofs = 2*l+ll + (b*NFIELDS+f0)*ql_dist;		// compute destination offset in parallel with reduce!
+				// reduce the NACC independent accumulators, which are shuffled accross lanes so that they share the same y above
+				if (NACC>1) qlri[0] += shfl_xor(qlri[1],1);
+				if (NACC==4) {
+					qlri[NACC-2] += shfl_xor(qlri[NACC-1],1);
+					qlri[0]      += shfl_xor(qlri[NACC-2],2);
+				}
+
+				static_assert(BLOCKSIZE/NW <= 4, "Blocksize must not exceed 4*NW");
+					// reduce_add within same l is in same warp too:
+					if (BLOCKSIZE/NW > 2) qlri[0] += shfl_down(qlri[0], 4*LSPAN, 8*LSPAN);
+					if (BLOCKSIZE/NW > 1) qlri[0] += shfl_down(qlri[0], 2*LSPAN, 4*LSPAN);
+
+			#endif
+
+				if (k0==WARPSZE) {
+					if ((BLOCKSIZE==WARPSZE  ||  j<WARPSZE) && (l+j+LSPAN<=llim))  ak[j] = al[j];
+					al+=WARPSZE;	k0=0;
+				}
+
+					if ( write && ((l+(ll>>1))<=llim) ) {	// write result
 						#if NLAT_2 * NF_A <= 512  &&  !defined( ILEG_ISHIOKA )
 							//if (S==0)	qlri[0] *= xlm[ofs_to_be_determined + l+(ll>>1)];	// this can be done here without the need for another kernel... maybe ?
 						#endif
@@ -1389,7 +1682,6 @@ void ileg_m_kernel(const real_g* __restrict__ al, const real_g* __restrict__ ct,
 					}
 
 			l+=LSPAN;
-			al += LSPAN;
 		}
 
 	}

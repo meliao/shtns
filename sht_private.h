@@ -40,15 +40,11 @@
 
 #ifdef SHTNS_GPU
 #if SHTNS_GPU == 1
-	#ifdef HAVE_LIBCUFFT
-	#include <cufft.h>
-	#endif
+	#include <cuda.h>
+	#include <nvrtc.h>
 	/// The warp size is always 32 on cuda devices
 	#define WARPSZE 32
 #elif SHTNS_GPU == 2
-	#ifdef HAVE_LIBROCFFT
-	#include <hipfft.h>
-	#endif
 	/// The warp size is 64 on supported AMD devices
 	#define WARPSZE 64
 	// convert cuda names to hip names.
@@ -56,9 +52,7 @@
 #endif
 #include "shtns_cuda.h"
 
-#ifdef VKFFT_BACKEND
 #include "vkfft/vkFFT.h"
-#endif
 
 #ifdef __cplusplus
 extern "C" {
@@ -149,6 +143,7 @@ struct shtns_info {		// MUST start with "int nlm;"
 	/* batched transform */
 	int howmany;		///< number of fields to transform simultaneously
 	long spec_dist;		///< pointer distance between two spectral fields (in complex number)
+	long spat_dist;		///< pointer distance between two spatial fields
 
 	/* Legendre function generation arrays */
 	double *alm;	// coefficient list for Legendre function recurrence (size 2*NLM)
@@ -188,7 +183,6 @@ struct shtns_info {		// MUST start with "int nlm;"
 	unsigned fftw_plan_mode;
 	unsigned layout;		// requested data layout
 	double Y00_1, Y10_ct, Y11_st;
-	double mpos_scale_analys;	///< scale factor for analysis, handles real-norm (0.5 or 1.0);
 	shtns_cfg next;		// pointer to next sht_setup or NULL (records a chained list of SHT setup).
 
 	#ifdef SHTNS_GPU
@@ -203,6 +197,7 @@ struct shtns_info {		// MUST start with "int nlm;"
 	double* d_mx_van;
 	double* gpu_staging_mem;	// for auto-offload only
 	double* gpu_buf_in;		// inner buffer: can each hold either spectral or spatial fields.
+	void* gpu_buf_oop_fft;
 	size_t nlm_stride, spat_stride;
 	cudaStream_t xfer_stream, comp_stream;		// the cuda streams
 	CUfunction gpu_kernels[4];		// 4 kernels (scalar & vector, synth & analys)
@@ -211,13 +206,8 @@ struct shtns_info {		// MUST start with "int nlm;"
 	unsigned char nwarp[3];			// third value is for scalar synthesis with sh2ish_fuse, or set to 0 to disable sh2ish
 	unsigned char lspan_a;			// for the record, not actually used.
 	CUmodule gpu_module;			// not sure this is needed
-	#ifdef VKFFT_BACKEND
-		VkFFTApplication vkfft_plan;
-	#endif
-	#if defined(HAVE_LIBCUFFT) || defined(HAVE_LIBROCFFT)
-	cufftHandle cufft_plan;						// the cufft Handle
-	//cufftHandle cufft_plan_float;				// the cufft Handle single precision
-	#endif
+	VkFFTApplication vkfft_plan;
+	double* d_wg_adjoint_spat;	// weights for adjoint in spatial space (real data type and not real_g)
 	cudaEvent_t gpu_timer[3];
 	cudaEvent_t sync_evt;		// for synchronizing comp_stream with external streams (e.g. JAX)
 	#endif	/* SHTNS_GPU  ===> NOTHING ELSE  IN THE STRUCTURE BEYOND THIS LINE */
@@ -361,8 +351,8 @@ static void ishioka_to_SH(const double* xlm, const v2d* qq, const int llim_m, v2
 	while (l<llim_m) {
 		v2d uu = qq[l];
 		Ql[l] = uu * vdup(xlm[ll]) + u0;
-		Ql[l+1] = qq[l+1] * vdup(xlm[ll+2]);
 		u0 = uu * vdup(xlm[ll+1]);
+		Ql[l+1] = qq[l+1] * vdup(xlm[ll+2]);
 		l+=2;	ll+=3;
 	}
 	if (l==llim_m) {
@@ -375,7 +365,7 @@ static void ishioka_to_SH(const double* xlm, const v2d* qq, const int llim_m, v2
 		v4d x = vread4(xlm+ll, 0);	x = vdup_even4(x);
 		v4d uu = vread4(qq+l, 0);	// [qq[l], qq[l+1]]
 		vstor4(Ql+l, 0, uu*x + z);
-		z = _mm256_castpd128_pd256( (v2d)_mm256_castpd256_pd128(uu) * vdup(xlm[ll+1]) );		// upper part of z is zeroed.
+		z = v2d_to_v4d_zext( (v2d)_mm256_castpd256_pd128(uu) * vdup(xlm[ll+1]) );	// upper part of z is zeroed
 		l+=2;	ll+=3;
 	}
 	if (l==llim_m) {
@@ -468,21 +458,10 @@ static void SH_to_ishioka(const double* xlm, const v2d* Ql, const int llim_m, v2
     ql[l+1] = qq;
   #else
 	v4d y = vread4(Ql+l, 0);
-/*	while (l<llim_m-4) {
-		v4d x = vread4(xlm+ll, 0);	x = vdup_even4(x);
-		v4d y2 = vread4(Ql+l+2, 0);
-		v4d z =_mm256_castpd128_pd256( vdup(xlm[ll+1]) * _mm256_castpd256_pd128( y2 ) );		// upper part of z is zeroed.
-		vstor4(ql+l, 0, x*y + z);
-		x = vread4(xlm+ll+3, 0);	x = vdup_even4(x);
-		y = vread4(Ql+l+4, 0);
-		z =_mm256_castpd128_pd256( vdup(xlm[ll+4]) * _mm256_castpd256_pd128( y ) );		// upper part of z is zeroed.
-		vstor4(ql+l+2, 0, x*y2 + z);
-		ll+=6;	l+=4;
-	}	*/
 	while (l<llim_m-1) {
 		v4d x = vread4(xlm+ll, 0);	x = vdup_even4(x);
 		v4d y = vread4(Ql+l, 0);
-		v4d z =_mm256_castpd128_pd256( vdup(xlm[ll+1]) * Ql[l+2] );		// upper part of z is zeroed with AVX
+		v4d z = v2d_to_v4d_zext( vdup(xlm[ll+1]) * Ql[l+2] );	// upper part of z is zeroed
 		vstor4(ql+l, 0, x*y + z);
 		ll+=3;	l+=2;
 	}
@@ -688,3 +667,6 @@ void S2D_CSTORE2(double* mem, long idx, long nlat, rnd nr, rnd sr, rnd ni, rnd s
 	vstor(mem + nlat*2, -(2*idx+1), si);
 	vstor(mem + nlat*2, -(2*idx+2), sr);
 }
+
+/// returns 0 if the specified transform (i_var,i_typ) is not scheduled to run on gpu
+int runs_on_gpu(shtns_cfg shtns, int i_var, int i_typ);

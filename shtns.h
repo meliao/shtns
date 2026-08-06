@@ -15,6 +15,9 @@
  * 
  */
 
+#ifndef SHTNS_H
+#define SHTNS_H
+
 /** \file shtns.h
  \brief shtns.h is the definition file for SHTns : include this file in your source code to use SHTns.
 **/
@@ -35,7 +38,7 @@ extern "C" {
 
 /// SHTns interface version (loosely follow versions) allowing simple version checks: (major << 16) | (minor << 8) | patchlevel
 /// should be increased at least each time this file changes.
-#define SHTNS_INTERFACE 0x30700
+#define SHTNS_INTERFACE 0x307A0
 
 /// pointer to data structure describing an SHT, returned by shtns_init() or shtns_create().
 typedef struct shtns_info* shtns_cfg;
@@ -164,8 +167,8 @@ int shtns_set_grid_auto(shtns_cfg, enum shtns_type flags, double eps, int nl_ord
 shtns_cfg shtns_create_with_grid(shtns_cfg, int mmax, int nofft);
 /// Enables multi-thread transform using OpenMP with num_threads (if available). Returns number of threads that will be used.
 int shtns_use_threads(int num_threads);
-/// beta: Modify plan to perform several transforms together (batch). This is useful to get good performance for small transforms on GPU, but also works on CPU.
-int shtns_set_batch(shtns_cfg shtns, int howmany, long spec_dist);
+/// Sets the number of transforms to be performed together (batch). Must be called before \ref shtns_set_grid or \ref shtns_set_grid_auto. Useful to get good performance for small transforms on GPU, but also works on CPU.
+int shtns_set_many(shtns_cfg shtns, int howmany, long spec_dist);
 
 void shtns_reset(void);				///< destroy all configs, free memory, and go back to initial state.
 void shtns_destroy(shtns_cfg);		///< free memory of given config, which cannot be used afterwards.
@@ -406,3 +409,5 @@ void adjoint_spat_to_SHqst(shtns_cfg, cplx *Qlm, cplx *Slm, cplx *Tlm, double *V
 #ifdef __cplusplus
 }
 #endif /* __cplusplus */
+
+#endif //SHTNS_H

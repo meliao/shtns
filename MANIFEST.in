@@ -6,4 +6,5 @@ include *.in
 include *.so
 include fftw3/*
 include SHT/*
+include hiprec/*
 exclude *cuda* SHT/*cu

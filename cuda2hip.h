@@ -21,6 +21,7 @@
 #define cudaMemcpyDeviceToHost	 hipMemcpyDeviceToHost
 #define cudaMemcpyHostToDevice	 hipMemcpyHostToDevice
 #define cudaMemsetAsync	 hipMemsetAsync
+#define cudaMemset2DAsync	 hipMemset2DAsync
 #define cudaSetDevice	 hipSetDevice
 #define cudaStreamCreateWithFlags	 hipStreamCreateWithFlags
 #define cudaStreamDestroy	 hipStreamDestroy

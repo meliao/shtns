@@ -99,7 +99,7 @@ VX		BpF = BtF + nv/2;
 		{
 			for (int b=0; b<shtns->howmany; b++) {		// inner-loop is batch. For best cache-reuse
 				long spec_ofs = b * shtns->spec_dist;
-				long spat_ofs = b * shtns->nlat_2;
+				long spat_ofs = b * shtns->spat_dist/2;
 3				GEN3(_sy3,NWAY,_l)(shtns, Qlm+spec_ofs, Slm+spec_ofs, Tlm+spec_ofs, BrF+spat_ofs, BtF+spat_ofs, BpF+spat_ofs, llim | adjoint, im, it0, it1);
 QX				GEN3(_sy1,NWAY,_l)(shtns, Qlm+spec_ofs, BrF+spat_ofs, llim | adjoint, im, it0, it1);
 	#ifndef SHT_GRAD
@@ -117,7 +117,7 @@ T				GEN3(_sy1t,NWAY,_l)(shtns, Tlm+spec_ofs, BtF+spat_ofs, BpF+spat_ofs, llim |
 		{
 			for (int b=0; b<shtns->howmany; b++) {		// inner-loop is batch. For best cache-reuse
 				long spec_ofs = b * shtns->spec_dist;
-				long spat_ofs = b * shtns->nlat_2;
+				long spat_ofs = b * shtns->spat_dist/2;
 3				GEN3(_sy3_hi,NWAY,_l)(shtns, Qlm+spec_ofs, Slm+spec_ofs, Tlm+spec_ofs, BrF+spat_ofs, BtF+spat_ofs, BpF+spat_ofs, llim | adjoint, im, it0, it1);
 QX				GEN3(_sy1_hi,NWAY,_l)(shtns, Qlm+spec_ofs, BrF+spat_ofs, llim | adjoint, im, it0, it1);
 	#ifndef SHT_GRAD
@@ -143,9 +143,12 @@ V			for (int it=0; it<shtns->nlat_2; it++) BpF[spat_ofs + it] *= scale;
 	// padding for high m's
 	if (NPHI-1 > 2*imlim) {
 		const int m_inc = shtns->nlat_padded >> 1;
-Q		memset(BrF + m_inc*(imlim+1), 0, sizeof(cplx)* m_inc * (NPHI-1-2*imlim));
-V		memset(BtF + m_inc*(imlim+1), 0, sizeof(cplx)* m_inc * (NPHI-1-2*imlim));
-V		memset(BpF + m_inc*(imlim+1), 0, sizeof(cplx)* m_inc * (NPHI-1-2*imlim));
+		for (int b=0; b<shtns->howmany; b++) {
+			long spat_ofs = b * shtns->spat_dist/2;
+Q			memset(BrF + spat_ofs + m_inc*(imlim+1), 0, sizeof(cplx)* m_inc * (NPHI-1-2*imlim));
+V			memset(BtF + spat_ofs + m_inc*(imlim+1), 0, sizeof(cplx)* m_inc * (NPHI-1-2*imlim));
+V			memset(BpF + spat_ofs + m_inc*(imlim+1), 0, sizeof(cplx)* m_inc * (NPHI-1-2*imlim));
+		}
 	}
 
     // NPHI > 1 as SHT_AXISYM is not defined.

@@ -40,6 +40,7 @@ cudaMemcpyAsync
 cudaMemcpyDeviceToHost
 cudaMemcpyHostToDevice
 cudaMemsetAsync
+cudaMemset2DAsync
 cudaSetDevice
 cudaStreamCreateWithFlags
 cudaStreamDestroy
