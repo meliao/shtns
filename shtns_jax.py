@@ -11,7 +11,7 @@ Example::
     alm = sh.analys_jax(spatial_array)   # supports jit, vmap, jvp, vjp
 """
 
-import logging
+# import logging
 import ctypes
 import os
 
@@ -75,7 +75,7 @@ try:
         jax.ffi.register_ffi_target(_name, jax.ffi.pycapsule(_func), platform="CUDA")
     CUDA_AVAILABLE = True
 except Exception:
-    logging.warning("Could not find GPU implementation for JAX:")
+    print("Could not find GPU implementation for JAX:")
 
 
 ###################################
