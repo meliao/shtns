@@ -14,13 +14,8 @@ This builds two modules, the `shtns` module we all know and love, and a second m
 | --- | --- | --- | --- | --- | --- |
 | `synth_jax` | Y | Y | Y | Y | |
 | `analys_jax` | Y | Y | Y | Y | |
-| `synth_cplx_jax` | N | N | N | N | |
-| `analys_cplx_jax` | N | N | N | N | |
 | `synth_vec_jax` | Y | Y | Y | Y | Vectorial SH -> spat transform. |
 | `analys_vec_jax` | Y | Y | Y | Y | Vectorial spat -> SH transform. |
-| `synth_vec_cplx_jax` | Y | N | Y | N | Complex vectorial SH -> spat transform. |
-| `analys_vec_cplx_jax` | Y | N | Y | N | Complex vectorial spat -> SH transform. |
-| `SHqst_to_point_cplx_jax` | N | N | N | N | Vector SH -> arbitrary point. We have a NumPy implementation in `shtns_jax.py`. |
 | `SHqst_to_lat_jax` | N | N | N | N | |
 | `SHqst_to_point_jax` | N | N | N | N | |
 

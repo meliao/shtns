@@ -75,6 +75,8 @@ sht_kernels_a.o : sht_kernels_a.c Makefile $(hfiles) SHT/spat_to_SH_kernel.c
 	$(shtcc) -c $< -o $@
 sht_gpu.o : sht_gpu.cu sht_gpu_kernels.cu Makefile $(hfiles) SHT/cuda_legendre.inc
 	@gpu_compile@ -c $< -o $@
+sht_gpu_local.o : sht_gpu_local.cu Makefile $(hfiles)
+	@gpu_compile@ -c $< -o $@
 # for more verbose cuda compilation, add to nvcc: -gencode=arch=compute_XX,code=sm_XX -Xptxas=-v
 
 # programs & Examples

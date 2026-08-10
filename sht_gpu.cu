@@ -555,6 +555,7 @@ void cushtns_release_gpu(shtns_cfg shtns)
 	if (shtns->gpu_staging_mem) cudaFree(shtns->gpu_staging_mem);
 	if (shtns->cu_flags & CUSHT_OWN_XFER_STREAM) cudaStreamDestroy(shtns->xfer_stream);
 	cudaEventDestroy(shtns->sync_evt);
+	if (shtns->nphi_lat_gpu) { deleteVkFFT(&shtns->vkfft_plan_lat); shtns->nphi_lat_gpu = 0; }
 	destroy_cuda_buffer_fft(shtns);
 	cushtns_profiling(shtns, 0);		// frees resources allocated for profiling
 	// TODO: arrays possibly shared between different shtns_cfg should be deallocated ONLY if not used by other shtns_cfg.
@@ -592,6 +593,7 @@ int cushtns_init_gpu(shtns_cfg shtns)
 	double *d_x2lm = 0;
 	double *d_clm = 0;
 	double *d_wg_spat = 0;
+	double *d_alm = 0;
 	int err_count = 0;
 	int device_id = -1;
 	bool fast_fp64 = true;	// assume GPU has good fp64 performance
@@ -642,6 +644,8 @@ int cushtns_init_gpu(shtns_cfg shtns)
 		if (shtns->x2lm != shtns->xlm)  sze += 3*nlm0/2 +  (CACHE_LINE_GPU/sizeof_real-1);		// reserve space for x2lm
 	}
 	if (shtns->mx_stdt) sze += ( 2*nlm + (CACHE_LINE_GPU/sizeof_real-1) ) * ((shtns->mx_van == shtns->mx_stdt) ? 1 : 2);
+	const long nlm_alm = 2*nlm + 2;	// shtns->alm size (sht_legendre.c), for SHqst_to_point/SHqst_to_lat (sht_gpu_local.cu)
+	sze += nlm_alm*sizeof(double)/sizeof_real + (CACHE_LINE_GPU/sizeof_real-1);	// d_alm (always double precision)
 	err = cudaMalloc(&buf, (sze + MAX_THREADS_PER_BLOCK-1)*sizeof_real);	// allow some overflow.
 	if (err != cudaSuccess) err_count ++;
 	if (err_count == 0) {
@@ -679,6 +683,10 @@ int cushtns_init_gpu(shtns_cfg shtns)
 			d_wg_spat = (double*) buf;			align_ptr(&buf, nlat_2*sizeof_real, CACHE_LINE_GPU);
 			err_count += gpu_upload_convert(d_wg_spat, shtns->wg, nlat_2, sizeof_real);
 		}
+
+		// d_alm: mirror of shtns->alm, always double precision, for SHqst_to_point/SHqst_to_lat (sht_gpu_local.cu)
+		d_alm = (double*) buf;		align_ptr(&buf, nlm_alm*sizeof(double), CACHE_LINE_GPU);
+		err_count += gpu_upload_convert(d_alm, shtns->alm, nlm_alm, sizeof(double));
 	}
 
 	shtns->d_xlm = d_xlm;
@@ -688,6 +696,9 @@ int cushtns_init_gpu(shtns_cfg shtns)
 	shtns->d_mx_stdt = d_mx_stdt;
 	shtns->d_mx_van = d_mx_van;
 	shtns->d_wg_adjoint_spat = d_wg_spat;
+	shtns->d_alm = d_alm;
+	shtns->nphi_lat_gpu = 0;
+	shtns->n_other_lat_gpu = 0;
 
 	err_count += init_cuda_buffer_fft(shtns, device_id, sizeof_real);
 	err_count += init_cuda_program(shtns, gpu_arch_target);

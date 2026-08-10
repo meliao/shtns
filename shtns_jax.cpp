@@ -439,7 +439,56 @@ XLA_FFI_DEFINE_HANDLER_SYMBOL(
         .Ret<ffi::Buffer<ffi::F64>>()    // stacked spatial (..., 3, nphi): [Vr, Vt, Vp]
 );
 
+// SHqst_to_point: C128 spectral (n_fields, 3, nlm) [Qlm,Slm,Tlm] + F64 cost (npts,)
+// + F64 phi (npts,) -> F64 (3, npts) [Vr,Vt,Vp]. n_fields must be 1 (a single field shared
+// by every point) or npts (one field per point, zipped with cost/phi) -- the latter is what
+// vmap_method="broadcast_all" produces when this op is vmapped, since it materializes a
+// batch dimension even on arguments that are logically constant across the batch.
+// Always uses the config's full LMAX/MMAX, matching SHqst_to_point's C signature (which has
+// no ltr/mtr truncation parameters).
+ffi::Error SHqst_to_point_jax_cpu(int64_t cfg,
+                                   ffi::Buffer<ffi::C128> spec,
+                                   ffi::Buffer<ffi::F64> cost_buf,
+                                   ffi::Buffer<ffi::F64> phi_buf,
+                                   ffi::ResultBuffer<ffi::F64> out) {
+  shtns_cfg sh = reinterpret_cast<shtns_cfg>(cfg);
+  long nlm = sh->nlm;
+  long n_total = spec.element_count();
+  if (nlm <= 0 || n_total % (3 * nlm) != 0)
+    return ffi::Error::InvalidArgument("shtns: SHqst_to_point: spectral input bad size");
+  long n_fields = n_total / (3 * nlm);
+  long npts = cost_buf.element_count();
+  if (phi_buf.element_count() != npts)
+    return ffi::Error::InvalidArgument("shtns: SHqst_to_point: cost/phi size mismatch");
+  if (n_fields != 1 && n_fields != npts)
+    return ffi::Error::InvalidArgument("shtns: SHqst_to_point: spectral batch must be 1 or match npts");
+  if (out->element_count() != 3 * npts)
+    return ffi::Error::InvalidArgument("shtns: SHqst_to_point: output bad size");
 
+  const double* cost = cost_buf.typed_data();
+  const double* phi = phi_buf.typed_data();
+  double* vr = &out->typed_data()[0];
+  double* vt = &out->typed_data()[npts];
+  double* vp = &out->typed_data()[2 * npts];
+  for (int64_t i = 0; i < npts; i++) {
+    long base = (n_fields == 1) ? 0 : i * 3 * nlm;
+    cplx* qlm = (cplx*)&spec.typed_data()[base];
+    cplx* slm = (cplx*)&spec.typed_data()[base + nlm];
+    cplx* tlm = (cplx*)&spec.typed_data()[base + 2 * nlm];
+    SHqst_to_point(sh, qlm, slm, tlm, cost[i], phi[i], &vr[i], &vt[i], &vp[i]);
+  }
+  return ffi::Error::Success();
+}
+
+XLA_FFI_DEFINE_HANDLER_SYMBOL(
+    SHqst_to_point_cpu, SHqst_to_point_jax_cpu,
+    ffi::Ffi::Bind()
+        .Attr<int64_t>("cfg")
+        .Arg<ffi::Buffer<ffi::C128>>()   // stacked spectral (3, nlm): [Qlm, Slm, Tlm] (one shared field)
+        .Arg<ffi::Buffer<ffi::F64>>()    // cost (npts,)
+        .Arg<ffi::Buffer<ffi::F64>>()    // phi (npts,)
+        .Ret<ffi::Buffer<ffi::F64>>()    // stacked (3, npts): [Vr, Vt, Vp]
+);
 
 
 // Rotation apply_real: C128 spectral (..., nlm) -> C128 spectral (..., nlm)

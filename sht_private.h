@@ -210,6 +210,10 @@ struct shtns_info {		// MUST start with "int nlm;"
 	double* d_wg_adjoint_spat;	// weights for adjoint in spatial space (real data type and not real_g)
 	cudaEvent_t gpu_timer[3];
 	cudaEvent_t sync_evt;		// for synchronizing comp_stream with external streams (e.g. JAX)
+	double* d_alm;				// device mirror of shtns->alm, for SHqst_to_point/SHqst_to_lat (sht_gpu_local.cu)
+	VkFFTApplication vkfft_plan_lat;	// separate small plan for SHqst_to_lat's m->nphi expansion
+	int nphi_lat_gpu;			// nphi of previous SHqst_to_lat GPU call (0 = uninitialized)
+	long n_other_lat_gpu;		// batch size (numberBatches) of previous SHqst_to_lat GPU call
 	#endif	/* SHTNS_GPU  ===> NOTHING ELSE  IN THE STRUCTURE BEYOND THIS LINE */
 
 	// the end should be aligned on the size of int, to allow the storage of small arrays.

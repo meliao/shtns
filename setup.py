@@ -66,7 +66,7 @@ def check_openmp_support(omp_flags='-fopenmp'):
 
 numpy_inc = get_include()               #  NumPy include path.
 shtns_o_com = "sht_kernels_a.o sht_kernels_s.o sht_odd_nlat.o sht_fly.o sht_omp.o".split()
-shtns_o_gpu = "sht_init_gpu.o sht_gpu.o".split()
+shtns_o_gpu = "sht_init_gpu.o sht_gpu.o sht_gpu_local.o".split()
 shtns_o_cpu = "sht_init.o".split()
 libdir = []
 cargs = ['-std=c99', '-DSHTNS_VER="' + getver() +'"']

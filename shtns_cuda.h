@@ -75,6 +75,20 @@ void cu_adjoint_SHsphtor_to_spat(shtns_cfg, double *Vt, double *Vp, cplx *Slm, c
 void cu_adjoint_SHsphtor_to_spat_float(shtns_cfg, float *Vt, float *Vp, cplx_f *Slm, cplx_f *Tlm, int ltr);
 void cu_adjoint_SHqst_to_spat(shtns_cfg, double *Vr, double *Vt, double *Vp, cplx *Qlm, cplx *Slm, cplx *Tlm, int ltr);
 void cu_adjoint_SHqst_to_spat_float(shtns_cfg, float *Vr, float *Vt, float *Vp, cplx_f *Qlm, cplx_f *Slm, cplx_f *Tlm, int ltr);
+
+/// Same as \ref SHqst_to_point, but working on data residing on the GPU, batched over npts
+/// points. Qlm/Slm/Tlm hold either a single shared field (n_fields==1, broadcast to every
+/// point) or one field per point (n_fields==npts, zipped with cost/phi, each field block
+/// contiguous and n_fields blocks laid out back-to-back -- i.e. planar, NOT interleaved).
+/// See sht_gpu_local.cu.
+void cu_SHqst_to_point(shtns_cfg, const cplx *Qlm, const cplx *Slm, const cplx *Tlm,
+                        long n_fields, const double *cost, const double *phi,
+                        double *Vr, double *Vt, double *Vp, long npts, int ltr, int mtr);
+/// Same as \ref SHqst_to_lat, but working on data residing on the GPU, batched over n_other
+/// (Qlm,Slm,Tlm,cost) tuples, each producing nphi output samples. See sht_gpu_local.cu.
+void cu_SHqst_to_lat(shtns_cfg, const cplx *Qlm, const cplx *Slm, const cplx *Tlm,
+                      const double *cost, double *Vr, double *Vt, double *Vp,
+                      long n_other, int nphi, int ltr, int mtr);
 ///@}
 
 ///\name Initialization

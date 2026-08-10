@@ -59,6 +59,7 @@ _cpu_lib_members = [
     ("shtns_rotation_apply_real", _shtns_jax_lib_cpu.rotation_apply_real_cpu),
     ("shtns_rotation_apply_cplx", _shtns_jax_lib_cpu.rotation_apply_cplx_cpu),
     ("shtns_SHqst_to_lat", _shtns_jax_lib_cpu.SHqst_to_lat_cpu),
+    ("shtns_SHqst_to_point", _shtns_jax_lib_cpu.SHqst_to_point_cpu),
 ]
 for _name, _func in _cpu_lib_members:
     jax.ffi.register_ffi_target(_name, jax.ffi.pycapsule(_func), platform="cpu")
@@ -76,6 +77,8 @@ try:
         ("shtns_analys_vec", _shtns_jax_lib_cuda.analys_vec_gpu),
         ("shtns_adjoint_synth_vec", _shtns_jax_lib_cuda.adjoint_synth_vec_gpu),
         ("shtns_adjoint_analys_vec", _shtns_jax_lib_cuda.adjoint_analys_vec_gpu),
+        ("shtns_SHqst_to_lat", _shtns_jax_lib_cuda.SHqst_to_lat_gpu),
+        ("shtns_SHqst_to_point", _shtns_jax_lib_cuda.SHqst_to_point_gpu),
     ]
     for _name, _func in _gpu_lib_members:
         jax.ffi.register_ffi_target(_name, jax.ffi.pycapsule(_func), platform="CUDA")
@@ -478,6 +481,56 @@ class sht(shtns.sht):
         spec = jnp.stack([Qlm, Slm, Tlm], axis=-2)
         out = _impl(spec, cost_arr)
         return out[..., 0, :], out[..., 1, :], out[..., 2, :]
+
+    def SHqst_to_point_jax(
+        self,
+        Qlm: jax.Array,
+        Slm: jax.Array,
+        Tlm: jax.Array,
+        cost: jax.Array,
+        phi: jax.Array,
+    ) -> jax.Array:
+        """
+        Arbitrary-point evaluation for vectors:
+
+        spectral QST -> float64 scalars (Vr, Vt, Vp) at the point cos(theta)=cost, phi.
+
+        cost and phi must be scalars. Always uses the full lmax/mmax of this config
+        (SHqst_to_point has no ltr/mtr truncation parameter, unlike SHqst_to_lat).
+
+        Supports jit and vmap (including vmap over cost/phi, or over Qlm/Slm/Tlm, for
+        batched points -- e.g. evaluating one field at many scattered points, or many
+        different fields each at their own point).
+        """
+        self._check_shape_dtype(Qlm, (self.nlm,), jnp.complex128)
+        self._check_shape_dtype(Slm, (self.nlm,), jnp.complex128)
+        self._check_shape_dtype(Tlm, (self.nlm,), jnp.complex128)
+        cost_arr = jnp.asarray(cost, dtype=jnp.float64).reshape(1)
+        phi_arr = jnp.asarray(phi, dtype=jnp.float64).reshape(1)
+
+        cfg = int(self.this)
+
+        @jax.custom_jvp
+        def _impl(spec: jax.Array, cost_in: jax.Array, phi_in: jax.Array) -> jax.Array:
+            prefix = spec.shape[:-2]
+            out_shape = (*prefix, 3, 1) if prefix else (3, 1)
+            return jax.ffi.ffi_call(
+                "shtns_SHqst_to_point",
+                jax.ShapeDtypeStruct(out_shape, jnp.float64),
+                vmap_method="broadcast_all",
+            )(spec, cost_in, phi_in, cfg=cfg)
+
+        @_impl.defjvp
+        def _jvp(primals, tangents):
+            spec, cost_in, phi_in = primals
+            spec_tan, _, _ = tangents
+            y = _impl(spec, cost_in, phi_in)
+            y_tan = _impl(spec_tan, cost_in, phi_in)
+            return y, y_tan
+
+        spec = jnp.stack([Qlm, Slm, Tlm], axis=-2)
+        out = _impl(spec, cost_arr, phi_arr)
+        return out[..., 0, 0], out[..., 1, 0], out[..., 2, 0]
 
     def synth_vec_cplx_jax(self, x: jax.Array) -> jax.Array:
         """Complex vector inverse SHT: complex128 spectral (3, nlm_cplx) ->
