@@ -16,9 +16,9 @@ import ctypes
 import os
 
 import jax
-from jax.custom_transpose import custom_transpose
 import jax.numpy as jnp
 import numpy as np
+from jax.custom_transpose import custom_transpose
 
 import shtns
 
@@ -46,6 +46,8 @@ _shtns_jax_lib_cpu = _load_jax_lib("libshtns_jax_cpu.so")
 _cpu_lib_members = [
     ("shtns_synth", _shtns_jax_lib_cpu.synth_cpu),
     ("shtns_analys", _shtns_jax_lib_cpu.analys_cpu),
+    ("shtns_adjoint_synth", _shtns_jax_lib_cpu.adjoint_synth_cpu),
+    ("shtns_adjoint_analys", _shtns_jax_lib_cpu.adjoint_analys_cpu),
     ("shtns_synth_vec", _shtns_jax_lib_cpu.synth_vec_cpu),
     ("shtns_analys_vec", _shtns_jax_lib_cpu.analys_vec_cpu),
     ("shtns_adjoint_synth_vec", _shtns_jax_lib_cpu.adjoint_synth_vec_cpu),
@@ -68,8 +70,12 @@ try:
     _gpu_lib_members = [
         ("shtns_synth", _shtns_jax_lib_cuda.synth_gpu),
         ("shtns_analys", _shtns_jax_lib_cuda.analys_gpu),
+        ("shtns_adjoint_synth", _shtns_jax_lib_cuda.adjoint_synth_gpu),
+        ("shtns_adjoint_analys", _shtns_jax_lib_cuda.adjoint_analys_gpu),
         ("shtns_synth_vec", _shtns_jax_lib_cuda.synth_vec_gpu),
         ("shtns_analys_vec", _shtns_jax_lib_cuda.analys_vec_gpu),
+        ("shtns_adjoint_synth_vec", _shtns_jax_lib_cuda.adjoint_synth_vec_gpu),
+        ("shtns_adjoint_analys_vec", _shtns_jax_lib_cuda.adjoint_analys_vec_gpu),
     ]
     for _name, _func in _gpu_lib_members:
         jax.ffi.register_ffi_target(_name, jax.ffi.pycapsule(_func), platform="CUDA")
@@ -136,7 +142,7 @@ class sht(shtns.sht):
             lmax + 1, lmax + 1, 1
         )  # degree lmax+1; no grid needed for point eval
 
-        l = np.asarray(sh_hi.zl, dtype=np.int64)  # output (hi) layout  # noqa: E741
+        l = np.asarray(sh_hi.zl, dtype=np.int64)  # output (hi) layout
         m = np.asarray(sh_hi.zm, dtype=np.int64)
 
         def eps(ll, mm):
@@ -260,18 +266,12 @@ class sht(shtns.sht):
             out_shape = (
                 (self.nlm,) if len(ct_out.shape) == 2 else (*prefix_shape, self.nlm)
             )
-            weights = self._grid_weights()
 
-            scaled = ct_out / weights
-
-            result = jax.ffi.ffi_call(
-                "shtns_analys",
+            return jax.ffi.ffi_call(
+                "shtns_adjoint_synth",
                 jax.ShapeDtypeStruct(out_shape, jnp.complex128),
                 vmap_method="broadcast_all",
-            )(scaled, cfg=int(self.this))
-            if self.orthonormal:
-                result = result.at[self.lmax + 1 :].multiply(2.0)
-            return result
+            )(ct_out, cfg=int(self.this))
 
         @_synth_impl.defjvp
         def _synth_impl_jvp(primals, tangents):
@@ -316,15 +316,11 @@ class sht(shtns.sht):
                 else (*orig_shape[:-1], *self.spat_shape)
             )
 
-            if self.orthonormal:
-                ct_out = ct_out.at[self.lmax + 1 :].multiply(0.5)
-            result = jax.ffi.ffi_call(
-                "shtns_synth",
+            return jax.ffi.ffi_call(
+                "shtns_adjoint_analys",
                 jax.ShapeDtypeStruct(out_shape, jnp.float64),
                 vmap_method="broadcast_all",
             )(ct_out, cfg=int(self.this))
-            weights = self._grid_weights()
-            return result * weights
 
         @_analys_impl.defjvp
         def _analys_impl_jvp(primals, tangents):
@@ -443,8 +439,8 @@ class sht(shtns.sht):
         nphi: int,
     ) -> jax.Array:
         """
-        Latitude-ring synthesis for vectors: 
-        
+        Latitude-ring synthesis for vectors:
+
         spectral QST -> float64 spatial (3, nphi) at a particular latitude.
 
         Returns 3 (nphi,) arrays [Vr, Vt, Vp] at the latitude

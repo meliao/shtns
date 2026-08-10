@@ -16,12 +16,13 @@ This builds two modules, the `shtns` module we all know and love, and a second m
 | `analys_jax` | Y | Y | Y | Y | |
 | `synth_cplx_jax` | N | N | N | N | |
 | `analys_cplx_jax` | N | N | N | N | |
-| `synth_vec_jax` | Y | Y | Y | N | Vectorial SH -> spat transform. |
-| `analys_vec_jax` | Y | Y | Y | N | Vectorial spat -> SH transform. |
+| `synth_vec_jax` | Y | Y | Y | Y | Vectorial SH -> spat transform. |
+| `analys_vec_jax` | Y | Y | Y | Y | Vectorial spat -> SH transform. |
 | `synth_vec_cplx_jax` | Y | N | Y | N | Complex vectorial SH -> spat transform. |
 | `analys_vec_cplx_jax` | Y | N | Y | N | Complex vectorial spat -> SH transform. |
 | `SHqst_to_point_cplx_jax` | N | N | N | N | Vector SH -> arbitrary point. We have a NumPy implementation in `shtns_jax.py`. |
-| `SHqst_to_lat_jax` | Y | N | N | N | |
+| `SHqst_to_lat_jax` | N | N | N | N | |
+| `SHqst_to_point_jax` | N | N | N | N | |
 
 
 And we have done the same for thet `shtns.rotation` object. The definition is extended in the `shtns_jax.rotation` class to include these JAX-compatible transforms:
@@ -29,7 +30,19 @@ And we have done the same for thet `shtns.rotation` object. The definition is ex
 | Transform | JAX CPU | JAX CUDA | JAX autodiff (CPU) | JAX autodiff (CUDA) | Notes |
 | --- | --- | --- | --- | --- | --- |
 | `apply_real_jax` | Y | N | N | N | CPU Autodiff is implemented but not validated numerically. |
-| `apply_cplx_jax` | Y | N | N | N | CPU Autodiff is implemented but not validated numerically. |
+
+
+## Complex-valued transforms
+
+There are some complex-valued transforms that we aren't using anymore. Here is the status of these transforms.
+
+| Transform | JAX CPU | JAX CUDA | JAX autodiff (CPU) | JAX autodiff (CUDA) | Notes |
+| --- | --- | --- | --- | --- | --- |
+| `synth_cplx_jax` | N | N | N | N | |
+| `analys_cplx_jax` | N | N | N | N | |
+| `synth_vec_cplx_jax` | Y | N | Y | N | Complex vectorial SH -> spat transform. |
+| `analys_vec_cplx_jax` | Y | N | Y | N | Complex vectorial spat -> SH transform. |
+| `SHqst_to_point_cplx_jax` | N | N | N | N | Vector SH -> arbitrary point. We have a NumPy implementation in `shtns_jax.py`. |
 
 ## Building with OpenMP support (macOS)
 

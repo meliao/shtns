@@ -74,6 +74,62 @@ XLA_FFI_DEFINE_HANDLER_SYMBOL(
         .Ret<ffi::Buffer<ffi::C128>>()  // qlm
 );
 
+// Adjoint of synthesis: F64 spatial (nlat*nphi) -> C128 spectral (nlm)
+// Used as VJP of synth.
+ffi::Error adjoint_synth_jax_cpu(int64_t cfg, ffi::Buffer<ffi::F64> x,
+                                  ffi::ResultBuffer<ffi::C128> y) {
+  shtns_cfg sh = reinterpret_cast<shtns_cfg>(cfg);
+  long n_spat = sh->nlat * sh->nphi;
+  long n_elem = x.element_count();
+  if ((n_spat == 0) || (n_elem % n_spat != 0))
+    return ffi::Error::InvalidArgument("shtns: adjoint_synth input array has wrong size");
+  long n_other = n_elem / n_spat;
+  long nlm = sh->nlm;
+  if (y->element_count() != n_other * nlm)
+    return ffi::Error::InvalidArgument("shtns: adjoint_synth output array has wrong size");
+  // adjoint_SH_to_spat uses the spatial buffer as FFT scratch space (in-place transforms),
+  // so we must copy before passing to avoid corrupting JAX's immutable Arg buffer.
+  std::vector<double> x_copy(x.typed_data(), x.typed_data() + n_elem);
+  for (int64_t n = 0; n < n_other; n++) {
+    adjoint_SH_to_spat(sh, &(x_copy[n * n_spat]), (cplx*) &(y->typed_data()[n * nlm]));
+  }
+  return ffi::Error::Success();
+}
+
+XLA_FFI_DEFINE_HANDLER_SYMBOL(
+    adjoint_synth_cpu, adjoint_synth_jax_cpu,
+    ffi::Ffi::Bind()
+        .Attr<int64_t>("cfg")
+        .Arg<ffi::Buffer<ffi::F64>>()   // q: real spatial
+        .Ret<ffi::Buffer<ffi::C128>>()  // qlm: complex spectral
+);
+
+// Adjoint of analysis: C128 spectral (nlm) -> F64 spatial (nlat*nphi)
+// Used as VJP of analys.
+ffi::Error adjoint_analys_jax_cpu(int64_t cfg, ffi::Buffer<ffi::C128> x,
+                                   ffi::ResultBuffer<ffi::F64> y) {
+  shtns_cfg sh = reinterpret_cast<shtns_cfg>(cfg);
+  long nlm = (x.dimensions().size() == 0) ? 0 : x.dimensions().back();
+  if (nlm != sh->nlm)
+    return ffi::Error::InvalidArgument("shtns: adjoint_analys input array has wrong size");
+  long n_other = x.element_count() / nlm;
+  long n_spat = sh->nlat * sh->nphi;
+  if (y->element_count() != n_other * n_spat)
+    return ffi::Error::InvalidArgument("shtns: adjoint_analys output array has wrong size");
+  for (int64_t n = 0; n < n_other; n++) {
+    adjoint_spat_to_SH(sh, (cplx*) &(x.typed_data()[n * nlm]), &(y->typed_data()[n * n_spat]));
+  }
+  return ffi::Error::Success();
+}
+
+XLA_FFI_DEFINE_HANDLER_SYMBOL(
+    adjoint_analys_cpu, adjoint_analys_jax_cpu,
+    ffi::Ffi::Bind()
+        .Attr<int64_t>("cfg")
+        .Arg<ffi::Buffer<ffi::C128>>()  // qlm: complex spectral
+        .Ret<ffi::Buffer<ffi::F64>>()   // q: real spatial
+);
+
 // Vector transforms
 
 // Vector synthesis: C128 spectral (3, nlm) -> F64 spatial (3, nlat*nphi)
